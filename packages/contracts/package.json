@@ -9,7 +9,11 @@
     ".": "./src/index.ts",
     "./permissions": "./src/permissions.ts",
     "./roles": "./src/roles.ts",
-    "./auth": "./src/auth.ts"
+    "./auth": "./src/auth.ts",
+    "./pagination": "./src/pagination.ts",
+    "./crm": "./src/crm.ts",
+    "./billing": "./src/billing.ts",
+    "./vendor-admin": "./src/vendor-admin.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

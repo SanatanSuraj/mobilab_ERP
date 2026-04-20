@@ -4,11 +4,45 @@
 -- One row per `resource:action`.
 
 INSERT INTO permissions (id, resource, action, description) VALUES
+  -- accounts (CRM)
+  ('accounts:create',             'accounts',          'create',            'Create CRM accounts'),
+  ('accounts:read',               'accounts',          'read',              'Read CRM accounts'),
+  ('accounts:update',             'accounts',          'update',            'Update CRM accounts'),
+  ('accounts:delete',             'accounts',          'delete',            'Soft-delete CRM accounts'),
+
+  -- contacts (CRM)
+  ('contacts:create',             'contacts',          'create',            'Create CRM contacts'),
+  ('contacts:read',               'contacts',          'read',              'Read CRM contacts'),
+  ('contacts:update',             'contacts',          'update',            'Update CRM contacts'),
+  ('contacts:delete',             'contacts',          'delete',            'Soft-delete CRM contacts'),
+
   -- customers
   ('customers:create',            'customers',         'create',            'Create customer records'),
   ('customers:read',              'customers',         'read',              'Read customer records'),
   ('customers:update',            'customers',         'update',            'Update customer records'),
   ('customers:delete',            'customers',         'delete',            'Delete customer records'),
+
+  -- deals (CRM)
+  ('deals:create',                'deals',             'create',            'Create deals'),
+  ('deals:read',                  'deals',             'read',              'Read deals'),
+  ('deals:update',                'deals',             'update',            'Update deals'),
+  ('deals:delete',                'deals',             'delete',            'Soft-delete deals'),
+  ('deals:transition',            'deals',             'transition',        'Transition deal stage'),
+
+  -- leads (CRM)
+  ('leads:create',                'leads',             'create',            'Create leads'),
+  ('leads:read',                  'leads',             'read',              'Read leads'),
+  ('leads:update',                'leads',             'update',            'Update leads'),
+  ('leads:delete',                'leads',             'delete',            'Soft-delete leads'),
+  ('leads:convert',               'leads',             'convert',           'Convert lead to deal/account'),
+
+  -- tickets (CRM support)
+  ('tickets:create',              'tickets',           'create',            'Create support tickets'),
+  ('tickets:read',                'tickets',           'read',              'Read support tickets'),
+  ('tickets:update',              'tickets',           'update',            'Update support tickets'),
+  ('tickets:delete',              'tickets',           'delete',            'Soft-delete support tickets'),
+  ('tickets:transition',          'tickets',           'transition',        'Transition ticket status'),
+  ('tickets:comment',             'tickets',           'comment',           'Add ticket comments'),
 
   -- quotations
   ('quotations:create',           'quotations',        'create',            NULL),

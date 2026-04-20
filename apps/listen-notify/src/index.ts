@@ -22,13 +22,35 @@ initTracing({ serviceName: "listen-notify" });
 
 import pg from "pg";
 import http from "node:http";
-import { createLogger, outboxDepth, registry } from "@mobilab/observability";
-import { QueueNames, makeQueue } from "@mobilab/queue";
-import { retry } from "@mobilab/resilience";
+import { createLogger, registry } from "@mobilab/observability";
+import {
+  QueueNames,
+  makeQueue,
+  assertBullRedisNoeviction,
+  createBullConnection,
+} from "@mobilab/queue";
+import { assertDirectPgUrl } from "@mobilab/db";
+import { createOutboxDrain } from "./drain.js";
 import { loadEnv } from "./env.js";
 
 const env = loadEnv();
 const log = createLogger({ service: "listen-notify", level: env.logLevel });
+
+// Phase 1 Gate 5 — the listener MUST talk to Postgres directly. LISTEN
+// does not survive PgBouncer's transaction mode because the subscription
+// is dropped between the pooled client's queries. Fail fast with a clear
+// message if someone points this process at pgbouncer by mistake.
+assertDirectPgUrl(env.databaseUrl);
+
+// Phase 1 Gate 4 — BullMQ requires maxmemory-policy=noeviction, else
+// queued jobs can silently disappear under memory pressure. Verify with
+// a throwaway connection before we subscribe anything.
+{
+  const probe = createBullConnection(env.bullRedisUrl);
+  await assertBullRedisNoeviction(probe).finally(() =>
+    probe.quit().catch(() => undefined)
+  );
+}
 
 const outboxQueue = makeQueue(QueueNames.outboxDispatch, {
   redisUrl: env.bullRedisUrl,
@@ -47,79 +69,11 @@ const pool = new pg.Pool({
 
 // ─── Drain loop ───────────────────────────────────────────────────────────────
 
-let draining = false;
-
-async function drainOutbox(): Promise<void> {
-  if (draining) return;
-  draining = true;
-  try {
-    // Batch: up to 100 rows at a time. Tweakable.
-    const { rows } = await pool.query<{
-      id: string;
-      aggregate_type: string;
-      event_type: string;
-    }>(`
-      SELECT id, aggregate_type, event_type
-      FROM outbox.events
-      WHERE dispatched_at IS NULL
-      ORDER BY created_at
-      LIMIT 100
-    `);
-
-    if (rows.length === 0) {
-      outboxDepth.set(0);
-      return;
-    }
-
-    // Enqueue with retry; mark rows dispatched only after successful enqueue.
-    await Promise.all(
-      rows.map(async (row) => {
-        await retry(
-          async () => {
-            await outboxQueue.add(
-              row.event_type,
-              { outboxId: row.id, aggregateType: row.aggregate_type },
-              // Idempotency: if listen-notify restarts mid-drain, BullMQ
-              // de-dupes by jobId.
-              { jobId: `outbox-${row.id}` }
-            );
-          },
-          {
-            maxAttempts: 5,
-            baseMs: 100,
-            capMs: 5000,
-            onAttempt: (err, attempt) => {
-              log.warn({ err, attempt, outboxId: row.id }, "enqueue retry");
-            },
-          }
-        );
-
-        await pool.query(
-          `UPDATE outbox.events
-             SET dispatched_at = now(),
-                 attempts = attempts + 1
-           WHERE id = $1 AND dispatched_at IS NULL`,
-          [row.id]
-        );
-      })
-    );
-
-    log.info({ dispatched: rows.length }, "outbox batch dispatched");
-
-    // Measure remaining depth.
-    const depthRow = await pool.query<{ c: string }>(
-      `SELECT count(*)::text AS c FROM outbox.events WHERE dispatched_at IS NULL`
-    );
-    outboxDepth.set(Number(depthRow.rows[0]?.c ?? "0"));
-
-    // If we got a full batch, there may be more — drain again.
-    if (rows.length === 100) setImmediate(drainOutbox);
-  } catch (err) {
-    log.error({ err }, "drain failed");
-  } finally {
-    draining = false;
-  }
-}
+const { drain: drainOutbox } = createOutboxDrain({
+  pool,
+  queue: outboxQueue,
+  log,
+});
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 

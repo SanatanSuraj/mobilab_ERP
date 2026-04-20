@@ -19,11 +19,45 @@ import { ROLES, type Role } from "./roles.js";
 // ─── Permission literals ──────────────────────────────────────────────────────
 
 export const PERMISSIONS = [
+  // accounts (CRM)
+  "accounts:create",
+  "accounts:read",
+  "accounts:update",
+  "accounts:delete",
+
+  // contacts (CRM)
+  "contacts:create",
+  "contacts:read",
+  "contacts:update",
+  "contacts:delete",
+
   // customers
   "customers:create",
   "customers:read",
   "customers:update",
   "customers:delete",
+
+  // deals (CRM)
+  "deals:create",
+  "deals:read",
+  "deals:update",
+  "deals:delete",
+  "deals:transition",
+
+  // leads (CRM)
+  "leads:create",
+  "leads:read",
+  "leads:update",
+  "leads:delete",
+  "leads:convert",
+
+  // tickets (CRM support)
+  "tickets:create",
+  "tickets:read",
+  "tickets:update",
+  "tickets:delete",
+  "tickets:transition",
+  "tickets:comment",
 
   // quotations
   "quotations:create",
@@ -126,7 +160,12 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   SUPER_ADMIN: PERMISSIONS, // everything
 
   MANAGEMENT: [
+    "accounts:read",
+    "contacts:read",
     "customers:read",
+    "deals:read",
+    "leads:read",
+    "tickets:read",
     "quotations:read",
     "sales_orders:read",
     "work_orders:read",
@@ -144,9 +183,22 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   SALES_REP: [
+    "accounts:create",
+    "accounts:read",
+    "accounts:update",
+    "contacts:create",
+    "contacts:read",
+    "contacts:update",
     "customers:create",
     "customers:read",
     "customers:update",
+    "deals:create",
+    "deals:read",
+    "deals:update",
+    "leads:create",
+    "leads:read",
+    "leads:update",
+    "leads:convert",
     "quotations:create",
     "quotations:read",
     "quotations:update",
@@ -159,10 +211,28 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   SALES_MANAGER: [
+    "accounts:create",
+    "accounts:read",
+    "accounts:update",
+    "accounts:delete",
+    "contacts:create",
+    "contacts:read",
+    "contacts:update",
+    "contacts:delete",
     "customers:create",
     "customers:read",
     "customers:update",
     "customers:delete",
+    "deals:create",
+    "deals:read",
+    "deals:update",
+    "deals:delete",
+    "deals:transition",
+    "leads:create",
+    "leads:read",
+    "leads:update",
+    "leads:delete",
+    "leads:convert",
     "quotations:create",
     "quotations:read",
     "quotations:update",
@@ -178,7 +248,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   FINANCE: [
+    "accounts:read",
+    "contacts:read",
     "customers:read",
+    "deals:read",
     "sales_orders:read",
     "sales_orders:approve_finance",
     "purchase_orders:read",
@@ -243,6 +316,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   QC_INSPECTOR: [
+    "tickets:read",
+    "tickets:comment",
     "work_orders:read",
     "bmr:read",
     "devices:read",
@@ -253,6 +328,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
 
   QC_MANAGER: [
+    "tickets:create",
+    "tickets:read",
+    "tickets:update",
+    "tickets:transition",
+    "tickets:comment",
     "work_orders:read",
     "bmr:read",
     "bmr:sign_qc",

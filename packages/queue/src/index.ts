@@ -12,3 +12,7 @@ export {
   type MakeQueueOptions,
   type MakeWorkerOptions,
 } from "./factory.js";
+export {
+  assertBullRedisNoeviction,
+  BullEvictionPolicyError,
+} from "./noeviction.js";

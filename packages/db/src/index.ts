@@ -19,4 +19,9 @@ export {
   installNumericTypeParser,
   isNumericParserInstalled,
 } from "./types.js";
+export {
+  assertDirectPgUrl,
+  PgBouncerUrlError,
+  type AssertDirectPgUrlOptions,
+} from "./direct-url.js";
 export * as schema from "./schema/index.js";

@@ -14,7 +14,12 @@ import http from "node:http";
 import pg from "pg";
 import { createLogger, registry } from "@mobilab/observability";
 import { installNumericTypeParser } from "@mobilab/db";
-import { QueueNames, makeWorker } from "@mobilab/queue";
+import {
+  QueueNames,
+  makeWorker,
+  assertBullRedisNoeviction,
+  createBullConnection,
+} from "@mobilab/queue";
 import type { Worker } from "bullmq";
 import { loadEnv } from "./env.js";
 import { runBootstrapPolicy } from "./bootstrap-policy.js";
@@ -36,6 +41,18 @@ async function main(): Promise<void> {
   });
 
   await runBootstrapPolicy(pool, log);
+
+  // Phase 1 Gate 4 — BullMQ requires maxmemory-policy=noeviction, else
+  // queued jobs can silently disappear under memory pressure. Check once
+  // at boot with a throwaway connection.
+  {
+    const probe = createBullConnection(env.bullRedisUrl);
+    try {
+      await assertBullRedisNoeviction(probe);
+    } finally {
+      await probe.quit().catch(() => undefined);
+    }
+  }
 
   const workers: Worker[] = [];
   workers.push(

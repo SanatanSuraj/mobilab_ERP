@@ -11,7 +11,12 @@ SELECT 'SUPER_ADMIN', id FROM permissions;
 
 -- MANAGEMENT: read + export only.
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('MANAGEMENT', 'accounts:read'),
+  ('MANAGEMENT', 'contacts:read'),
   ('MANAGEMENT', 'customers:read'),
+  ('MANAGEMENT', 'deals:read'),
+  ('MANAGEMENT', 'leads:read'),
+  ('MANAGEMENT', 'tickets:read'),
   ('MANAGEMENT', 'quotations:read'),
   ('MANAGEMENT', 'sales_orders:read'),
   ('MANAGEMENT', 'work_orders:read'),
@@ -29,9 +34,22 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 
 -- SALES_REP
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('SALES_REP', 'accounts:create'),
+  ('SALES_REP', 'accounts:read'),
+  ('SALES_REP', 'accounts:update'),
+  ('SALES_REP', 'contacts:create'),
+  ('SALES_REP', 'contacts:read'),
+  ('SALES_REP', 'contacts:update'),
   ('SALES_REP', 'customers:create'),
   ('SALES_REP', 'customers:read'),
   ('SALES_REP', 'customers:update'),
+  ('SALES_REP', 'deals:create'),
+  ('SALES_REP', 'deals:read'),
+  ('SALES_REP', 'deals:update'),
+  ('SALES_REP', 'leads:create'),
+  ('SALES_REP', 'leads:read'),
+  ('SALES_REP', 'leads:update'),
+  ('SALES_REP', 'leads:convert'),
   ('SALES_REP', 'quotations:create'),
   ('SALES_REP', 'quotations:read'),
   ('SALES_REP', 'quotations:update'),
@@ -44,10 +62,28 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 
 -- SALES_MANAGER
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('SALES_MANAGER', 'accounts:create'),
+  ('SALES_MANAGER', 'accounts:read'),
+  ('SALES_MANAGER', 'accounts:update'),
+  ('SALES_MANAGER', 'accounts:delete'),
+  ('SALES_MANAGER', 'contacts:create'),
+  ('SALES_MANAGER', 'contacts:read'),
+  ('SALES_MANAGER', 'contacts:update'),
+  ('SALES_MANAGER', 'contacts:delete'),
   ('SALES_MANAGER', 'customers:create'),
   ('SALES_MANAGER', 'customers:read'),
   ('SALES_MANAGER', 'customers:update'),
   ('SALES_MANAGER', 'customers:delete'),
+  ('SALES_MANAGER', 'deals:create'),
+  ('SALES_MANAGER', 'deals:read'),
+  ('SALES_MANAGER', 'deals:update'),
+  ('SALES_MANAGER', 'deals:delete'),
+  ('SALES_MANAGER', 'deals:transition'),
+  ('SALES_MANAGER', 'leads:create'),
+  ('SALES_MANAGER', 'leads:read'),
+  ('SALES_MANAGER', 'leads:update'),
+  ('SALES_MANAGER', 'leads:delete'),
+  ('SALES_MANAGER', 'leads:convert'),
   ('SALES_MANAGER', 'quotations:create'),
   ('SALES_MANAGER', 'quotations:read'),
   ('SALES_MANAGER', 'quotations:update'),
@@ -63,7 +99,10 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 
 -- FINANCE
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('FINANCE', 'accounts:read'),
+  ('FINANCE', 'contacts:read'),
   ('FINANCE', 'customers:read'),
+  ('FINANCE', 'deals:read'),
   ('FINANCE', 'sales_orders:read'),
   ('FINANCE', 'sales_orders:approve_finance'),
   ('FINANCE', 'purchase_orders:read'),
@@ -128,6 +167,8 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 
 -- QC_INSPECTOR
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('QC_INSPECTOR', 'tickets:read'),
+  ('QC_INSPECTOR', 'tickets:comment'),
   ('QC_INSPECTOR', 'work_orders:read'),
   ('QC_INSPECTOR', 'bmr:read'),
   ('QC_INSPECTOR', 'devices:read'),
@@ -138,6 +179,11 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 
 -- QC_MANAGER
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('QC_MANAGER', 'tickets:create'),
+  ('QC_MANAGER', 'tickets:read'),
+  ('QC_MANAGER', 'tickets:update'),
+  ('QC_MANAGER', 'tickets:transition'),
+  ('QC_MANAGER', 'tickets:comment'),
   ('QC_MANAGER', 'work_orders:read'),
   ('QC_MANAGER', 'bmr:read'),
   ('QC_MANAGER', 'bmr:sign_qc'),

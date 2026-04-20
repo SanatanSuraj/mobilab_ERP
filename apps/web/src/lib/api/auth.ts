@@ -4,13 +4,22 @@
  * Kept deliberately framework-free — plain fetch — so it works in Next.js
  * server and client components alike. The shapes are imported from
  * @mobilab/contracts so frontend and backend stay in lockstep.
+ *
+ * Login flow (Option 2 identity model):
+ *   1. apiLogin() returns either an AuthenticatedResponse (single
+ *      membership short-circuit) or a MultiTenantResponse (tenant picker).
+ *   2. On MultiTenantResponse, show the user a picker, then call
+ *      apiSelectTenant() with the chosen orgId.
  */
 
 import type {
+  AuthenticatedResponse,
   LoginRequest,
   LoginResponse,
   MeResponse,
+  MultiTenantResponse,
   RefreshRequest,
+  SelectTenantRequest,
   Problem,
 } from "@mobilab/contracts";
 
@@ -52,13 +61,26 @@ export async function apiLogin(req: LoginRequest): Promise<LoginResponse> {
   return (await parseJsonOrThrow(res)) as LoginResponse;
 }
 
-export async function apiRefresh(req: RefreshRequest): Promise<LoginResponse> {
+export async function apiSelectTenant(
+  req: SelectTenantRequest
+): Promise<AuthenticatedResponse> {
+  const res = await fetch(`${API_BASE_URL}/auth/select-tenant`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return (await parseJsonOrThrow(res)) as AuthenticatedResponse;
+}
+
+export async function apiRefresh(
+  req: RefreshRequest
+): Promise<AuthenticatedResponse> {
   const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
   });
-  return (await parseJsonOrThrow(res)) as LoginResponse;
+  return (await parseJsonOrThrow(res)) as AuthenticatedResponse;
 }
 
 export async function apiLogout(refreshToken: string): Promise<void> {
@@ -78,3 +100,6 @@ export async function apiMe(accessToken: string): Promise<MeResponse> {
   });
   return (await parseJsonOrThrow(res)) as MeResponse;
 }
+
+// Re-export for callers that want to narrow the union at the call site.
+export type { AuthenticatedResponse, LoginResponse, MultiTenantResponse };

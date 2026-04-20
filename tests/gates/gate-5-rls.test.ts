@@ -12,6 +12,11 @@ import { withOrg } from "@mobilab/db";
 import { makeTestPool, waitForPg, DEV_ORG_ID } from "./_helpers.js";
 
 const OTHER_ORG_ID = "00000000-0000-0000-0000-0000000000b1";
+// Matches Option 2 identity model — one global identity, one membership,
+// one tenant-scoped users row. The identity sits above RLS (no org_id);
+// users + memberships are tenant-scoped and must flow through withOrg().
+const OTHER_IDENTITY_ID = "00000000-0000-0000-0000-0000000000b2";
+const OTHER_USER_ID = "00000000-0000-0000-0000-00000000e001";
 
 describe("gate-5: row-level security", () => {
   let pool: pg.Pool;
@@ -20,9 +25,25 @@ describe("gate-5: row-level security", () => {
     pool = makeTestPool();
     await waitForPg(pool);
 
-    // Seed a second org + one user so we can verify isolation. Both inserts
-    // must go through withOrg() because RLS is FORCE'd — inserts without
-    // app.current_org match zero rows and the row is silently dropped.
+    // user_identities is GLOBAL (no RLS), so we can insert without withOrg.
+    // Upsert shape keeps the test idempotent across runs.
+    const bootstrap = await pool.connect();
+    try {
+      // user_identities holds auth (email/password/MFA); `name` lives on
+      // the per-tenant users row, not here.
+      await bootstrap.query(
+        `INSERT INTO user_identities (id, email, password_hash)
+         VALUES ($1, 'other@other.local', '$2b$10$stub')
+         ON CONFLICT (id) DO NOTHING`,
+        [OTHER_IDENTITY_ID]
+      );
+    } finally {
+      bootstrap.release();
+    }
+
+    // The org + its users row + the membership all live under RLS —
+    // inserts without app.current_org match zero rows and are silently
+    // dropped. Wrap in withOrg(OTHER_ORG_ID).
     await withOrg(pool, OTHER_ORG_ID, async (client) => {
       await client.query(
         `INSERT INTO organizations (id, name) VALUES ($1, 'Other Tenant')
@@ -30,11 +51,10 @@ describe("gate-5: row-level security", () => {
         [OTHER_ORG_ID]
       );
       await client.query(
-        `INSERT INTO users (id, org_id, email, password_hash, name)
-         VALUES ('00000000-0000-0000-0000-00000000e001', $1,
-                 'other@other.local', '$2b$10$stub', 'Other User')
+        `INSERT INTO users (id, org_id, identity_id, email, name)
+         VALUES ($1, $2, $3, 'other@other.local', 'Other User')
          ON CONFLICT (id) DO NOTHING`,
-        [OTHER_ORG_ID]
+        [OTHER_USER_ID, OTHER_ORG_ID, OTHER_IDENTITY_ID]
       );
     });
   });

@@ -15,11 +15,22 @@ import {
   type Permission,
 } from "@mobilab/contracts";
 import type { TokenFactory } from "./tokens.js";
+import type { TenantStatusService } from "../tenants/service.js";
 import type { RequestUser } from "../../context/request-context.js";
 
 export interface AuthGuardOptions {
   tokens: TokenFactory;
   expectedAudience: Audience;
+  /**
+   * Sprint 1B — per-request tenant lifecycle check. A valid JWT is not
+   * sufficient; the tenant must still be ACTIVE (or TRIAL-not-expired).
+   * This closes the gap where a token minted pre-suspension keeps working
+   * for up to one access TTL.
+   *
+   * Cost: one PK lookup per request (<1ms). Add a 10s TTL cache in front
+   * if request rate makes this meaningful.
+   */
+  tenantStatus: TenantStatusService;
 }
 
 export function createAuthGuard(opts: AuthGuardOptions) {
@@ -35,6 +46,10 @@ export function createAuthGuard(opts: AuthGuardOptions) {
     if (!token) throw new UnauthorizedError("empty bearer token");
 
     const claims = await opts.tokens.verifyAccess(token, opts.expectedAudience);
+
+    // Tenant-lifecycle gate. Throws TenantSuspendedError / TenantDeletedError /
+    // TrialExpiredError which the error handler translates to Problem+JSON.
+    await opts.tenantStatus.assertActive(claims.org);
 
     const roles = (claims.roles ?? []) as Role[];
     const perms = new Set<Permission>();

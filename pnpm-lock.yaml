@@ -56,9 +56,15 @@ importers:
       '@mobilab/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@mobilab/quotas':
+        specifier: workspace:*
+        version: link:../../packages/quotas
       '@mobilab/resilience':
         specifier: workspace:*
         version: link:../../packages/resilience
+      '@mobilab/vendor-admin':
+        specifier: workspace:*
+        version: link:../../packages/vendor-admin
       bcrypt:
         specifier: ^5.1.1
         version: 5.1.1
@@ -426,6 +432,37 @@ importers:
         specifier: ^2.1.5
         version: 2.1.9(@types/node@22.19.17)(lightningcss@1.32.0)(msw@2.13.4(@types/node@22.19.17)(typescript@5.9.3))
 
+  packages/quotas:
+    dependencies:
+      '@mobilab/cache':
+        specifier: workspace:*
+        version: link:../cache
+      '@mobilab/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@mobilab/db':
+        specifier: workspace:*
+        version: link:../db
+      '@mobilab/errors':
+        specifier: workspace:*
+        version: link:../errors
+      pg:
+        specifier: ^8.13.1
+        version: 8.20.0
+    devDependencies:
+      '@mobilab/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.19.17)(lightningcss@1.32.0)(msw@2.13.4(@types/node@22.19.17)(typescript@5.9.3))
+
   packages/resilience:
     dependencies:
       '@mobilab/errors':
@@ -442,8 +479,42 @@ importers:
         specifier: ^2.1.5
         version: 2.1.9(@types/node@22.19.17)(lightningcss@1.32.0)(msw@2.13.4(@types/node@22.19.17)(typescript@5.9.3))
 
+  packages/vendor-admin:
+    dependencies:
+      '@mobilab/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@mobilab/errors':
+        specifier: workspace:*
+        version: link:../errors
+      bcrypt:
+        specifier: ^5.1.1
+        version: 5.1.1
+      pg:
+        specifier: ^8.13.1
+        version: 8.20.0
+    devDependencies:
+      '@mobilab/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/bcrypt':
+        specifier: ^5.0.2
+        version: 5.0.2
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.19.17)(lightningcss@1.32.0)(msw@2.13.4(@types/node@22.19.17)(typescript@5.9.3))
+
   tests/gates:
     dependencies:
+      '@mobilab/api':
+        specifier: workspace:*
+        version: link:../../apps/api
       '@mobilab/cache':
         specifier: workspace:*
         version: link:../../packages/cache
@@ -456,15 +527,33 @@ importers:
       '@mobilab/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@mobilab/listen-notify':
+        specifier: workspace:*
+        version: link:../../apps/listen-notify
       '@mobilab/money':
         specifier: workspace:*
         version: link:../../packages/money
+      '@mobilab/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@mobilab/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@mobilab/quotas':
+        specifier: workspace:*
+        version: link:../../packages/quotas
       '@mobilab/resilience':
         specifier: workspace:*
         version: link:../../packages/resilience
+      '@mobilab/vendor-admin':
+        specifier: workspace:*
+        version: link:../../packages/vendor-admin
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
+      '@opentelemetry/sdk-trace-base':
+        specifier: ^1.28.0
+        version: 1.30.1(@opentelemetry/api@1.9.1)
       ioredis:
         specifier: ^5.4.1
         version: 5.10.1

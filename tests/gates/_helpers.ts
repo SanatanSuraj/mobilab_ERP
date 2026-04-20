@@ -17,6 +17,12 @@ export const DATABASE_URL =
   process.env.DATABASE_URL ??
   "postgres://mobilab_app:mobilab_dev@localhost:5434/mobilab";
 
+// The BYPASSRLS mobilab_vendor role — created in ops/sql/seed/98-vendor-role.sql.
+// Used by Gate 19 to prove "vendor can see all tenants / tenant role cannot".
+export const VENDOR_DATABASE_URL =
+  process.env.VENDOR_DATABASE_URL ??
+  "postgres://mobilab_vendor:mobilab_dev@localhost:5434/mobilab";
+
 export const REDIS_BULL_URL =
   process.env.REDIS_BULL_URL ?? "redis://localhost:6381";
 
@@ -32,6 +38,20 @@ export function makeTestPool(): pg.Pool {
     connectionString: DATABASE_URL,
     max: 4,
     application_name: "mobilab-gates",
+  });
+}
+
+/**
+ * Pool for the BYPASSRLS vendor role. Used by Gate 19 to confirm cross-tenant
+ * reads land successfully (and by Gate 18 to exercise the vendor audit log
+ * write path).
+ */
+export function makeVendorTestPool(): pg.Pool {
+  installNumericTypeParser();
+  return new pg.Pool({
+    connectionString: VENDOR_DATABASE_URL,
+    max: 4,
+    application_name: "mobilab-gates-vendor",
   });
 }
 

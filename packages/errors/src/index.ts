@@ -69,15 +69,57 @@ export class UnauthorizedError extends AppError {
   readonly status = 401;
 }
 
+// ─── 402 Payment Required ─────────────────────────────────────────────────────
+
+/**
+ * Tenant's trial has expired or a required subscription is missing / past
+ * grace period. The client uses this to redirect to a billing page.
+ *
+ * ARCHITECTURE.md §(tbd, Phase 2.5).
+ *
+ * `code` is typed as `string` (not a literal) so ModuleDisabledError /
+ * QuotaExceededError can specialize it without TS2416.
+ */
+export class TrialExpiredError extends AppError {
+  readonly code: string = "trial_expired";
+  readonly status = 402;
+}
+
+/**
+ * The tenant's plan does not include the requested module or feature. Used
+ * by the feature-flag guard (Sprint 1C): e.g. FREE-plan tenant hits a
+ * /crm/... route after CRM was downgraded out of their plan, or STARTER
+ * tenant hits a manufacturing endpoint.
+ *
+ * 402 (not 403) because the right client action is "upgrade your plan",
+ * not "ask an admin for permission". Semantically aligned with
+ * TrialExpiredError: both say "this is a billing-tier gate".
+ */
+export class ModuleDisabledError extends TrialExpiredError {
+  override readonly code: string = "module_disabled";
+}
+
 // ─── 403 Forbidden ────────────────────────────────────────────────────────────
 
 /**
  * Authenticated but missing the required permission, wrong audience, or
  * operator capability missing (e.g. unauthorized PCB rework).
+ *
+ * `code` is typed as `string` (not a literal) so subclasses can specialize.
  */
 export class ForbiddenError extends AppError {
-  readonly code = "forbidden";
+  readonly code: string = "forbidden";
   readonly status = 403;
+}
+
+/**
+ * Tenant has been administratively suspended (billing dispute, ToS
+ * violation, etc.). Different from TrialExpired because a SUSPENDED tenant
+ * is a deliberate admin action, not a billing-cycle outcome. Returned by
+ * the auth guard on every request until the tenant is restored.
+ */
+export class TenantSuspendedError extends ForbiddenError {
+  override readonly code: string = "tenant_suspended";
 }
 
 // ─── 404 Not Found ────────────────────────────────────────────────────────────
@@ -85,6 +127,21 @@ export class ForbiddenError extends AppError {
 export class NotFoundError extends AppError {
   readonly code = "not_found";
   readonly status = 404;
+}
+
+// ─── 410 Gone ────────────────────────────────────────────────────────────────
+
+/**
+ * Tenant was soft-deleted (organizations.deleted_at IS NOT NULL). The row
+ * still exists for audit but the customer relationship is over — no token
+ * will ever be issued and any stale access token is rejected here.
+ *
+ * 410 (not 404) because the URL / identity used to work and the client
+ * should stop trying.
+ */
+export class TenantDeletedError extends AppError {
+  readonly code = "tenant_deleted";
+  readonly status = 410;
 }
 
 // ─── 409 Conflict ─────────────────────────────────────────────────────────────
@@ -125,9 +182,27 @@ export class ShortageError extends AppError {
 
 // ─── 429 Too Many Requests ────────────────────────────────────────────────────
 
+/**
+ * `code` is `string` (not literal) so subclasses can specialize.
+ */
 export class RateLimitError extends AppError {
-  readonly code = "rate_limited";
+  readonly code: string = "rate_limited";
   readonly status = 429;
+}
+
+/**
+ * Plan quota exhausted for the current period. Different from RateLimitError
+ * (transient, reset on window) — this is a billing-plan cap, so the client
+ * should surface "upgrade your plan" rather than "try again in 60s".
+ *
+ * `details` includes `{metric, limit, used, period}` so the client can
+ * render an informative message and the frontend can deep-link to the
+ * upgrade flow with the overflowing metric pre-selected.
+ *
+ * ARCHITECTURE.md §(tbd, Phase 2.5 / Sprint 2).
+ */
+export class QuotaExceededError extends RateLimitError {
+  override readonly code: string = "quota_exceeded";
 }
 
 // ─── 503 Service Unavailable ──────────────────────────────────────────────────

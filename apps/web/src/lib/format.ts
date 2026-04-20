@@ -34,6 +34,28 @@ export function formatCurrency(amount: number): string {
 }
 
 /**
+ * Formats a decimal-string amount (NUMERIC wire shape) as INR. The real
+ * CRM contracts ship money as strings like "12345.67" — never as numbers —
+ * so this is the formatter to use for Lead.estimatedValue, Deal.value,
+ * Account.annualRevenue, etc.
+ *
+ * We still pass the parsed number to Intl because `Intl.NumberFormat` only
+ * accepts numbers/bigints. Decimal strings that represent integers or
+ * typical INR amounts (up to ~10¹³) round-trip safely through `Number()`;
+ * for anything approaching MAX_SAFE_INTEGER we'd need a decimal library,
+ * but that is overkill for UI display.
+ *
+ * @example formatCurrencyStr("285000") → "₹2,85,000"
+ * @example formatCurrencyStr("285000.75") → "₹2,85,001" (rounded)
+ */
+export function formatCurrencyStr(amount: string | null | undefined): string {
+  if (amount == null || amount === "") return "—";
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return amount;
+  return INR_FORMATTER.format(n);
+}
+
+/**
  * Formats a date string or Date object.
  * @example formatDate("2026-04-18") → "18 Apr 2026"
  */

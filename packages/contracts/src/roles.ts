@@ -35,10 +35,35 @@ export function isInternalRole(r: Role): boolean {
   return r !== "CUSTOMER";
 }
 
-/** JWT audience tags — must match the API's `aud` claim verifier. */
+/**
+ * JWT audience tags — must match the API's `aud` claim verifier.
+ *
+ *   internal       — admin UI tokens (staff)
+ *   portal         — customer portal tokens
+ *   tenantPicker   — short-lived token from POST /auth/login when an
+ *                    identity has 2+ active memberships; the client
+ *                    exchanges it at POST /auth/select-tenant.
+ *   vendor         — Mobilab employee admin console tokens. These sit
+ *                    ABOVE the tenant boundary and carry NO `org` claim;
+ *                    they authorize /vendor-admin/* only. See Sprint 3 /
+ *                    packages/contracts/src/vendor-admin.ts.
+ */
 export const AUDIENCE = {
   internal: "mobilab-internal",
   portal: "mobilab-portal",
+  tenantPicker: "mobilab-tenant-picker",
+  vendor: "mobilab-vendor",
 } as const;
 
-export type Audience = (typeof AUDIENCE)[keyof typeof AUDIENCE];
+/**
+ * Audience union for tenant-scoped access tokens (the ones that authorize
+ * /auth/*, /crm/* and other tenant API calls). `tenantPicker` and `vendor`
+ * are NOT here — `tenantPicker` only unlocks /auth/select-tenant, and
+ * `vendor` tokens belong on /vendor-admin/* with their own guard.
+ */
+export type Audience =
+  | (typeof AUDIENCE)["internal"]
+  | (typeof AUDIENCE)["portal"];
+
+/** Audience constant for vendor-admin tokens. Type alias keeps callers tidy. */
+export type VendorAudience = (typeof AUDIENCE)["vendor"];

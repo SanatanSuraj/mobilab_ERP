@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./auth/service": "./src/modules/auth/service.ts",
+    "./auth/tokens": "./src/modules/auth/tokens.ts"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
@@ -24,7 +29,9 @@
     "@mobilab/errors": "workspace:*",
     "@mobilab/observability": "workspace:*",
     "@mobilab/queue": "workspace:*",
+    "@mobilab/quotas": "workspace:*",
     "@mobilab/resilience": "workspace:*",
+    "@mobilab/vendor-admin": "workspace:*",
     "bcrypt": "^5.1.1",
     "fastify": "^5.1.0",
     "jose": "^5.9.6",

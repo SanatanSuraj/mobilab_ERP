@@ -1,5 +1,13 @@
 export interface Env {
   databaseUrl: string;
+  /**
+   * Connection string for the vendor-admin pool (mobilab_vendor BYPASSRLS
+   * role). Separate from databaseUrl on purpose — tenant-side traffic must
+   * never resolve to a BYPASSRLS session, and a leaked tenant credential
+   * must not grant the vendor role. Defaults to `databaseUrl` only in dev
+   * so local docker-compose still works; production MUST set this.
+   */
+  vendorDatabaseUrl: string;
   cacheRedisUrl: string;
   bullRedisUrl: string;
   jwtSecret: string;
@@ -25,8 +33,10 @@ export function loadEnv(): Env {
   if (jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must be at least 32 characters");
   }
+  const databaseUrl = required("DATABASE_URL");
   return {
-    databaseUrl: required("DATABASE_URL"),
+    databaseUrl,
+    vendorDatabaseUrl: process.env.VENDOR_DATABASE_URL ?? databaseUrl,
     cacheRedisUrl: required("REDIS_CACHE_URL"),
     bullRedisUrl: required("REDIS_BULL_URL"),
     jwtSecret,
