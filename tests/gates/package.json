@@ -1,0 +1,28 @@
+{
+  "name": "@mobilab/gates",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mobilab/cache": "workspace:*",
+    "@mobilab/contracts": "workspace:*",
+    "@mobilab/db": "workspace:*",
+    "@mobilab/errors": "workspace:*",
+    "@mobilab/money": "workspace:*",
+    "@mobilab/queue": "workspace:*",
+    "@mobilab/resilience": "workspace:*",
+    "ioredis": "^5.4.1",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@mobilab/config": "workspace:*",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

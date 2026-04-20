@@ -1,0 +1,181 @@
+# Mobilab ERP — dev stack.
+#
+# Port remap (to coexist with existing services on the host):
+#   - Postgres         5434  (host 5432 is a native Postgres)
+#   - PgBouncer        6432
+#   - Redis-BULL       6381  (host 6379 is stylesense-redis)
+#   - Redis-CACHE      6382
+#   - MinIO            9000 / 9001
+#   - OTel collector   4318 (HTTP), 4317 (gRPC)
+#   - Prometheus       9090
+#   - Grafana          3001
+#
+# Start:  pnpm infra:up
+# Stop:   pnpm infra:down
+# Reset:  pnpm infra:reset   (wipes volumes)
+
+name: mobilab-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mobilab-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mobilab
+      POSTGRES_USER: mobilab
+      POSTGRES_PASSWORD: mobilab_dev
+      # Speed up dev — this is intentionally unsafe for production.
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      # Postgres' entrypoint iterates the top level of
+      # /docker-entrypoint-initdb.d/ only. We mount each SQL subtree under a
+      # sub-path AND drop a shell script at the top level that walks them
+      # in canonical order (init → triggers → rls → seed). See the script
+      # itself for the contract.
+      - ../sql/00-apply-all.sh:/docker-entrypoint-initdb.d/00-apply-all.sh:ro
+      - ../sql/init:/docker-entrypoint-initdb.d/01-init:ro
+      - ../sql/triggers:/docker-entrypoint-initdb.d/02-triggers:ro
+      - ../sql/rls:/docker-entrypoint-initdb.d/03-rls:ro
+      - ../sql/seed:/docker-entrypoint-initdb.d/04-seed:ro
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c work_mem=8MB
+      -c wal_level=logical
+      -c log_statement=none
+      -c log_min_duration_statement=200
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mobilab -d mobilab"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: mobilab-pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: mobilab
+      DB_PASSWORD: mobilab_dev
+      DB_NAME: mobilab
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 500
+      DEFAULT_POOL_SIZE: 20
+      SERVER_RESET_QUERY: DISCARD ALL
+      AUTH_TYPE: md5
+      ADMIN_USERS: mobilab
+    ports:
+      - "6432:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis-bull:
+    image: redis:7-alpine
+    container_name: mobilab-redis-bull
+    restart: unless-stopped
+    # BullMQ benefits from AOF — crash-consistent job state.
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory-policy noeviction
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis-bull-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-cache:
+    image: redis:7-alpine
+    container_name: mobilab-redis-cache
+    restart: unless-stopped
+    # Cache: LRU eviction, no persistence required. Snapshotting off for speed.
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6382:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: mobilab-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: mobilab
+      MINIO_ROOT_PASSWORD: mobilab_dev_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: mobilab-otel
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mobilab-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mobilab-grafana
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: mobilab_dev
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  pg-data:
+  redis-bull-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:

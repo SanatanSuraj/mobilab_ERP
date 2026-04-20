@@ -1,0 +1,168 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel older runs on the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.14.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build packages
+        run: pnpm build
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 1 gates — integration tests. Spin up real Postgres + Redis as
+  # GitHub service containers, seed schema + triggers + RLS + role data,
+  # then run vitest.
+  # ─────────────────────────────────────────────────────────────────────────────
+  phase-1-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: mobilab
+          POSTGRES_USER: mobilab
+          POSTGRES_PASSWORD: mobilab_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mobilab -d mobilab"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      redis-bull:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+      redis-cache:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      # Two URLs:
+      #   ADMIN_DATABASE_URL — SUPERUSER `mobilab`, used to apply init/RLS
+      #                        SQL (needs CREATE EXTENSION, CREATE ROLE).
+      #   DATABASE_URL       — `mobilab_app` non-superuser, used by the
+      #                        gates so RLS actually binds. Created by
+      #                        ops/sql/seed/99-app-role.sql on bootstrap.
+      # CI runs Postgres on standard ports — docker-compose.dev.yml uses
+      # remapped ports (5434/6381/6382) to avoid collisions on the host.
+      ADMIN_DATABASE_URL: postgres://mobilab:mobilab_dev@localhost:5432/mobilab
+      DATABASE_URL: postgres://mobilab_app:mobilab_dev@localhost:5432/mobilab
+      REDIS_BULL_URL: redis://localhost:6379
+      REDIS_CACHE_URL: redis://localhost:6380
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.14.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply init schemas
+        run: |
+          for f in ops/sql/init/*.sql; do
+            echo "applying $f"
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Apply triggers
+        run: |
+          for f in ops/sql/triggers/*.sql; do
+            echo "applying $f"
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Apply RLS policies
+        run: |
+          for f in ops/sql/rls/*.sql; do
+            echo "applying $f"
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Apply seed data
+        run: |
+          for f in ops/sql/seed/*.sql; do
+            echo "applying $f"
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      # Run all 7 gates. Individual step names help surface which gate
+      # failed in the GitHub UI.
+      - name: Gate 1 — Number ban
+        run: pnpm -C tests/gates test gate-1-number-ban.test.ts
+
+      - name: Gate 2 — Decimal round-trip
+        run: pnpm -C tests/gates test gate-2-decimal.test.ts
+
+      - name: Gate 3 — Outbox idempotency
+        run: pnpm -C tests/gates test gate-3-idempotency.test.ts
+
+      - name: Gate 4 — LISTEN/NOTIFY trigger
+        run: pnpm -C tests/gates test gate-4-notify.test.ts
+
+      - name: Gate 5 — RLS isolation
+        run: pnpm -C tests/gates test gate-5-rls.test.ts
+
+      - name: Gate 6 — RBAC catalog sync
+        run: pnpm -C tests/gates test gate-6-rbac.test.ts
+
+      - name: Gate 7 — Bootstrap policy
+        run: pnpm -C tests/gates test gate-7-bootstrap.test.ts

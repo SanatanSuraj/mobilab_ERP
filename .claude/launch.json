@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "crm-prototype",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype' && npm run dev"],
+      "port": 3000
+    }
+  ]
+}
