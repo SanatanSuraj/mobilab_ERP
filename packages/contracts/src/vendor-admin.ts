@@ -21,12 +21,7 @@
  */
 
 import { z } from "zod";
-// NOTE: no `.js` extension here — Turbopack chokes when a relative import
-// uses `.js` to reach a file that is ALSO declared as a subpath in our
-// package's `exports` map. Other internal imports in this package stay on
-// `.js` because those targets are not (also) exports subpaths. tsc +
-// vitest are happy with either form under moduleResolution: "Bundler".
-import { PLAN_CODES, TENANT_STATUSES } from "./billing";
+import { PLAN_CODES, TENANT_STATUSES } from "./billing.js";
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
