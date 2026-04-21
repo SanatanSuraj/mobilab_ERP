@@ -333,6 +333,42 @@ const statusStyles: Record<string, string> = {
   training: "bg-blue-50 text-blue-700 border-blue-200",
   warranty_claim: "bg-purple-50 text-purple-700 border-purple-200",
   general_inquiry: "bg-gray-50 text-gray-600 border-gray-200",
+
+  // CRM - Contract-typed UPPER_CASE variants (served by /crm/* real API).
+  // Keep color mapping aligned with the lowercase mock entries above so the
+  // badge doesn't visually shift as pages migrate from mock → real API.
+  // OPEN / IN_PROGRESS / LOW / HIGH / CRITICAL are already defined above
+  // for other entities and their colors are acceptable here too.
+
+  // Ticket Status
+  WAITING_CUSTOMER: "bg-purple-50 text-purple-700 border-purple-200",
+  RESOLVED: "bg-green-50 text-green-700 border-green-200",
+  CLOSED: "bg-gray-50 text-gray-500 border-gray-200",
+
+  // Ticket Priority
+  MEDIUM: "bg-blue-50 text-blue-700 border-blue-200",
+
+  // Ticket Category
+  HARDWARE_DEFECT: "bg-red-50 text-red-700 border-red-200",
+  CALIBRATION: "bg-amber-50 text-amber-700 border-amber-200",
+  SOFTWARE_BUG: "bg-orange-50 text-orange-700 border-orange-200",
+  TRAINING: "bg-blue-50 text-blue-700 border-blue-200",
+  WARRANTY_CLAIM: "bg-purple-50 text-purple-700 border-purple-200",
+  GENERAL_INQUIRY: "bg-gray-50 text-gray-600 border-gray-200",
+
+  // Deal Stage
+  DISCOVERY: "bg-cyan-50 text-cyan-700 border-cyan-200",
+  PROPOSAL: "bg-orange-50 text-orange-700 border-orange-200",
+  NEGOTIATION: "bg-amber-50 text-amber-700 border-amber-200",
+  CLOSED_WON: "bg-green-50 text-green-700 border-green-200",
+  CLOSED_LOST: "bg-red-50 text-red-700 border-red-200",
+
+  // Lead Status (UPPER_CASE variants for /crm/leads)
+  NEW: "bg-blue-50 text-blue-700 border-blue-200",
+  CONTACTED: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  QUALIFIED: "bg-purple-50 text-purple-700 border-purple-200",
+  CONVERTED: "bg-green-50 text-green-700 border-green-200",
+  LOST: "bg-red-50 text-red-700 border-red-200",
 };
 
 function formatLabel(status: string): string {

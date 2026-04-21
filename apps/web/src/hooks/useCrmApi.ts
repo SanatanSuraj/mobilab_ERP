@@ -28,13 +28,26 @@ import {
   apiConvertLead,
   apiCreateLead,
   apiDeleteLead,
+  apiGetAccount,
+  apiGetContact,
+  apiGetDeal,
   apiGetLead,
+  apiGetTicket,
+  apiListAccounts,
+  apiListContacts,
+  apiListDeals,
   apiListLeadActivities,
   apiListLeads,
+  apiListTicketComments,
+  apiListTickets,
   apiMarkLeadLost,
   apiUpdateLead,
+  type AccountListQuery,
+  type ContactListQuery,
   type ConvertLeadResponse,
+  type DealListQuery,
   type LeadListQuery,
+  type TicketListQuery,
 } from "@/lib/api/crm";
 
 import type {
@@ -48,6 +61,11 @@ import type {
 } from "@mobilab/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
+//
+// Namespaced `["crm-api", entity, ...]` so they never collide with the mock
+// hooks in useCrm.ts (`["crm", ...]`). Every new entity added here should
+// follow the `all | list(q) | detail(id)` triple so react-query invalidations
+// can target either the whole entity or a specific row.
 
 export const crmApiKeys = {
   all: ["crm-api"] as const,
@@ -57,6 +75,31 @@ export const crmApiKeys = {
     detail: (id: string) => ["crm-api", "leads", "detail", id] as const,
     activities: (id: string) =>
       ["crm-api", "leads", "activities", id] as const,
+  },
+  accounts: {
+    all: ["crm-api", "accounts"] as const,
+    list: (q: AccountListQuery) =>
+      ["crm-api", "accounts", "list", q] as const,
+    detail: (id: string) => ["crm-api", "accounts", "detail", id] as const,
+  },
+  contacts: {
+    all: ["crm-api", "contacts"] as const,
+    list: (q: ContactListQuery) =>
+      ["crm-api", "contacts", "list", q] as const,
+    detail: (id: string) => ["crm-api", "contacts", "detail", id] as const,
+  },
+  deals: {
+    all: ["crm-api", "deals"] as const,
+    list: (q: DealListQuery) => ["crm-api", "deals", "list", q] as const,
+    detail: (id: string) => ["crm-api", "deals", "detail", id] as const,
+  },
+  tickets: {
+    all: ["crm-api", "tickets"] as const,
+    list: (q: TicketListQuery) =>
+      ["crm-api", "tickets", "list", q] as const,
+    detail: (id: string) => ["crm-api", "tickets", "detail", id] as const,
+    comments: (id: string) =>
+      ["crm-api", "tickets", "comments", id] as const,
   },
 };
 
@@ -168,5 +211,111 @@ export function useApiConvertLead(id: string) {
       qc.setQueryData(crmApiKeys.leads.detail(id), res.lead);
       qc.invalidateQueries({ queryKey: crmApiKeys.all });
     },
+  });
+}
+
+// ─── Accounts: reads ───────────────────────────────────────────────────────
+//
+// List pages just need read paths for now — create/update/delete flows
+// will arrive with the account-detail pages. Staleness of 30s matches the
+// cadence a CRM list view actually needs (not super hot), while
+// `placeholderData: prev` keeps the old page visible while filters churn.
+
+export function useApiAccounts(query: AccountListQuery = {}) {
+  return useQuery({
+    queryKey: crmApiKeys.accounts.list(query),
+    queryFn: () => apiListAccounts(query),
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiAccount(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? crmApiKeys.accounts.detail(id)
+      : ["crm-api", "accounts", "detail", "__none__"],
+    queryFn: () => apiGetAccount(id!),
+    enabled: Boolean(id),
+    staleTime: 60_000,
+  });
+}
+
+// ─── Contacts: reads ───────────────────────────────────────────────────────
+
+export function useApiContacts(query: ContactListQuery = {}) {
+  return useQuery({
+    queryKey: crmApiKeys.contacts.list(query),
+    queryFn: () => apiListContacts(query),
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiContact(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? crmApiKeys.contacts.detail(id)
+      : ["crm-api", "contacts", "detail", "__none__"],
+    queryFn: () => apiGetContact(id!),
+    enabled: Boolean(id),
+    staleTime: 60_000,
+  });
+}
+
+// ─── Deals: reads ──────────────────────────────────────────────────────────
+
+export function useApiDeals(query: DealListQuery = {}) {
+  return useQuery({
+    queryKey: crmApiKeys.deals.list(query),
+    queryFn: () => apiListDeals(query),
+    // Deals move around; keep fresher than accounts.
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiDeal(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? crmApiKeys.deals.detail(id)
+      : ["crm-api", "deals", "detail", "__none__"],
+    queryFn: () => apiGetDeal(id!),
+    enabled: Boolean(id),
+    staleTime: 30_000,
+  });
+}
+
+// ─── Tickets: reads ────────────────────────────────────────────────────────
+
+export function useApiTickets(query: TicketListQuery = {}) {
+  return useQuery({
+    queryKey: crmApiKeys.tickets.list(query),
+    queryFn: () => apiListTickets(query),
+    // SLA countdowns + inbox churn — keep fresh.
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiTicket(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? crmApiKeys.tickets.detail(id)
+      : ["crm-api", "tickets", "detail", "__none__"],
+    queryFn: () => apiGetTicket(id!),
+    enabled: Boolean(id),
+    staleTime: 15_000,
+  });
+}
+
+export function useApiTicketComments(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? crmApiKeys.tickets.comments(id)
+      : ["crm-api", "tickets", "comments", "__none__"],
+    queryFn: () => apiListTicketComments(id!),
+    enabled: Boolean(id),
+    staleTime: 10_000,
   });
 }
