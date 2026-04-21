@@ -50,6 +50,7 @@ import {
   type ConvertLeadResponse,
   type DealListQuery,
   type LeadListQuery,
+  type PaginatedResponse,
   type TicketListQuery,
 } from "@/lib/api/crm";
 
@@ -348,6 +349,70 @@ export function useApiTransitionDealStage(id: string) {
     mutationFn: (body) => apiTransitionDealStage(id, body),
     onSuccess: (deal) => {
       qc.setQueryData(crmApiKeys.deals.detail(id), deal);
+      qc.invalidateQueries({ queryKey: crmApiKeys.deals.all });
+    },
+  });
+}
+
+/**
+ * Generic per-call variant of useApiTransitionDealStage. Detail pages
+ * pin the id at hook-creation time; the pipeline kanban moves many
+ * different deals from one component, so it needs a mutation object
+ * that takes `{id, body}` at call time.
+ *
+ * Optimistic update: when the user drops a card, we immediately patch
+ * every cached deals list so the card shows up in the new column. On
+ * mutation error (e.g. 409 stale version), we roll back by restoring
+ * the cached list snapshot. On success, react-query re-fetches anyway
+ * via the onSettled invalidate — which also gives us the new `version`
+ * so the next move won't 409.
+ */
+export function useApiMoveDealStage() {
+  const qc = useQueryClient();
+  type Vars = { id: string; body: TransitionDealStage };
+  type Ctx = {
+    snapshots: Array<[readonly unknown[], PaginatedResponse<Deal> | undefined]>;
+  };
+  return useMutation<Deal, Error, Vars, Ctx>({
+    mutationFn: ({ id, body }) => apiTransitionDealStage(id, body),
+    onMutate: async ({ id, body }) => {
+      // Freeze every in-flight deals query; we're about to lie to the
+      // cache and don't want a late server response to overwrite the
+      // optimistic state.
+      await qc.cancelQueries({ queryKey: crmApiKeys.deals.all });
+
+      // Grab a snapshot of every cached deals-list variant (different
+      // filters can coexist) so we can roll back on error.
+      const snapshots = qc.getQueriesData<PaginatedResponse<Deal>>({
+        queryKey: ["crm-api", "deals", "list"],
+      });
+
+      for (const [key, cached] of snapshots) {
+        if (!cached) continue;
+        qc.setQueryData<PaginatedResponse<Deal>>(key, {
+          ...cached,
+          data: cached.data.map((d) =>
+            d.id === id ? { ...d, stage: body.stage } : d
+          ),
+        });
+      }
+
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      // Restore every list we touched. Detail caches are untouched
+      // because we didn't optimistically write there — the caller will
+      // refetch via onSettled.
+      for (const [key, value] of ctx?.snapshots ?? []) {
+        qc.setQueryData(key, value);
+      }
+    },
+    onSuccess: (deal) => {
+      // Write the authoritative server row into the detail cache so a
+      // subsequent open of the detail page doesn't flash stale data.
+      qc.setQueryData(crmApiKeys.deals.detail(deal.id), deal);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: crmApiKeys.deals.all });
     },
   });
