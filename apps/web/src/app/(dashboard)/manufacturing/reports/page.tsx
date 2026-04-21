@@ -104,10 +104,12 @@ const MONTHLY_OUTPUT = [
   },
 ];
 
+// Note: MBA-* serials are Module Serials (Analyser sub-assembly). MCC-* would be
+// Device Serials (finished Mobicase). MLB-BAT-* are batch numbers.
 const RECENT_TRACES = [
   {
     serial: "MBA-2026-0091",
-    type: "Device Serial",
+    type: "Module Serial",
     queriedAt: "17 Apr 2026, 09:12",
     queriedBy: "Ranjit Bora",
     result: "Full chain resolved",
@@ -121,7 +123,7 @@ const RECENT_TRACES = [
   },
   {
     serial: "MBA-2026-0101",
-    type: "Device Serial",
+    type: "Module Serial",
     queriedAt: "16 Apr 2026, 11:30",
     queriedBy: "Vikram Nair",
     result: "Full chain resolved",
@@ -135,7 +137,7 @@ const RECENT_TRACES = [
   },
   {
     serial: "MBA-2026-0201",
-    type: "Device Serial",
+    type: "Module Serial",
     queriedAt: "14 Apr 2026, 10:22",
     queriedBy: "Priya Devi",
     result: "QC hold — rework ongoing",
@@ -827,8 +829,9 @@ function TraceabilityTab() {
           </CardTitle>
           <CardDescription>
             Query the complete forward/backward traceability chain for any
-            component or device serial. Full traceability completes in &lt; 5
-            seconds per PRD spec.
+            device serial (MCC), module serial (MBA/MBM/MBC/CFG), or component
+            batch number. Full traceability completes in &lt; 5 seconds per PRD
+            spec.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -837,7 +840,7 @@ function TraceabilityTab() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 className="pl-9"
-                placeholder="Enter Device Serial or Component Batch Number to trace..."
+                placeholder="Enter Device Serial (MCC-*), Module Serial (MBA/MBM/MBC/CFG-*), or Component Batch Number to trace..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
@@ -876,12 +879,12 @@ function TraceabilityTab() {
               <div>
                 <p className="text-sm font-semibold mb-3 flex items-center gap-1.5">
                   <GitBranch className="h-4 w-4 text-primary" />
-                  Forward Trace — Device Lifecycle
+                  Forward Trace — Module Lifecycle
                 </p>
                 <div className="space-y-1 text-sm">
                   <TraceNode
                     icon={<Factory className="h-4 w-4 text-blue-600" />}
-                    label="Device Serial"
+                    label="Module Serial (MBA · Analyser)"
                     id={MOCK_SERIAL}
                     depth={0}
                     color="text-blue-700"
@@ -919,7 +922,7 @@ function TraceabilityTab() {
                 <div className="space-y-1 text-sm">
                   <TraceNode
                     icon={<Factory className="h-4 w-4 text-blue-600" />}
-                    label="Device Serial"
+                    label="Module Serial (MBA · Analyser)"
                     id={MOCK_SERIAL}
                     depth={0}
                     color="text-blue-700"

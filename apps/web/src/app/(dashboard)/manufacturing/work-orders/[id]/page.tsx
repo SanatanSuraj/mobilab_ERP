@@ -24,6 +24,8 @@ import {
 import {
   mobiDeviceIDs,
   mobiStageLogs,
+  isFinishedDeviceCode,
+  type MobicaseProduct,
 } from "@/data/mobilab-mock";
 
 // Extended local types to support QC gate and rework limit tracking
@@ -52,7 +54,8 @@ import {
 // ─── ComponentAssignmentPanel (inline) ───────────────────────────────────────
 
 interface ComponentRow {
-  deviceId: string;
+  unitId: string;
+  productCode: MobicaseProduct;
   pcbId: string | null;
   sensorId: string | null;
   mechId: string | null;
@@ -90,7 +93,8 @@ function buildComponentRows(woId: string): ComponentRow[] {
 
     const isComplete = pcbId !== null && sensorId !== null && mechId !== null && ocId !== null;
     return {
-      deviceId: dev.deviceId,
+      unitId: dev.deviceId,
+      productCode: dev.productCode,
       pcbId,
       sensorId,
       mechId,
@@ -102,22 +106,32 @@ function buildComponentRows(woId: string): ComponentRow[] {
 
 function ComponentAssignmentPanel({ woId }: { woId: string }) {
   const rows = buildComponentRows(woId);
+  const deviceCount = rows.filter((r) => isFinishedDeviceCode(r.productCode)).length;
+  const moduleCount = rows.length - deviceCount;
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Component Assignment</CardTitle>
-        <CardDescription>Device-level component traceability</CardDescription>
+        <CardDescription>
+          Unit-level component traceability
+          {rows.length > 0 && (
+            <span className="ml-1 text-muted-foreground">
+              — {deviceCount} Device · {moduleCount} Module
+            </span>
+          )}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">No device IDs assigned yet.</p>
+          <p className="text-sm text-muted-foreground text-center py-4">No unit IDs assigned yet.</p>
         ) : (
           <div className="rounded-lg border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead>Device ID</TableHead>
+                  <TableHead>Unit ID</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>PCB-ID</TableHead>
                   <TableHead>Sensor-ID</TableHead>
                   <TableHead>Mech-ID</TableHead>
@@ -126,35 +140,49 @@ function ComponentAssignmentPanel({ woId }: { woId: string }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.deviceId}>
-                    <TableCell className="font-mono text-xs font-medium">{row.deviceId}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {row.pcbId ?? <span className="text-red-500">—</span>}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {row.sensorId ?? <span className="text-red-500">—</span>}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {row.mechId ?? <span className="text-red-500">—</span>}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {row.ocId ?? <span className="text-red-500">—</span>}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={
-                          row.status === "COMPLETE"
-                            ? "bg-green-50 text-green-700 border-green-200 text-xs"
-                            : "bg-amber-50 text-amber-700 border-amber-200 text-xs"
-                        }
-                      >
-                        {row.status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {rows.map((row) => {
+                  const finished = isFinishedDeviceCode(row.productCode);
+                  return (
+                    <TableRow key={row.unitId}>
+                      <TableCell className="font-mono text-xs font-medium">{row.unitId}</TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            finished
+                              ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                              : "bg-slate-50 text-slate-700 border border-slate-200"
+                          }`}
+                        >
+                          {finished ? "Device" : "Module"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {row.pcbId ?? <span className="text-red-500">—</span>}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {row.sensorId ?? <span className="text-red-500">—</span>}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {row.mechId ?? <span className="text-red-500">—</span>}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {row.ocId ?? <span className="text-red-500">—</span>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            row.status === "COMPLETE"
+                              ? "bg-green-50 text-green-700 border-green-200 text-xs"
+                              : "bg-amber-50 text-amber-700 border-amber-200 text-xs"
+                          }
+                        >
+                          {row.status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -650,10 +678,10 @@ export default function WorkOrderDetailPage({ params }: { params: { id: string }
                 <p className="text-sm text-muted-foreground text-center py-4">No component assignments yet.</p>
               )}
 
-              {/* Device Serials */}
+              {/* Unit Serials (Device = MCC · Module = MBA/MBM/MBC/CFG) */}
               {wo.deviceSerials.length > 0 && (
                 <div className="space-y-2">
-                  <div className="text-sm font-medium">Device Serials</div>
+                  <div className="text-sm font-medium">Unit Serials</div>
                   <div className="flex flex-wrap gap-2">
                     {wo.deviceSerials.map((serial) => (
                       <Badge key={serial} variant="outline" className="font-mono text-xs">
@@ -781,7 +809,7 @@ export default function WorkOrderDetailPage({ params }: { params: { id: string }
                   );
                 })
               ) : (
-                <p className="text-xs text-muted-foreground">No device serials assigned yet.</p>
+                <p className="text-xs text-muted-foreground">No unit serials assigned yet.</p>
               )}
 
               {wo.componentAssignments.length > 0 && wo.deviceSerials.length === 0 && (

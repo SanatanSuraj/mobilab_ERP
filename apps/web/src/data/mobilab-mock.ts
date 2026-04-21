@@ -416,7 +416,7 @@ export const mobiWorkOrders: MobiWorkOrder[] = [
     id: "mwo-001",
     woNumber: "WO-2026-04-001",
     dmrVersion: "DMR-v3.2",
-    productCodes: ["MBA", "MBM", "MBC", "MCC"],
+    productCodes: ["MBA", "MBM", "MBC", "CFG", "MCC"],
     batchQty: 5,
     priority: "URGENT",
     status: "IN_PROGRESS",
@@ -454,7 +454,7 @@ export const mobiWorkOrders: MobiWorkOrder[] = [
     id: "mwo-002",
     woNumber: "WO-2026-04-002",
     dmrVersion: "DMR-v2.1",
-    productCodes: ["MBA", "MBM", "MBC", "MCC"],
+    productCodes: ["MBA", "MBM", "MBC", "CFG", "MCC"],
     batchQty: 2,
     priority: "NORMAL",
     status: "QC_IN_PROGRESS",
@@ -485,7 +485,7 @@ export const mobiWorkOrders: MobiWorkOrder[] = [
     id: "mwo-003",
     woNumber: "WO-2026-04-003",
     dmrVersion: "DMR-v3.2",
-    productCodes: ["MBA", "MBM", "MBC", "MCC"],
+    productCodes: ["MBA", "MBM", "MBC", "CFG", "MCC"],
     batchQty: 10,
     priority: "CRITICAL",
     status: "PENDING_APPROVAL",
@@ -513,7 +513,7 @@ export const mobiWorkOrders: MobiWorkOrder[] = [
     id: "mwo-004",
     woNumber: "WO-2026-03-004",
     dmrVersion: "DMR-v3.1",
-    productCodes: ["MBA", "MBM", "MBC", "MCC"],
+    productCodes: ["MBA", "MBM", "MBC", "CFG", "MCC"],
     batchQty: 1,
     priority: "NORMAL",
     status: "COMPLETED",
@@ -1050,4 +1050,73 @@ export function formatDate(dateStr: string): string {
 
 export function formatDateTime(dateStr: string): string {
   return new Date(dateStr).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+// ─── Device vs Module Classification ──────────────────────────────────────────
+// Canonical rule: only MCC (the final Mobicase) is a finished Device.
+// MCC is composed of exactly FOUR modules:
+//   MBA  (Analyser)  — manufactured in-house on L2
+//   MBM  (Mobimix)   — manufactured in-house on L1
+//   MBC  (Mobicube)  — manufactured in-house on L3
+//   CFG  (Centrifuge) — VENDOR-SOURCED (purchased ready-made, scanned in
+//                        by vendor lot ID; no in-house production steps)
+// Use these helpers everywhere — do NOT redefine locally.
+
+export const DEVICE_PRODUCT_CODES: readonly MobicaseProduct[] = ["MCC"] as const;
+export const MODULE_PRODUCT_CODES: readonly MobicaseProduct[] = ["MBA", "MBM", "MBC", "CFG"] as const;
+
+/**
+ * MCC BOM — the canonical 4-module composition.
+ * Every MCC device consumes exactly one of each of these modules.
+ */
+export const MCC_MODULE_BOM: readonly MobicaseProduct[] = ["MBA", "MBM", "MBC", "CFG"] as const;
+
+/**
+ * Module sourcing model: in-house (manufactured on one of our lines)
+ * vs vendor (externally purchased, scanned in by vendor lot ID).
+ */
+export const VENDOR_SOURCED_PRODUCT_CODES: readonly MobicaseProduct[] = ["CFG"] as const;
+
+export function isFinishedDeviceCode(code: MobicaseProduct): boolean {
+  return DEVICE_PRODUCT_CODES.includes(code);
+}
+
+export function isModuleCode(code: MobicaseProduct): boolean {
+  return !DEVICE_PRODUCT_CODES.includes(code);
+}
+
+/**
+ * Is this product externally purchased from a vendor (vs manufactured in-house)?
+ * Currently only CFG (Centrifuge) is vendor-sourced — we buy them ready-made
+ * and integrate them into the MCC device.
+ */
+export function isVendorSourcedCode(code: MobicaseProduct): boolean {
+  return VENDOR_SOURCED_PRODUCT_CODES.includes(code);
+}
+
+/** "In-house" vs "Vendor" label for a module code. */
+export function getSourcingLabel(code: MobicaseProduct): "In-house" | "Vendor" {
+  return isVendorSourcedCode(code) ? "Vendor" : "In-house";
+}
+
+export function isFinishedDevice(d: Pick<MobiDeviceID, "productCode">): boolean {
+  return isFinishedDeviceCode(d.productCode);
+}
+
+export function isModule(d: Pick<MobiDeviceID, "productCode">): boolean {
+  return isModuleCode(d.productCode);
+}
+
+export type UnitKind = "DEVICE" | "MODULE";
+
+export function getUnitKind(code: MobicaseProduct): UnitKind {
+  return isFinishedDeviceCode(code) ? "DEVICE" : "MODULE";
+}
+
+export function getUnitKindLabel(code: MobicaseProduct): "Device" | "Module" {
+  return isFinishedDeviceCode(code) ? "Device" : "Module";
+}
+
+export function getUnitKindLabelPlural(code: MobicaseProduct): "Devices" | "Modules" {
+  return isFinishedDeviceCode(code) ? "Devices" : "Modules";
 }

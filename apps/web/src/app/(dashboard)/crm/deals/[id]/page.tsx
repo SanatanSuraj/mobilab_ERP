@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -29,9 +30,10 @@ import {
   useApiAccount,
   useApiDeal,
   useApiTransitionDealStage,
+  useApiUpdateDeal,
 } from "@/hooks/useCrmApi";
 import { formatCurrency, formatDate } from "@/data/mock";
-import type { DealStage } from "@mobilab/contracts";
+import type { DealStage, UpdateDeal } from "@mobilab/contracts";
 import {
   AlertCircle,
   ArrowLeft,
@@ -39,8 +41,11 @@ import {
   CalendarDays,
   DollarSign,
   ExternalLink,
+  Pencil,
   Percent,
+  Save,
   User,
+  X,
 } from "lucide-react";
 
 /**
@@ -107,6 +112,19 @@ function toNumber(v: string | null): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Draft form state for inline editing. String-only fields — number
+// conversion happens at submit time. `expectedClose` is yyyy-mm-dd (what
+// <input type="date"> produces); we pass it through as-is since the
+// contract expects a z.string().date().
+type EditDraft = {
+  title: string;
+  company: string;
+  contactName: string;
+  value: string; // decimal string
+  probability: string; // stringified int 0-100; parsed on save
+  expectedClose: string; // yyyy-mm-dd or "" for null
+};
+
 export default function DealDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -114,6 +132,7 @@ export default function DealDetailPage() {
 
   const dealQuery = useApiDeal(dealId);
   const transitionMut = useApiTransitionDealStage(dealId);
+  const updateMut = useApiUpdateDeal(dealId);
 
   // Side-fetch the linked account so we can show its name rather than a
   // bare uuid. Only enabled when the deal has an accountId.
@@ -122,6 +141,20 @@ export default function DealDetailPage() {
   const [lostDialogOpen, setLostDialogOpen] = useState(false);
   const [lostReason, setLostReason] = useState("");
   const [lostCategory, setLostCategory] = useState<LostCategory | "">("");
+
+  // Inline-edit state. `draft` is only meaningful when editMode is true;
+  // it seeds from the server row on every "Edit" click so the form is
+  // always based on the latest known version+values, not whatever the
+  // user had entered before a cancel.
+  const [editMode, setEditMode] = useState(false);
+  const [draft, setDraft] = useState<EditDraft>({
+    title: "",
+    company: "",
+    contactName: "",
+    value: "",
+    probability: "",
+    expectedClose: "",
+  });
 
   // Pre-compute the stage strip every render — cheap, and keeps the flow
   // logic colocated with the data it depends on.
@@ -222,6 +255,79 @@ export default function DealDetailPage() {
     setLostDialogOpen(false);
     setLostReason("");
     setLostCategory("");
+  }
+
+  function startEdit() {
+    setDraft({
+      title: deal.title,
+      company: deal.company,
+      contactName: deal.contactName,
+      value: deal.value,
+      probability: String(deal.probability),
+      // The contract stores `YYYY-MM-DD` strings without a time component,
+      // so the <input type="date"> value passes straight through.
+      expectedClose: deal.expectedClose ?? "",
+    });
+    setEditMode(true);
+  }
+
+  function cancelEdit() {
+    setEditMode(false);
+  }
+
+  function handleSave() {
+    const title = draft.title.trim();
+    const company = draft.company.trim();
+    const contactName = draft.contactName.trim();
+    if (!title || !company || !contactName) {
+      toast.error("Title, company, and contact name are required.");
+      return;
+    }
+
+    // Validate value as a decimal string. Cheap on the client; backend
+    // will also reject but this gives immediate feedback.
+    if (!/^-?\d+(\.\d+)?$/.test(draft.value) || Number(draft.value) < 0) {
+      toast.error("Value must be a non-negative number.");
+      return;
+    }
+
+    const probabilityNum = Number(draft.probability);
+    if (
+      !Number.isInteger(probabilityNum) ||
+      probabilityNum < 0 ||
+      probabilityNum > 100
+    ) {
+      toast.error("Probability must be an integer between 0 and 100.");
+      return;
+    }
+
+    const body: UpdateDeal = {
+      title,
+      company,
+      contactName,
+      value: draft.value,
+      probability: probabilityNum,
+      expectedVersion: deal.version,
+    };
+    // Expected-close is optional. Only include it when the user set a
+    // value; passing an empty string would fail the z.string().date() check.
+    if (draft.expectedClose) {
+      body.expectedClose = draft.expectedClose;
+    }
+
+    updateMut.mutate(body, {
+      onSuccess: () => {
+        toast.success("Deal updated");
+        setEditMode(false);
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to update deal"
+        );
+        // 409 → fresh read so the next attempt has the new version.
+        dealQuery.refetch();
+      },
+    });
   }
 
   // Timeline events derive from the current stage + timestamps on the row.
@@ -346,34 +452,94 @@ export default function DealDetailPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => router.push("/crm/deals")}
+          disabled={editMode}
         >
           <ArrowLeft className="h-4 w-4 mr-1" />
           Back to Deals
         </Button>
+        {editMode ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={cancelEdit}
+              disabled={updateMut.isPending}
+            >
+              <X className="h-4 w-4 mr-1" />
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={updateMut.isPending}
+            >
+              <Save className="h-4 w-4 mr-1" />
+              {updateMut.isPending ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={startEdit}
+            disabled={isTerminal}
+            title={
+              isTerminal
+                ? "Closed deals cannot be edited"
+                : "Edit deal details"
+            }
+          >
+            <Pencil className="h-4 w-4 mr-1" />
+            Edit
+          </Button>
+        )}
       </div>
 
       <div className="flex items-start justify-between mb-4 gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight truncate">
-              {deal.title}
-            </h1>
-            <span className="text-xs text-muted-foreground font-mono">
-              {deal.dealNumber}
-            </span>
-          </div>
-          <p className="text-sm text-muted-foreground mt-1">{accountName}</p>
+        <div className="min-w-0 flex-1">
+          {editMode ? (
+            <div className="space-y-2">
+              <Input
+                value={draft.title}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, title: e.target.value }))
+                }
+                className="text-xl font-bold h-10"
+                placeholder="Deal title"
+                maxLength={200}
+              />
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-mono">{deal.dealNumber}</span>
+                <span>·</span>
+                <span>version {deal.version}</span>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold tracking-tight truncate">
+                  {deal.title}
+                </h1>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {deal.dealNumber}
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">
+                {accountName}
+              </p>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <Select
             value={deal.stage}
             onValueChange={handleStageChange}
-            disabled={isTerminal || transitionMut.isPending}
+            disabled={isTerminal || transitionMut.isPending || editMode}
           >
             <SelectTrigger className="w-[180px]">
               <SelectValue />
@@ -470,13 +636,24 @@ export default function DealDetailPage() {
                 <CardTitle className="text-base">Deal Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   <div className="p-2 rounded-lg bg-muted">
                     <Building2 className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">Account</p>
-                    {deal.accountId ? (
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-muted-foreground mb-1">
+                      Company
+                    </p>
+                    {editMode ? (
+                      <Input
+                        value={draft.company}
+                        onChange={(e) =>
+                          setDraft((d) => ({ ...d, company: e.target.value }))
+                        }
+                        placeholder="Company name"
+                        maxLength={200}
+                      />
+                    ) : deal.accountId ? (
                       <button
                         type="button"
                         className="text-sm font-medium text-primary hover:underline flex items-center gap-1"
@@ -492,41 +669,85 @@ export default function DealDetailPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   <div className="p-2 rounded-lg bg-muted">
                     <User className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">Contact</p>
-                    <p className="text-sm font-medium">{deal.contactName}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-muted-foreground mb-1">Contact</p>
+                    {editMode ? (
+                      <Input
+                        value={draft.contactName}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            contactName: e.target.value,
+                          }))
+                        }
+                        placeholder="Contact name"
+                        maxLength={200}
+                      />
+                    ) : (
+                      <p className="text-sm font-medium">{deal.contactName}</p>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   <div className="p-2 rounded-lg bg-muted">
                     <DollarSign className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Value</p>
-                    <p className="text-sm font-medium">
-                      {formatCurrency(toNumber(deal.value))}
-                    </p>
+                  <div className="flex-1">
+                    <p className="text-xs text-muted-foreground mb-1">Value</p>
+                    {editMode ? (
+                      <Input
+                        value={draft.value}
+                        onChange={(e) =>
+                          setDraft((d) => ({ ...d, value: e.target.value }))
+                        }
+                        placeholder="0.00"
+                        inputMode="decimal"
+                      />
+                    ) : (
+                      <p className="text-sm font-medium">
+                        {formatCurrency(toNumber(deal.value))}
+                      </p>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   <div className="p-2 rounded-lg bg-muted">
                     <Percent className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Probability</p>
-                    <div className="flex items-center gap-2">
-                      <Progress
-                        value={deal.probability}
-                        className="h-2 w-24"
+                  <div className="flex-1">
+                    <p className="text-xs text-muted-foreground mb-1">
+                      Probability
+                    </p>
+                    {editMode ? (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={draft.probability}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            probability: e.target.value,
+                          }))
+                        }
+                        placeholder="0"
                       />
-                      <span className="text-sm font-medium">
-                        {deal.probability}%
-                      </span>
-                    </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Progress
+                          value={deal.probability}
+                          className="h-2 w-24"
+                        />
+                        <span className="text-sm font-medium">
+                          {deal.probability}%
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -537,19 +758,32 @@ export default function DealDetailPage() {
                 <CardTitle className="text-base">Details</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   <div className="p-2 rounded-lg bg-muted">
                     <CalendarDays className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">
+                  <div className="flex-1">
+                    <p className="text-xs text-muted-foreground mb-1">
                       Expected Close
                     </p>
-                    <p className="text-sm font-medium">
-                      {deal.expectedClose
-                        ? formatDate(deal.expectedClose)
-                        : "—"}
-                    </p>
+                    {editMode ? (
+                      <Input
+                        type="date"
+                        value={draft.expectedClose}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            expectedClose: e.target.value,
+                          }))
+                        }
+                      />
+                    ) : (
+                      <p className="text-sm font-medium">
+                        {deal.expectedClose
+                          ? formatDate(deal.expectedClose)
+                          : "—"}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">

@@ -172,15 +172,15 @@ function BatchQCDetailDialog({
             {batchDecisionLabel(batch.batchDecision)}
           </div>
 
-          {/* Device Results */}
+          {/* Unit Results (Devices + Modules) */}
           {batch.deviceResults.length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold mb-2">Device Results</h3>
+              <h3 className="text-sm font-semibold mb-2">Unit Results</h3>
               <div className="rounded-md border overflow-hidden">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Device ID</TableHead>
+                      <TableHead>Unit ID</TableHead>
                       <TableHead>Result</TableHead>
                       <TableHead>Revision</TableHead>
                       <TableHead>Defects</TableHead>

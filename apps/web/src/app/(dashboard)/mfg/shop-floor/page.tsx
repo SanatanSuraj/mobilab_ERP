@@ -13,6 +13,8 @@ import {
   mobiWorkOrders,
   lineStageTemplates,
   mobiOperators,
+  isFinishedDevice,
+  isModule,
   type AssemblyLine,
   type MobiStageLog,
   type LineStageTemplate,
@@ -78,7 +80,7 @@ function getAvgCycleTime(logs: MobiStageLog[]): number | null {
   return Math.round(completed.reduce((s, l) => s + (l.cycleTimeMin ?? 0), 0) / completed.length);
 }
 
-/** Action buttons shown per device */
+/** Action buttons shown per unit (Device or Module) */
 function canLogStage(device: MobiDeviceID) {
   return ["CREATED", "IN_PRODUCTION", "IN_REWORK", "FINAL_ASSEMBLY"].includes(device.status);
 }
@@ -99,7 +101,7 @@ function canDispatch(device: MobiDeviceID) {
   return device.status === "RELEASED";
 }
 
-// ─── Device Row Card ──────────────────────────────────────────────────────────
+// ─── Unit Row Card (Device or Module) ─────────────────────────────────────────
 
 function DeviceActionRow({
   device,
@@ -153,8 +155,9 @@ function DeviceActionRow({
   async function handleDispatch() {
     try {
       await dispatchDevice.mutateAsync(device.deviceId);
+      const kind = isFinishedDevice(device) ? "Device" : "Module";
       toast.success(`${device.deviceId} dispatched to customer ✓`, {
-        description: "Device removed from active inventory. Ready for delivery.",
+        description: `${kind} removed from active inventory. Ready for delivery.`,
       });
     } catch (err) {
       toast.error((err as Error).message);
@@ -177,11 +180,20 @@ function DeviceActionRow({
             : "border-border bg-muted/10"
         }`}
       >
-        {/* Device identity */}
+        {/* Unit identity */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-mono text-xs font-bold text-blue-700">
               {device.deviceId}
+            </span>
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                isFinishedDevice(device)
+                  ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                  : "bg-slate-50 text-slate-700 border border-slate-200"
+              }`}
+            >
+              {isFinishedDevice(device) ? "Device" : "Module"}
             </span>
             <StatusBadge status={device.productCode} />
             <StatusBadge status={device.status} />
@@ -366,8 +378,8 @@ export default function ShopFloorPage() {
     <div className="space-y-6 p-6">
       <div className="flex items-start justify-between gap-4">
         <PageHeader
-          title="Shop Floor — Device Entry"
-          description="Log stage completions, record component IDs, and track device progress | ISO 13485 | Guwahati Plant"
+          title="Shop Floor — Unit Entry"
+          description="Log stage completions, record component IDs, and track Device (MCC) / Module (MBA/MBM/MBC/CFG) progress | ISO 13485 | Guwahati Plant"
         />
         <Button
           onClick={() => setStartProductionOpen(true)}
@@ -545,21 +557,27 @@ export default function ShopFloorPage() {
               </div>
             )}
 
-            {/* ── Active Devices with Action Buttons ───────────────────────── */}
+            {/* ── Active Units with Action Buttons ─────────────────────────── */}
             <div className="space-y-3">
-              <h3 className="text-base font-semibold flex items-center gap-2">
-                <Scan className="h-4 w-4" />
-                Active Devices on {line}
-                {lineDevices.length > 0 && (
-                  <Badge variant="secondary" className="text-xs">
-                    {lineDevices.length}
-                  </Badge>
-                )}
-              </h3>
+              {(() => {
+                const activeDeviceCount = lineDevices.filter(isFinishedDevice).length;
+                const activeModuleCount = lineDevices.filter(isModule).length;
+                return (
+                  <h3 className="text-base font-semibold flex items-center gap-2">
+                    <Scan className="h-4 w-4" />
+                    Active Units on {line}
+                    {lineDevices.length > 0 && (
+                      <Badge variant="secondary" className="text-xs">
+                        {activeDeviceCount} Device · {activeModuleCount} Module
+                      </Badge>
+                    )}
+                  </h3>
+                );
+              })()}
 
               {lineDevices.length === 0 ? (
                 <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-                  No active devices on this line
+                  No active units on this line
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -579,7 +597,7 @@ export default function ShopFloorPage() {
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold text-red-700 flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4" />
-                  Devices in Rework on {line}
+                  Units in Rework on {line}
                 </h3>
                 <div className="flex flex-wrap gap-2">
                   {reworkDevices.map((dev) => (
@@ -617,7 +635,7 @@ export default function ShopFloorPage() {
                       <table className="w-full text-sm">
                         <thead className="bg-muted/50 border-b">
                           <tr>
-                            <th className="text-left px-4 py-3 font-medium text-muted-foreground">Device ID</th>
+                            <th className="text-left px-4 py-3 font-medium text-muted-foreground">Unit ID</th>
                             <th className="text-left px-4 py-3 font-medium text-muted-foreground">Stage</th>
                             <th className="text-left px-4 py-3 font-medium text-muted-foreground">Operator</th>
                             <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>

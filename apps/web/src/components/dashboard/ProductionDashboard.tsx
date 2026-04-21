@@ -3,8 +3,8 @@
 import { useMemo } from "react";
 import { KPICard } from "@/components/shared/kpi-card";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ProductBadge } from "@/components/shared/product-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertTriangle, AlertCircle, Factory, ShieldCheck, Clock, BarChart3 } from "lucide-react";
@@ -16,6 +16,8 @@ import {
   getOEEAvg,
   isWOOverdue,
   getWOProgress,
+  isFinishedDeviceCode,
+  isModuleCode,
 } from "@/data/mobilab-mock";
 import { formatCurrency, formatDate, currentMonthPrefix } from "@/lib/format";
 
@@ -101,7 +103,8 @@ export function ProductionDashboard() {
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
                     <TableHead>WO#</TableHead>
-                    <TableHead>Products</TableHead>
+                    <TableHead title="Finished device — MCC (Mobicase)">Device</TableHead>
+                    <TableHead title="Sub-assembly modules — MBA, MBM, MBC, CFG">Module</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Progress</TableHead>
                     <TableHead className="text-right">Lines</TableHead>
@@ -116,11 +119,35 @@ export function ProductionDashboard() {
                       <TableRow key={wo.id}>
                         <TableCell className="font-mono text-xs">{wo.woNumber}</TableCell>
                         <TableCell>
-                          <div className="flex gap-1 flex-wrap">
-                            {wo.productCodes.map((pc) => (
-                              <Badge key={pc} variant="outline" className="text-xs px-1 py-0">{pc}</Badge>
-                            ))}
-                          </div>
+                          {(() => {
+                            const deviceCodes = wo.productCodes.filter(isFinishedDeviceCode);
+                            if (deviceCodes.length === 0)
+                              return <span className="text-muted-foreground text-xs">—</span>;
+                            return (
+                              <div className="flex gap-1 flex-wrap">
+                                {deviceCodes.map((pc) => (
+                                  <ProductBadge key={pc} productCode={pc} />
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </TableCell>
+                        <TableCell>
+                          {(() => {
+                            const moduleCodes = wo.productCodes
+                              .filter(isModuleCode)
+                              .slice()
+                              .sort((a, b) => a.localeCompare(b));
+                            if (moduleCodes.length === 0)
+                              return <span className="text-muted-foreground text-xs">—</span>;
+                            return (
+                              <div className="flex gap-1 flex-wrap">
+                                {moduleCodes.map((pc) => (
+                                  <ProductBadge key={pc} productCode={pc} />
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell><StatusBadge status={wo.status} /></TableCell>
                         <TableCell>

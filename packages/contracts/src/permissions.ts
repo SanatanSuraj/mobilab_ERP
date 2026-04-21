@@ -14,7 +14,7 @@
  * resource.
  */
 
-import { ROLES, type Role } from "./roles.js";
+import { ROLES, type Role } from "./roles";
 
 // ─── Permission literals ──────────────────────────────────────────────────────
 

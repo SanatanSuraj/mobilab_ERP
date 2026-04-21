@@ -116,7 +116,7 @@ function ScrapLogTable({ entries }: { entries: ScrapEntry[] }) {
                   Scrap #
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-xs text-muted-foreground">
-                  Device / Item
+                  Unit / Item
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-xs text-muted-foreground">
                   WO#

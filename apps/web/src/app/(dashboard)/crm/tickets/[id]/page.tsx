@@ -8,6 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -20,9 +28,15 @@ import {
   useApiTicket,
   useApiTicketComments,
   useApiTransitionTicketStatus,
+  useApiUpdateTicket,
 } from "@/hooks/useCrmApi";
 import { formatDate } from "@/data/mock";
-import type { TicketStatus } from "@mobilab/contracts";
+import type {
+  TicketCategory,
+  TicketPriority,
+  TicketStatus,
+  UpdateTicket,
+} from "@mobilab/contracts";
 import {
   AlertCircle,
   AlertTriangle,
@@ -33,9 +47,12 @@ import {
   Clock,
   Cpu,
   Package,
+  Pencil,
+  Save,
   Send,
   Tag,
   User,
+  X,
 } from "lucide-react";
 
 /**
@@ -73,6 +90,33 @@ function statusLabel(s: TicketStatus): string {
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+const CATEGORY_LABELS: Record<TicketCategory, string> = {
+  HARDWARE_DEFECT: "Hardware Defect",
+  CALIBRATION: "Calibration",
+  SOFTWARE_BUG: "Software Bug",
+  TRAINING: "Training",
+  WARRANTY_CLAIM: "Warranty Claim",
+  GENERAL_INQUIRY: "General Inquiry",
+};
+
+const PRIORITY_LABELS: Record<TicketPriority, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  CRITICAL: "Critical",
+};
+
+// Inline-edit draft. Empty strings for nullable fields → caller omits them
+// from the PATCH body (backend treats them as "don't touch").
+type EditDraft = {
+  subject: string;
+  description: string;
+  category: TicketCategory;
+  priority: TicketPriority;
+  deviceSerial: string;
+  productCode: string;
+};
 
 /**
  * Human-readable SLA countdown. Returns "Resolved" for terminal statuses
@@ -112,6 +156,7 @@ export default function TicketDetailPage() {
   const commentsQuery = useApiTicketComments(ticketId);
   const transitionMut = useApiTransitionTicketStatus(ticketId);
   const addCommentMut = useApiAddTicketComment(ticketId);
+  const updateMut = useApiUpdateTicket(ticketId);
 
   // Side-fetches for humane labels.
   const accountQuery = useApiAccount(
@@ -124,6 +169,18 @@ export default function TicketDetailPage() {
   // INTERNAL by default — matches mock "internal note first" behaviour.
   const [isInternal, setIsInternal] = useState(true);
   const [newComment, setNewComment] = useState("");
+
+  // Inline-edit state. Seeded from the server row on every Edit click so
+  // the form always reflects the latest known version+values.
+  const [editMode, setEditMode] = useState(false);
+  const [draft, setDraft] = useState<EditDraft>({
+    subject: "",
+    description: "",
+    category: "HARDWARE_DEFECT",
+    priority: "MEDIUM",
+    deviceSerial: "",
+    productCode: "",
+  });
 
   if (ticketQuery.isLoading) {
     return (
@@ -224,18 +281,124 @@ export default function TicketDetailPage() {
     );
   };
 
+  const isTerminal =
+    ticket.status === "RESOLVED" || ticket.status === "CLOSED";
+
+  function startEdit() {
+    setDraft({
+      subject: ticket.subject,
+      description: ticket.description,
+      category: ticket.category,
+      priority: ticket.priority,
+      deviceSerial: ticket.deviceSerial ?? "",
+      productCode: ticket.productCode ?? "",
+    });
+    setEditMode(true);
+  }
+
+  function cancelEdit() {
+    setEditMode(false);
+  }
+
+  function handleSave() {
+    const subject = draft.subject.trim();
+    const description = draft.description.trim();
+    if (!subject || !description) {
+      toast.error("Subject and description are required.");
+      return;
+    }
+    if (subject.length > 200) {
+      toast.error("Subject must be 200 characters or fewer.");
+      return;
+    }
+    if (description.length > 4000) {
+      toast.error("Description must be 4000 characters or fewer.");
+      return;
+    }
+
+    const body: UpdateTicket = {
+      subject,
+      description,
+      category: draft.category,
+      priority: draft.priority,
+      expectedVersion: ticket.version,
+    };
+    // Empty-string nullable fields → omit from PATCH; the backend keeps the
+    // existing value rather than nulling it out.
+    const deviceSerial = draft.deviceSerial.trim();
+    if (deviceSerial) body.deviceSerial = deviceSerial;
+    const productCode = draft.productCode.trim();
+    if (productCode) body.productCode = productCode;
+
+    updateMut.mutate(body, {
+      onSuccess: () => {
+        toast.success("Ticket updated");
+        setEditMode(false);
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to update ticket"
+        );
+        // 409 → fresh read so the next attempt has the new version.
+        ticketQuery.refetch();
+      },
+    });
+  }
+
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
-      <Link
-        href="/crm/tickets"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Tickets
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          href="/crm/tickets"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          aria-disabled={editMode}
+          onClick={(e) => {
+            if (editMode) e.preventDefault();
+          }}
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Tickets
+        </Link>
+        {editMode ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={cancelEdit}
+              disabled={updateMut.isPending}
+            >
+              <X className="h-4 w-4 mr-1" />
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={updateMut.isPending}
+            >
+              <Save className="h-4 w-4 mr-1" />
+              {updateMut.isPending ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={startEdit}
+            disabled={isTerminal}
+            title={
+              isTerminal
+                ? "Closed tickets cannot be edited"
+                : "Edit ticket details"
+            }
+          >
+            <Pencil className="h-4 w-4 mr-1" />
+            Edit
+          </Button>
+        )}
+      </div>
 
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-        <div>
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-2xl font-bold tracking-tight">
               {ticket.ticketNumber}
@@ -243,7 +406,19 @@ export default function TicketDetailPage() {
             <StatusBadge status={ticket.priority} />
             <StatusBadge status={ticket.status} />
           </div>
-          <p className="text-sm text-muted-foreground">{ticket.subject}</p>
+          {editMode ? (
+            <Input
+              value={draft.subject}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, subject: e.target.value }))
+              }
+              placeholder="Ticket subject"
+              maxLength={200}
+              className="mt-1"
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">{ticket.subject}</p>
+          )}
         </div>
         <div
           className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 ${
@@ -307,7 +482,35 @@ export default function TicketDetailPage() {
                   <Tag className="h-3.5 w-3.5" />
                   <span className="text-xs font-medium">Category</span>
                 </div>
-                <StatusBadge status={ticket.category} />
+                {editMode ? (
+                  <Select
+                    value={draft.category}
+                    onValueChange={(v) =>
+                      setDraft((d) => ({
+                        ...d,
+                        category: v as TicketCategory,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(
+                        Object.entries(CATEGORY_LABELS) as [
+                          TicketCategory,
+                          string,
+                        ][]
+                      ).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <StatusBadge status={ticket.category} />
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -316,7 +519,35 @@ export default function TicketDetailPage() {
                   <AlertTriangle className="h-3.5 w-3.5" />
                   <span className="text-xs font-medium">Priority</span>
                 </div>
-                <StatusBadge status={ticket.priority} />
+                {editMode ? (
+                  <Select
+                    value={draft.priority}
+                    onValueChange={(v) =>
+                      setDraft((d) => ({
+                        ...d,
+                        priority: v as TicketPriority,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(
+                        Object.entries(PRIORITY_LABELS) as [
+                          TicketPriority,
+                          string,
+                        ][]
+                      ).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <StatusBadge status={ticket.priority} />
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -332,29 +563,59 @@ export default function TicketDetailPage() {
                 </p>
               </CardContent>
             </Card>
-            {ticket.deviceSerial && (
+            {(editMode || ticket.deviceSerial) && (
               <Card>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-2 text-muted-foreground mb-1">
                     <Cpu className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium">Device Serial</span>
+                    <span className="text-xs font-medium">Unit Serial (Device / Module)</span>
                   </div>
-                  <p className="text-sm font-mono font-medium">
-                    {ticket.deviceSerial}
-                  </p>
+                  {editMode ? (
+                    <Input
+                      value={draft.deviceSerial}
+                      onChange={(e) =>
+                        setDraft((d) => ({
+                          ...d,
+                          deviceSerial: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. SN-12345"
+                      maxLength={120}
+                      className="h-8 font-mono text-sm"
+                    />
+                  ) : (
+                    <p className="text-sm font-mono font-medium">
+                      {ticket.deviceSerial}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             )}
-            {ticket.productCode && (
+            {(editMode || ticket.productCode) && (
               <Card>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-2 text-muted-foreground mb-1">
                     <Package className="h-3.5 w-3.5" />
                     <span className="text-xs font-medium">Product Code</span>
                   </div>
-                  <p className="text-sm font-mono font-medium">
-                    {ticket.productCode}
-                  </p>
+                  {editMode ? (
+                    <Input
+                      value={draft.productCode}
+                      onChange={(e) =>
+                        setDraft((d) => ({
+                          ...d,
+                          productCode: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. PRD-001"
+                      maxLength={80}
+                      className="h-8 font-mono text-sm"
+                    />
+                  ) : (
+                    <p className="text-sm font-mono font-medium">
+                      {ticket.productCode}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -395,7 +656,12 @@ export default function TicketDetailPage() {
                   <Button
                     size="sm"
                     onClick={advanceStatus}
-                    disabled={transitionMut.isPending}
+                    disabled={transitionMut.isPending || editMode}
+                    title={
+                      editMode
+                        ? "Finish editing before changing status"
+                        : undefined
+                    }
                   >
                     {transitionMut.isPending
                       ? "Saving…"
@@ -411,9 +677,22 @@ export default function TicketDetailPage() {
               <CardTitle className="text-base">Description</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                {ticket.description}
-              </p>
+              {editMode ? (
+                <Textarea
+                  value={draft.description}
+                  onChange={(e) =>
+                    setDraft((d) => ({ ...d, description: e.target.value }))
+                  }
+                  rows={6}
+                  maxLength={4000}
+                  placeholder="Describe the issue…"
+                  className="text-sm leading-relaxed"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                  {ticket.description}
+                </p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

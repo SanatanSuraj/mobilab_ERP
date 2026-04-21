@@ -13,7 +13,7 @@
  */
 
 import { z } from "zod";
-import { PaginationQuerySchema } from "./pagination.js";
+import { PaginationQuerySchema } from "./pagination";
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 

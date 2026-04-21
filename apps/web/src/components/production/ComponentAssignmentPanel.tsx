@@ -58,7 +58,7 @@ export function ComponentAssignmentPanel({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Device ID</TableHead>
+            <TableHead>Unit ID</TableHead>
             <TableHead>PCB-ID</TableHead>
             <TableHead>Mech-ID</TableHead>
             <TableHead>Sensor-ID</TableHead>
@@ -72,7 +72,7 @@ export function ComponentAssignmentPanel({
             const complete = isComplete(a);
             return (
               <TableRow key={a.deviceSerialId}>
-                {/* Device ID */}
+                {/* Unit ID (Device = MCC · Module = MBA/MBM/MBC/CFG) */}
                 <TableCell>
                   <span className="font-mono text-xs font-semibold">
                     {a.deviceSerialId}

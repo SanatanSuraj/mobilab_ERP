@@ -123,6 +123,21 @@ export default function LeadsPage() {
   // avoid a spurious 401 ping against the API before login.
   const leadsQuery = useApiLeads(guard === "authenticated" ? query : {});
 
+  // ── Derived values from the query (safe to compute pre-guard; hooks
+  //    must run in the same order every render, so keep useMemo above
+  //    any conditional early returns).
+  const data = leadsQuery.data;
+  const total = data?.meta.total ?? 0;
+  const showInitialSkeleton = leadsQuery.isLoading && !data;
+
+  // Memoized header summary so it only recomputes when meta moves.
+  const summary = useMemo(() => {
+    if (showInitialSkeleton) return null;
+    if (total === 0) return "No leads yet";
+    if (total === 1) return "1 lead";
+    return `${total.toLocaleString("en-IN")} leads`;
+  }, [total, showInitialSkeleton]);
+
   // ── Auth states ──────────────────────────────────────────────────────────
   if (guard !== "authenticated") {
     return (
@@ -159,9 +174,7 @@ export default function LeadsPage() {
     }
   }
 
-  const data = leadsQuery.data;
   const leads: Lead[] = data?.data ?? [];
-  const total = data?.meta.total ?? 0;
 
   const columns: Column<Lead>[] = [
     {
@@ -231,16 +244,6 @@ export default function LeadsPage() {
       ),
     },
   ];
-
-  const showInitialSkeleton = leadsQuery.isLoading && !data;
-
-  // Memoized header summary so it only recomputes when meta moves.
-  const summary = useMemo(() => {
-    if (showInitialSkeleton) return null;
-    if (total === 0) return "No leads yet";
-    if (total === 1) return "1 lead";
-    return `${total.toLocaleString("en-IN")} leads`;
-  }, [total, showInitialSkeleton]);
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto">

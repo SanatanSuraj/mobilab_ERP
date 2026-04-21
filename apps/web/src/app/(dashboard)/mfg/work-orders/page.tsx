@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ProductBadge } from "@/components/shared/product-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -15,7 +16,10 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -31,13 +35,20 @@ import {
   MobiWorkOrder,
   MobiWOStatus,
   MobicaseProduct,
+  isFinishedDevice,
+  isFinishedDeviceCode,
+  isModuleCode,
+  isVendorSourcedCode,
 } from "@/data/mobilab-mock";
 import { Search, AlertTriangle, Info } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type WOStatusFilter = MobiWOStatus | "ALL";
-type ProductFilter = MobicaseProduct | "ALL";
+// "DEVICE" matches any WO that ships a finished device (MCC).
+// "MODULE" matches any WO that ships a sub-assembly (MBA/MBM/MBC/CFG).
+// Individual codes (MBA, MBM, …) keep the fine-grained single-product filter.
+type ProductFilter = MobicaseProduct | "ALL" | "DEVICE" | "MODULE";
 
 // ─── All 13 WO statuses for the legend ────────────────────────────────────────
 
@@ -98,7 +109,7 @@ function WODetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[58vw] sm:max-w-[min(58vw,840px)] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3 font-mono text-base">
             {wo.woNumber}
@@ -110,6 +121,57 @@ function WODetailDialog({
             )}
           </DialogTitle>
         </DialogHeader>
+
+        {/* WO Products (Device + Modules) — dedicated full-width row */}
+        {(() => {
+          const deviceCodes = wo.productCodes.filter(isFinishedDeviceCode);
+          const moduleCodes = wo.productCodes
+            .filter(isModuleCode)
+            .slice()
+            .sort((a, b) => {
+              // in-house first, vendor last
+              const av = isVendorSourcedCode(a) ? 1 : 0;
+              const bv = isVendorSourcedCode(b) ? 1 : 0;
+              if (av !== bv) return av - bv;
+              return a.localeCompare(b);
+            });
+          return (
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_2fr] gap-x-6 gap-y-2 text-sm border rounded-lg p-4 bg-muted/30">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium mb-1">
+                  Device
+                </div>
+                {deviceCodes.length === 0 ? (
+                  <span className="text-muted-foreground text-sm">—</span>
+                ) : (
+                  <div className="flex gap-1 flex-wrap items-center">
+                    {deviceCodes.map((pc) => (
+                      <ProductBadge key={pc} productCode={pc} />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium mb-1">
+                  Modules{moduleCodes.length > 0 && (
+                    <span className="ml-1 normal-case tracking-normal font-normal text-muted-foreground">
+                      ({moduleCodes.length})
+                    </span>
+                  )}
+                </div>
+                {moduleCodes.length === 0 ? (
+                  <span className="text-muted-foreground text-sm">—</span>
+                ) : (
+                  <div className="flex gap-1 flex-wrap items-center">
+                    {moduleCodes.map((pc) => (
+                      <ProductBadge key={pc} productCode={pc} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* WO Header Info */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm border rounded-lg p-4 bg-muted/30">
@@ -124,14 +186,6 @@ function WODetailDialog({
           <div>
             <span className="text-muted-foreground">Batch Qty:</span>{" "}
             <span className="font-semibold">{wo.batchQty}</span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Products:</span>{" "}
-            <span className="inline-flex gap-1 flex-wrap">
-              {wo.productCodes.map((p) => (
-                <StatusBadge key={p} status={p} />
-              ))}
-            </span>
           </div>
           <div>
             <span className="text-muted-foreground">Target Start:</span>{" "}
@@ -203,7 +257,7 @@ function WODetailDialog({
         {wo.lineAssignments.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-sm font-semibold">Line Assignments</h3>
-            <div className="rounded-lg border overflow-hidden">
+            <div className="rounded-lg border overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-muted/50 border-b">
                   <tr>
@@ -236,58 +290,81 @@ function WODetailDialog({
           </div>
         )}
 
-        {/* Device IDs */}
+        {/* Unit IDs (Devices + Modules) */}
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold">
-            Device IDs{" "}
-            <span className="font-normal text-muted-foreground">({devices.length})</span>
-          </h3>
+          {(() => {
+            const deviceCount = devices.filter(isFinishedDevice).length;
+            const moduleCount = devices.length - deviceCount;
+            return (
+              <h3 className="text-sm font-semibold">
+                Unit IDs{" "}
+                <span className="font-normal text-muted-foreground">
+                  ({devices.length} total · {deviceCount} Device · {moduleCount} Module)
+                </span>
+              </h3>
+            );
+          })()}
           {devices.length === 0 ? (
             <div className="rounded-lg border py-6 text-center text-sm text-muted-foreground">
-              No devices assigned yet
+              No units assigned yet
             </div>
           ) : (
-            <div className="rounded-lg border overflow-hidden">
+            <div className="rounded-lg border overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-muted/50 border-b">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium">Device ID</th>
+                    <th className="text-left px-3 py-2 font-medium">Unit ID</th>
+                    <th className="text-left px-3 py-2 font-medium">Type</th>
                     <th className="text-left px-3 py-2 font-medium">Product</th>
                     <th className="text-left px-3 py-2 font-medium">Status</th>
-                    <th className="text-right px-3 py-2 font-medium">Rework Count</th>
+                    <th className="text-right px-3 py-2 font-medium" title="Rework count">Rework</th>
                     <th className="text-left px-3 py-2 font-medium">Line</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {devices.map((dev) => (
-                    <tr key={dev.id} className="hover:bg-muted/20">
-                      <td className="px-3 py-2 font-mono text-xs font-bold text-blue-700">
-                        {dev.deviceId}
-                      </td>
-                      <td className="px-3 py-2">
-                        <StatusBadge status={dev.productCode} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <StatusBadge status={dev.status} />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <span
-                          className={
-                            dev.reworkCount >= 3
-                              ? "font-bold text-red-700"
-                              : dev.reworkCount > 0
-                              ? "font-semibold text-orange-700"
-                              : "text-muted-foreground"
-                          }
-                        >
-                          {dev.reworkCount}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">
-                        <StatusBadge status={dev.assignedLine} />
-                      </td>
-                    </tr>
-                  ))}
+                  {devices.map((dev) => {
+                    const finished = isFinishedDevice(dev);
+                    return (
+                      <tr key={dev.id} className="hover:bg-muted/20">
+                        <td className="px-3 py-2 font-mono text-xs font-bold text-blue-700">
+                          {dev.deviceId}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              finished
+                                ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                : "bg-slate-50 text-slate-700 border border-slate-200"
+                            }`}
+                          >
+                            {finished ? "Device" : "Module"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <StatusBadge status={dev.productCode} />
+                        </td>
+                        <td className="px-3 py-2">
+                          <StatusBadge status={dev.status} />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <span
+                            className={
+                              dev.reworkCount >= 3
+                                ? "font-bold text-red-700"
+                                : dev.reworkCount > 0
+                                ? "font-semibold text-orange-700"
+                                : "text-muted-foreground"
+                            }
+                          >
+                            {dev.reworkCount}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <StatusBadge status={dev.assignedLine} />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -305,7 +382,7 @@ function WODetailDialog({
               No stage logs recorded yet
             </div>
           ) : (
-            <div className="rounded-lg border overflow-hidden">
+            <div className="rounded-lg border overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-muted/50 border-b">
                   <tr>
@@ -396,7 +473,7 @@ function WODetailDialog({
                     )}
                   </div>
                   <div className="text-muted-foreground">
-                    <span className="font-medium text-foreground">Device:</span>{" "}
+                    <span className="font-medium text-foreground">Unit:</span>{" "}
                     {scrap.deviceId ?? "—"}
                     {" · "}
                     <span className="font-medium text-foreground">Item:</span>{" "}
@@ -429,7 +506,13 @@ export default function WorkOrdersPage() {
     return mobiWorkOrders.filter((wo) => {
       const matchesStatus = statusFilter === "ALL" || wo.status === statusFilter;
       const matchesProduct =
-        productFilter === "ALL" || wo.productCodes.includes(productFilter);
+        productFilter === "ALL"
+          ? true
+          : productFilter === "DEVICE"
+          ? wo.productCodes.some(isFinishedDeviceCode)
+          : productFilter === "MODULE"
+          ? wo.productCodes.some(isModuleCode)
+          : wo.productCodes.includes(productFilter);
       const searchLower = search.toLowerCase();
       const matchesSearch =
         !search ||
@@ -499,16 +582,46 @@ export default function WorkOrdersPage() {
           value={productFilter}
           onValueChange={(v) => setProductFilter((v ?? "ALL") as ProductFilter)}
         >
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-52">
             <SelectValue placeholder="Filter by product" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="ALL">All Products</SelectItem>
-            {ALL_PRODUCTS.map((p) => (
-              <SelectItem key={p} value={p}>
-                {p}
+            <SelectGroup>
+              <SelectItem value="ALL">All Products</SelectItem>
+            </SelectGroup>
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectLabel className="text-[10px] font-semibold uppercase tracking-wide">
+                By Type
+              </SelectLabel>
+              <SelectItem value="DEVICE">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-flex items-center justify-center text-[9px] font-bold rounded-full px-1 py-0 leading-[14px] bg-indigo-600 text-white">
+                    D
+                  </span>
+                  Device (MCC)
+                </span>
               </SelectItem>
-            ))}
+              <SelectItem value="MODULE">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-flex items-center justify-center text-[9px] font-bold rounded-full px-1 py-0 leading-[14px] bg-slate-500 text-white">
+                    M
+                  </span>
+                  Modules (MBA/MBM/MBC/CFG)
+                </span>
+              </SelectItem>
+            </SelectGroup>
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectLabel className="text-[10px] font-semibold uppercase tracking-wide">
+                By Product Code
+              </SelectLabel>
+              {ALL_PRODUCTS.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
 
@@ -530,10 +643,26 @@ export default function WorkOrdersPage() {
                 <thead className="bg-muted/50 border-b">
                   <tr>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">WO #</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Products</th>
+                    <th
+                      className="text-left px-4 py-3 font-medium text-muted-foreground"
+                      title="Finished device — MCC (Mobicase)"
+                    >
+                      Device
+                    </th>
+                    <th
+                      className="text-left px-4 py-3 font-medium text-muted-foreground"
+                      title="Sub-assembly modules — MBA, MBM, MBC, CFG"
+                    >
+                      Module
+                    </th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Customer</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">Qty Planned</th>
-                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">Completed</th>
+                    <th
+                      className="text-right px-4 py-3 font-medium text-muted-foreground"
+                      title="Completed finished devices (MCC) / modules (MBA/MBM/MBC/CFG)"
+                    >
+                      Done (D / M)
+                    </th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Assigned Lines</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Target Date</th>
@@ -544,12 +673,14 @@ export default function WorkOrdersPage() {
                   {filtered.map((wo) => {
                     const overdue = isWOOverdue(wo);
                     const progress = getWOProgress(wo);
-                    const completedDevices = getDeviceIDsByWO(wo.id).filter(
+                    const completedUnits = getDeviceIDsByWO(wo.id).filter(
                       (d) =>
                         d.status === "RELEASED" ||
                         d.status === "DISPATCHED" ||
                         d.status === "FINAL_QC_PASS"
-                    ).length;
+                    );
+                    const completedDevices = completedUnits.filter(isFinishedDevice).length;
+                    const completedModules = completedUnits.length - completedDevices;
 
                     return (
                       <tr
@@ -566,11 +697,35 @@ export default function WorkOrdersPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex gap-1 flex-wrap">
-                            {wo.productCodes.map((p) => (
-                              <StatusBadge key={p} status={p} />
-                            ))}
-                          </div>
+                          {(() => {
+                            const deviceCodes = wo.productCodes.filter(isFinishedDeviceCode);
+                            if (deviceCodes.length === 0)
+                              return <span className="text-muted-foreground text-xs">—</span>;
+                            return (
+                              <div className="flex gap-1 flex-wrap">
+                                {deviceCodes.map((pc) => (
+                                  <ProductBadge key={pc} productCode={pc} />
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const moduleCodes = wo.productCodes
+                              .filter(isModuleCode)
+                              .slice()
+                              .sort((a, b) => a.localeCompare(b));
+                            if (moduleCodes.length === 0)
+                              return <span className="text-muted-foreground text-xs">—</span>;
+                            return (
+                              <div className="flex gap-1 flex-wrap">
+                                {moduleCodes.map((pc) => (
+                                  <ProductBadge key={pc} productCode={pc} />
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3 max-w-[160px]">
                           <span
@@ -586,12 +741,12 @@ export default function WorkOrdersPage() {
                           {wo.batchQty}
                         </td>
                         <td className="px-4 py-3 text-right font-mono">
-                          <span
-                            className={
-                              completedDevices > 0 ? "text-green-700 font-semibold" : "text-muted-foreground"
-                            }
-                          >
+                          <span className={completedDevices > 0 ? "text-indigo-700 font-semibold" : "text-muted-foreground"}>
                             {completedDevices}
+                          </span>
+                          <span className="text-muted-foreground mx-0.5">/</span>
+                          <span className={completedModules > 0 ? "text-slate-700 font-semibold" : "text-muted-foreground"}>
+                            {completedModules}
                           </span>
                         </td>
                         <td className="px-4 py-3">

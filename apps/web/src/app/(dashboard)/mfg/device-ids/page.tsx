@@ -25,9 +25,10 @@ import {
   mobiOperators,
   DeviceIDStatus,
   MobiDeviceID,
-  MobicaseProduct,
   formatDate,
   formatDateTime,
+  isFinishedDevice,
+  isModule,
 } from "@/data/mobilab-mock";
 import { Search, Cpu, Activity, CheckCircle2, RotateCcw, Trash2 } from "lucide-react";
 
@@ -36,11 +37,6 @@ import { Search, Cpu, Activity, CheckCircle2, RotateCcw, Trash2 } from "lucide-r
 type DeviceStatusFilter = DeviceIDStatus | "ALL";
 type WOFilter = string; // WO number or "ALL"
 type TypeFilter = "ALL" | "DEVICE" | "MODULE";
-
-// MCC is the only finished device; MBA/MBM/MBC/CFG are sub-assembly modules
-const DEVICE_CODES: MobicaseProduct[] = ["MCC"];
-const isFinishedDevice = (d: MobiDeviceID) => DEVICE_CODES.includes(d.productCode);
-const isModule         = (d: MobiDeviceID) => !DEVICE_CODES.includes(d.productCode);
 
 // ─── Regex: MBA-YYYY-MM-NNNN-R ───────────────────────────────────────────────
 
@@ -771,8 +767,8 @@ export default function DeviceIDsPage() {
   return (
     <div className="space-y-6 p-6">
       <PageHeader
-        title="Device ID Registry"
-        description="Mobilab Mobicase — Full genealogy & traceability for every manufactured unit | 21 CFR Part 11"
+        title="Device & Module ID Registry"
+        description="Mobilab Mobicase — Devices (MCC) & Modules (MBA/MBM/MBC/CFG). Full genealogy & traceability for every manufactured unit | 21 CFR Part 11"
       />
 
       {/* Summary Stats — individual clickable filter cards */}

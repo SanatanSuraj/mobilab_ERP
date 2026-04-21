@@ -144,7 +144,7 @@ function WIPDetailDialog({
             <span className="text-xs text-muted-foreground">(#{inspection.stageSequence})</span>
           </div>
           <div>
-            <span className="text-muted-foreground">Device ID:</span>{" "}
+            <span className="text-muted-foreground">Unit ID:</span>{" "}
             <span className="font-mono text-xs">{inspection.deviceId ?? "—"}</span>
           </div>
           <div>
@@ -418,7 +418,7 @@ export default function WIPGateInspectionPage() {
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Inspection #</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">WO PID</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Product</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Device ID</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Unit ID</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Line</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Stage Name</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">Stage #</th>

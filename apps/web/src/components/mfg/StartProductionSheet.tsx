@@ -1,17 +1,20 @@
 "use client";
 
 /**
- * StartProductionSheet — generates Device IDs when production begins on a WO.
+ * StartProductionSheet — generates Unit IDs when production begins on a WO.
+ *
+ * A Unit is either a finished Device (MCC) or a sub-assembly Module
+ * (MBA/MBM/MBC/CFG). Every WO may produce a mix of both kinds.
  *
  * Flow:
  *  1. Supervisor picks an eligible Work Order (APPROVED / RM_ISSUED / IN_PROGRESS)
  *  2. For each product code in that WO, selects the assembly line
- *  3. Clicks "Generate Device IDs" → creates N devices per product (N = batchQty)
+ *  3. Clicks "Generate Unit IDs" → creates N units per product (N = batchQty)
  *  4. WO status advances to IN_PROGRESS
- *  5. Devices immediately appear on the shop floor line panels
+ *  5. Units immediately appear on the shop floor line panels
  *
- * Device ID format generated: {PRODUCT}-{YYYY}-{MM}-{SEQ4}-0
- *   e.g. MBA-2026-04-0007-0
+ * Unit ID format generated: {PRODUCT}-{YYYY}-{MM}-{SEQ4}-0
+ *   e.g. MBA-2026-04-0007-0 (Module) or MCC-2026-04-0001-0 (Device)
  */
 
 import { useState, useMemo } from "react";
@@ -35,7 +38,34 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useProductionReadyWOs, useGenerateDeviceIds } from "@/hooks/useMfg";
-import type { MobicaseProduct, AssemblyLine } from "@/data/mobilab-mock";
+import {
+  isFinishedDeviceCode,
+  isVendorSourcedCode,
+  type MobicaseProduct,
+  type AssemblyLine,
+} from "@/data/mobilab-mock";
+
+type BadgeKind = "DEVICE" | "MODULE_INHOUSE" | "MODULE_VENDOR";
+function classifyForBadge(code: MobicaseProduct): BadgeKind {
+  if (isFinishedDeviceCode(code)) return "DEVICE";
+  if (isVendorSourcedCode(code)) return "MODULE_VENDOR";
+  return "MODULE_INHOUSE";
+}
+const CHIP_CLS: Record<BadgeKind, string> = {
+  DEVICE: "bg-indigo-600",
+  MODULE_INHOUSE: "bg-slate-500",
+  MODULE_VENDOR: "bg-amber-500",
+};
+const CHIP_LETTER: Record<BadgeKind, "D" | "M" | "V"> = {
+  DEVICE: "D",
+  MODULE_INHOUSE: "M",
+  MODULE_VENDOR: "V",
+};
+const CHIP_TITLE: Record<BadgeKind, string> = {
+  DEVICE: "Device (finished unit)",
+  MODULE_INHOUSE: "Module · In-house (manufactured on our lines)",
+  MODULE_VENDOR: "Module · Vendor-sourced (purchased ready-made)",
+};
 
 // Default line per product — operator can override
 const DEFAULT_LINE: Record<MobicaseProduct, AssemblyLine> = {
@@ -122,7 +152,7 @@ export function StartProductionSheet({ open, onOpenChange }: Props) {
       });
 
       toast.success(
-        `${devices.length} Device IDs generated for ${selectedWO.woNumber}`,
+        `${devices.length} Unit IDs generated for ${selectedWO.woNumber}`,
         {
           description: `${selectedWO.productCodes.join(" · ")} — ${selectedWO.batchQty} units each. WO → IN PROGRESS.`,
         }
@@ -146,11 +176,12 @@ export function StartProductionSheet({ open, onOpenChange }: Props) {
         <SheetHeader className="pb-2">
           <SheetTitle className="flex items-center gap-2 text-base">
             <Play className="h-4 w-4 text-green-600" />
-            Start Production — Generate Device IDs
+            Start Production — Generate Unit IDs
           </SheetTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            Select an approved Work Order. Device IDs will be auto-generated (one per unit per product).
-            They will immediately appear on the shop floor line panels.
+            Select an approved Work Order. Unit IDs will be auto-generated
+            (Device for MCC, Module for MBA/MBM/MBC/CFG — one per unit per
+            product). They will immediately appear on the shop floor line panels.
           </p>
         </SheetHeader>
 
@@ -226,11 +257,27 @@ export function StartProductionSheet({ open, onOpenChange }: Props) {
                   <Package className="h-4 w-4 text-muted-foreground" />
                   <Label>Assign Assembly Line per Product</Label>
                 </div>
-                {selectedWO.productCodes.map((pc) => (
+                {selectedWO.productCodes.map((pc) => {
+                  const kind = classifyForBadge(pc);
+                  const isVendor = kind === "MODULE_VENDOR";
+                  return (
                   <div key={pc} className="grid grid-cols-2 gap-3 items-center">
                     <div>
-                      <p className="text-xs font-semibold">{pc}</p>
-                      <p className="text-xs text-muted-foreground">{PRODUCT_LABEL[pc]}</p>
+                      <p className="text-xs font-semibold inline-flex items-center gap-1.5">
+                        <span
+                          title={CHIP_TITLE[kind]}
+                          className={`inline-flex items-center justify-center text-[9px] font-bold rounded-full px-1 py-0 leading-[14px] text-white ${CHIP_CLS[kind]}`}
+                        >
+                          {CHIP_LETTER[kind]}
+                        </span>
+                        {pc}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {PRODUCT_LABEL[pc]}
+                        {isVendor && (
+                          <span className="ml-1 text-amber-700">· vendor-sourced</span>
+                        )}
+                      </p>
                     </div>
                     <Select
                       value={linePerProduct[pc] ?? DEFAULT_LINE[pc]}
@@ -248,19 +295,50 @@ export function StartProductionSheet({ open, onOpenChange }: Props) {
                       </SelectContent>
                     </Select>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* What will be created */}
               <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800 space-y-0.5">
-                <p className="font-semibold">Will generate {totalDevices} Device IDs:</p>
-                {selectedWO.productCodes.map((pc) => (
-                  <p key={pc}>
-                    · {selectedWO.batchQty}× <span className="font-mono">{pc}</span> on{" "}
-                    <span className="font-semibold">{linePerProduct[pc] ?? DEFAULT_LINE[pc]}</span>
-                    {" "}({LINE_LABEL[linePerProduct[pc] ?? DEFAULT_LINE[pc]]})
-                  </p>
-                ))}
+                {(() => {
+                  const deviceCount = selectedWO.productCodes.filter(isFinishedDeviceCode).length;
+                  const moduleCount = selectedWO.productCodes.length - deviceCount;
+                  const deviceUnits = deviceCount * selectedWO.batchQty;
+                  const moduleUnits = moduleCount * selectedWO.batchQty;
+                  const parts: string[] = [];
+                  if (deviceUnits > 0) parts.push(`${deviceUnits} Device${deviceUnits === 1 ? "" : "s"}`);
+                  if (moduleUnits > 0) parts.push(`${moduleUnits} Module${moduleUnits === 1 ? "" : "s"}`);
+                  return (
+                    <p className="font-semibold">
+                      Will generate {totalDevices} Unit IDs
+                      {parts.length > 0 && (
+                        <span className="text-green-700 font-normal"> ({parts.join(" · ")})</span>
+                      )}:
+                    </p>
+                  );
+                })()}
+                {selectedWO.productCodes.map((pc) => {
+                  const kind = classifyForBadge(pc);
+                  const isVendor = kind === "MODULE_VENDOR";
+                  return (
+                    <p key={pc}>
+                      · {selectedWO.batchQty}×{" "}
+                      <span
+                        title={CHIP_TITLE[kind]}
+                        className={`inline-flex items-center justify-center text-[9px] font-bold rounded-full px-1 py-0 leading-[14px] text-white mr-0.5 ${CHIP_CLS[kind]}`}
+                      >
+                        {CHIP_LETTER[kind]}
+                      </span>
+                      <span className="font-mono">{pc}</span> on{" "}
+                      <span className="font-semibold">{linePerProduct[pc] ?? DEFAULT_LINE[pc]}</span>
+                      {" "}({LINE_LABEL[linePerProduct[pc] ?? DEFAULT_LINE[pc]]})
+                      {isVendor && (
+                        <span className="text-amber-700"> — vendor scan</span>
+                      )}
+                    </p>
+                  );
+                })}
               </div>
             </>
           )}
@@ -282,7 +360,7 @@ export function StartProductionSheet({ open, onOpenChange }: Props) {
               {generateDevices.isPending ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Generating…</>
               ) : (
-                <><Play className="h-4 w-4 mr-2" />Generate {totalDevices > 0 ? `${totalDevices} ` : ""}Device IDs</>
+                <><Play className="h-4 w-4 mr-2" />Generate {totalDevices > 0 ? `${totalDevices} ` : ""}Unit IDs</>
               )}
             </Button>
           </SheetFooter>

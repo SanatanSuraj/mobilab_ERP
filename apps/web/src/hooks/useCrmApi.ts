@@ -44,7 +44,10 @@ import {
   apiMarkLeadLost,
   apiTransitionDealStage,
   apiTransitionTicketStatus,
+  apiUpdateAccount,
+  apiUpdateDeal,
   apiUpdateLead,
+  apiUpdateTicket,
   type AccountListQuery,
   type ContactListQuery,
   type ConvertLeadResponse,
@@ -55,6 +58,7 @@ import {
 } from "@/lib/api/crm";
 
 import type {
+  Account,
   AddLeadActivity,
   AddTicketComment,
   ConvertLead,
@@ -67,7 +71,10 @@ import type {
   TicketComment,
   TransitionDealStage,
   TransitionTicketStatus,
+  UpdateAccount,
+  UpdateDeal,
   UpdateLead,
+  UpdateTicket,
 } from "@mobilab/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
@@ -439,6 +446,48 @@ export function useApiAddTicketComment(id: string) {
       // Comment-list is the only cache affected; ticket detail doesn't
       // embed comment counts, so we skip invalidating it.
       qc.invalidateQueries({ queryKey: crmApiKeys.tickets.comments(id) });
+    },
+  });
+}
+
+// ─── Detail-page edit mutations ────────────────────────────────────────────
+//
+// Accounts / Deals / Tickets all follow the same optimistic-locking
+// pattern: PATCH takes `expectedVersion`, server returns the new row
+// (with version+1), we write it straight into the detail cache and
+// invalidate the entity's list keys. 409 from the server bubbles up as
+// an Error — callers are expected to toast + refetch (which gives them
+// the new version for the next attempt).
+
+export function useApiUpdateAccount(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Account, Error, UpdateAccount>({
+    mutationFn: (body) => apiUpdateAccount(id, body),
+    onSuccess: (account) => {
+      qc.setQueryData(crmApiKeys.accounts.detail(id), account);
+      qc.invalidateQueries({ queryKey: crmApiKeys.accounts.all });
+    },
+  });
+}
+
+export function useApiUpdateDeal(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Deal, Error, UpdateDeal>({
+    mutationFn: (body) => apiUpdateDeal(id, body),
+    onSuccess: (deal) => {
+      qc.setQueryData(crmApiKeys.deals.detail(id), deal);
+      qc.invalidateQueries({ queryKey: crmApiKeys.deals.all });
+    },
+  });
+}
+
+export function useApiUpdateTicket(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Ticket, Error, UpdateTicket>({
+    mutationFn: (body) => apiUpdateTicket(id, body),
+    onSuccess: (ticket) => {
+      qc.setQueryData(crmApiKeys.tickets.detail(id), ticket);
+      qc.invalidateQueries({ queryKey: crmApiKeys.tickets.all });
     },
   });
 }

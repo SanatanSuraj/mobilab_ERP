@@ -171,11 +171,11 @@ const navSections: NavSection[] = [
         ],
       },
       {
-        label: "Device IDs & BMR",
+        label: "Device & Module IDs",
         href: "/production/device-ids",
         roles: ["SUPER_ADMIN", "MANAGEMENT", "PRODUCTION_MANAGER", "QC_MANAGER", "RD"],
         children: [
-          { label: "Device IDs", href: "/production/device-ids" },
+          { label: "Device & Module IDs", href: "/production/device-ids" },
           { label: "BMR", href: "/production/bmr" },
           { label: "Scrap & CAPA", href: "/production/scrap" },
           { label: "OEE & COPQ", href: "/production/oee" },

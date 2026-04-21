@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ProductBadge } from "@/components/shared/product-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   getActiveWOs,
@@ -17,6 +18,10 @@ import {
   oeeRecords,
   scrapEntries,
   mobiDeviceIDs,
+  isFinishedDevice,
+  isFinishedDeviceCode,
+  isModule,
+  isModuleCode,
 } from "@/data/mobilab-mock";
 import {
   AlertCircle,
@@ -33,11 +38,17 @@ export default function MfgDashboardPage() {
   const oeeAvg = useMemo(() => getOEEAvg(), []);
   const totalScrapValue = useMemo(() => getTotalScrapValue(), []);
 
-  // Units in production today (devices whose status is IN_PRODUCTION)
-  const unitsInProduction = useMemo(
-    () => mobiDeviceIDs.filter((d) => d.status === "IN_PRODUCTION").length,
-    []
-  );
+  // Units in production today, split by kind (Device=MCC only, Module=MBA/MBM/MBC/CFG)
+  const { devicesInProduction, modulesInProduction } = useMemo(() => {
+    let devices = 0;
+    let modules = 0;
+    for (const d of mobiDeviceIDs) {
+      if (d.status !== "IN_PRODUCTION") continue;
+      if (isFinishedDevice(d)) devices++;
+      else if (isModule(d)) modules++;
+    }
+    return { devicesInProduction: devices, modulesInProduction: modules };
+  }, []);
 
   // Last 4 OEE records for trend table
   const recentOEE = useMemo(
@@ -48,16 +59,20 @@ export default function MfgDashboardPage() {
     []
   );
 
-  // Pre-compute completed devices count per WO to avoid per-row filter in the table
-  const completedDevicesByWO = useMemo(() => {
-    const map = new Map<string, number>();
+  // Pre-compute completed Device (MCC) vs Module (MBA/MBM/MBC/CFG) counts per WO
+  // so the Active WO table can show "Devices" and "Modules" columns without per-row filters.
+  const completedUnitsByWO = useMemo(() => {
+    const map = new Map<string, { devices: number; modules: number }>();
     for (const d of mobiDeviceIDs) {
       if (
         d.status === "FINAL_QC_PASS" ||
         d.status === "RELEASED" ||
         d.status === "DISPATCHED"
       ) {
-        map.set(d.workOrderId, (map.get(d.workOrderId) ?? 0) + 1);
+        const prev = map.get(d.workOrderId) ?? { devices: 0, modules: 0 };
+        if (isFinishedDevice(d)) prev.devices++;
+        else if (isModule(d)) prev.modules++;
+        map.set(d.workOrderId, prev);
       }
     }
     return map;
@@ -102,10 +117,10 @@ export default function MfgDashboardPage() {
         />
         <KPICard
           title="Units in Production"
-          value={String(unitsInProduction)}
+          value={String(devicesInProduction + modulesInProduction)}
           icon={Package}
           iconColor="text-indigo-600"
-          change="Devices currently active"
+          change={`${devicesInProduction} Device · ${modulesInProduction} Module`}
           trend="neutral"
         />
         <KPICard
@@ -143,14 +158,32 @@ export default function MfgDashboardPage() {
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                         WO #
                       </th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                        Products
+                      <th
+                        className="text-left px-4 py-3 font-medium text-muted-foreground"
+                        title="Finished device — MCC (Mobicase)"
+                      >
+                        Device
+                      </th>
+                      <th
+                        className="text-left px-4 py-3 font-medium text-muted-foreground"
+                        title="Sub-assembly modules — MBA, MBM, MBC, CFG"
+                      >
+                        Module
                       </th>
                       <th className="text-right px-4 py-3 font-medium text-muted-foreground">
                         Planned
                       </th>
-                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                        Completed
+                      <th
+                        className="text-right px-4 py-3 font-medium text-muted-foreground"
+                        title="Finished devices (MCC) completed on this WO"
+                      >
+                        Devices ✓
+                      </th>
+                      <th
+                        className="text-right px-4 py-3 font-medium text-muted-foreground"
+                        title="Sub-assembly modules (MBA/MBM/MBC/CFG) completed on this WO"
+                      >
+                        Modules ✓
                       </th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                         Status
@@ -177,7 +210,7 @@ export default function MfgDashboardPage() {
                       );
 
                       // Use pre-computed map — O(1) lookup instead of O(n) filter
-                      const completedDevices = completedDevicesByWO.get(wo.id) ?? 0;
+                      const completed = completedUnitsByWO.get(wo.id) ?? { devices: 0, modules: 0 };
 
                       const isOverdue = daysRemaining < 0;
                       const isOnHold = wo.status === "ON_HOLD";
@@ -193,17 +226,44 @@ export default function MfgDashboardPage() {
                             {wo.woNumber}
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1">
-                              {wo.productCodes.map((pc) => (
-                                <StatusBadge key={pc} status={pc} />
-                              ))}
-                            </div>
+                            {(() => {
+                              const deviceCodes = wo.productCodes.filter(isFinishedDeviceCode);
+                              if (deviceCodes.length === 0)
+                                return <span className="text-muted-foreground text-xs">—</span>;
+                              return (
+                                <div className="flex gap-1 flex-wrap">
+                                  {deviceCodes.map((pc) => (
+                                    <ProductBadge key={pc} productCode={pc} />
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-4 py-3">
+                            {(() => {
+                              const moduleCodes = wo.productCodes
+                                .filter(isModuleCode)
+                                .slice()
+                                .sort((a, b) => a.localeCompare(b));
+                              if (moduleCodes.length === 0)
+                                return <span className="text-muted-foreground text-xs">—</span>;
+                              return (
+                                <div className="flex gap-1 flex-wrap">
+                                  {moduleCodes.map((pc) => (
+                                    <ProductBadge key={pc} productCode={pc} />
+                                  ))}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-sm">
                             {wo.batchQty}
                           </td>
-                          <td className="px-4 py-3 text-right font-mono text-sm">
-                            {completedDevices}
+                          <td className="px-4 py-3 text-right font-mono text-sm text-indigo-700">
+                            {completed.devices}
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono text-sm text-slate-700">
+                            {completed.modules}
                           </td>
                           <td className="px-4 py-3">
                             <StatusBadge status={wo.status} />
@@ -360,7 +420,7 @@ export default function MfgDashboardPage() {
                     <thead className="bg-muted/50 border-b">
                       <tr>
                         <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                          Device ID
+                          Unit ID
                         </th>
                         <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                           Root Cause

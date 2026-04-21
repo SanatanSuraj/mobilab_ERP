@@ -14,7 +14,7 @@
  */
 
 import { z } from "zod";
-import { ROLES } from "./roles.js";
+import { ROLES } from "./roles";
 
 // ─── JWT payloads ─────────────────────────────────────────────────────────────
 
