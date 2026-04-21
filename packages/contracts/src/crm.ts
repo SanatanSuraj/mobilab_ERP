@@ -13,7 +13,7 @@
  */
 
 import { z } from "zod";
-import { PaginationQuerySchema } from "./pagination";
+import { PaginationQuerySchema } from "./pagination.js";
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -414,3 +414,271 @@ export const AddTicketCommentSchema = z.object({
   content: z.string().trim().min(1).max(4000),
 });
 export type AddTicketComment = z.infer<typeof AddTicketCommentSchema>;
+
+// ─── Quotations ──────────────────────────────────────────────────────────────
+//
+// Sales-side quote that lives after a deal has matured but before the order
+// is placed. A quotation is a single row with N line items; optimistic
+// concurrency via `version`. Status graph (§13.1):
+//
+//   DRAFT → AWAITING_APPROVAL → APPROVED → SENT → ACCEPTED | REJECTED | EXPIRED
+//           AWAITING_APPROVAL → REJECTED (decline)
+//           APPROVED         → SENT | EXPIRED
+//           ACCEPTED         → CONVERTED (terminal; produces a SalesOrder)
+//
+// AWAITING_APPROVAL is entered when grand_total exceeds the tenant's approval
+// threshold (enforced in the service, not on the row). Approvals require
+// `quotations:approve`; transitioning to CONVERTED requires
+// `quotations:convert_to_so`.
+
+export const QUOTATION_STATUSES = [
+  "DRAFT",
+  "AWAITING_APPROVAL",
+  "APPROVED",
+  "SENT",
+  "ACCEPTED",
+  "REJECTED",
+  "EXPIRED",
+  "CONVERTED",
+] as const;
+export const QuotationStatusSchema = z.enum(QUOTATION_STATUSES);
+export type QuotationStatus = z.infer<typeof QuotationStatusSchema>;
+
+export const QuotationLineItemSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  quotationId: uuid,
+  productCode: z.string(),
+  productName: z.string(),
+  quantity: z.number().int().positive(),
+  unitPrice: decimalStr,
+  discountPct: decimalStr,
+  taxPct: decimalStr,
+  taxAmount: decimalStr,
+  lineTotal: decimalStr,
+  createdAt: z.string(),
+});
+export type QuotationLineItem = z.infer<typeof QuotationLineItemSchema>;
+
+export const CreateQuotationLineItemSchema = z.object({
+  productCode: z.string().trim().min(1).max(80),
+  productName: z.string().trim().min(1).max(200),
+  quantity: z.number().int().positive(),
+  unitPrice: decimalStr,
+  discountPct: decimalStr.default("0"),
+  taxPct: decimalStr.default("0"),
+});
+export type CreateQuotationLineItem = z.infer<
+  typeof CreateQuotationLineItemSchema
+>;
+
+export const QuotationSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  quotationNumber: z.string(),
+  dealId: uuid.nullable(),
+  accountId: uuid.nullable(),
+  contactId: uuid.nullable(),
+  company: z.string(),
+  contactName: z.string(),
+  status: QuotationStatusSchema,
+  subtotal: decimalStr,
+  taxAmount: decimalStr,
+  grandTotal: decimalStr,
+  validUntil: z.string().nullable(),
+  notes: z.string().nullable(),
+  requiresApproval: z.boolean(),
+  approvedBy: uuid.nullable(),
+  approvedAt: z.string().nullable(),
+  convertedToOrderId: uuid.nullable(),
+  version: z.number().int().positive(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  deletedAt: z.string().nullable(),
+  lineItems: z.array(QuotationLineItemSchema),
+});
+export type Quotation = z.infer<typeof QuotationSchema>;
+
+export const CreateQuotationSchema = z.object({
+  dealId: uuid.optional(),
+  accountId: uuid.optional(),
+  contactId: uuid.optional(),
+  company: z.string().trim().min(1).max(200),
+  contactName: z.string().trim().min(1).max(200),
+  validUntil: z.string().date().optional(),
+  notes: z.string().trim().max(4000).optional(),
+  lineItems: z.array(CreateQuotationLineItemSchema).min(1),
+});
+export type CreateQuotation = z.infer<typeof CreateQuotationSchema>;
+
+/**
+ * Header-level update. Line-item edits go through replaceLineItems (below);
+ * this keeps UPDATEs race-free by not trying to merge per-line diffs.
+ */
+export const UpdateQuotationSchema = z.object({
+  dealId: uuid.optional(),
+  accountId: uuid.optional(),
+  contactId: uuid.optional(),
+  company: z.string().trim().min(1).max(200).optional(),
+  contactName: z.string().trim().min(1).max(200).optional(),
+  validUntil: z.string().date().optional(),
+  notes: z.string().trim().max(4000).optional(),
+  lineItems: z.array(CreateQuotationLineItemSchema).min(1).optional(),
+  expectedVersion: z.number().int().positive(),
+});
+export type UpdateQuotation = z.infer<typeof UpdateQuotationSchema>;
+
+export const QuotationListQuerySchema = PaginationQuerySchema.extend({
+  status: QuotationStatusSchema.optional(),
+  accountId: uuid.optional(),
+  dealId: uuid.optional(),
+  requiresApproval: z.coerce.boolean().optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});
+
+export const TransitionQuotationStatusSchema = z.object({
+  status: QuotationStatusSchema,
+  expectedVersion: z.number().int().positive(),
+  /** Required when status is REJECTED. */
+  reason: z.string().trim().max(500).optional(),
+});
+export type TransitionQuotationStatus = z.infer<
+  typeof TransitionQuotationStatusSchema
+>;
+
+export const ApproveQuotationSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+});
+export type ApproveQuotation = z.infer<typeof ApproveQuotationSchema>;
+
+/**
+ * Convert an ACCEPTED quotation into a SalesOrder. Line items are copied
+ * verbatim; the resulting SalesOrder ID is returned on the quotation.
+ */
+export const ConvertQuotationSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  expectedDelivery: z.string().date().optional(),
+});
+export type ConvertQuotation = z.infer<typeof ConvertQuotationSchema>;
+
+// ─── Sales Orders ────────────────────────────────────────────────────────────
+//
+// Downstream of quotations (or created directly for spot sales). Status graph:
+//
+//   DRAFT → CONFIRMED → PROCESSING → DISPATCHED → IN_TRANSIT → DELIVERED
+//   any-non-terminal → CANCELLED
+//
+// Finance approval is an orthogonal flag (approvedBy/approvedAt), not a status
+// step, because the order can progress through the fulfillment graph while
+// finance signs off asynchronously.
+
+export const SALES_ORDER_STATUSES = [
+  "DRAFT",
+  "CONFIRMED",
+  "PROCESSING",
+  "DISPATCHED",
+  "IN_TRANSIT",
+  "DELIVERED",
+  "CANCELLED",
+] as const;
+export const SalesOrderStatusSchema = z.enum(SALES_ORDER_STATUSES);
+export type SalesOrderStatus = z.infer<typeof SalesOrderStatusSchema>;
+
+export const SalesOrderLineItemSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  orderId: uuid,
+  productCode: z.string(),
+  productName: z.string(),
+  quantity: z.number().int().positive(),
+  unitPrice: decimalStr,
+  discountPct: decimalStr,
+  taxPct: decimalStr,
+  taxAmount: decimalStr,
+  lineTotal: decimalStr,
+  createdAt: z.string(),
+});
+export type SalesOrderLineItem = z.infer<typeof SalesOrderLineItemSchema>;
+
+export const CreateSalesOrderLineItemSchema = z.object({
+  productCode: z.string().trim().min(1).max(80),
+  productName: z.string().trim().min(1).max(200),
+  quantity: z.number().int().positive(),
+  unitPrice: decimalStr,
+  discountPct: decimalStr.default("0"),
+  taxPct: decimalStr.default("0"),
+});
+export type CreateSalesOrderLineItem = z.infer<
+  typeof CreateSalesOrderLineItemSchema
+>;
+
+export const SalesOrderSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  orderNumber: z.string(),
+  quotationId: uuid.nullable(),
+  accountId: uuid.nullable(),
+  contactId: uuid.nullable(),
+  company: z.string(),
+  contactName: z.string(),
+  status: SalesOrderStatusSchema,
+  subtotal: decimalStr,
+  taxAmount: decimalStr,
+  grandTotal: decimalStr,
+  expectedDelivery: z.string().nullable(),
+  financeApprovedBy: uuid.nullable(),
+  financeApprovedAt: z.string().nullable(),
+  notes: z.string().nullable(),
+  version: z.number().int().positive(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  deletedAt: z.string().nullable(),
+  lineItems: z.array(SalesOrderLineItemSchema),
+});
+export type SalesOrder = z.infer<typeof SalesOrderSchema>;
+
+export const CreateSalesOrderSchema = z.object({
+  quotationId: uuid.optional(),
+  accountId: uuid.optional(),
+  contactId: uuid.optional(),
+  company: z.string().trim().min(1).max(200),
+  contactName: z.string().trim().min(1).max(200),
+  expectedDelivery: z.string().date().optional(),
+  notes: z.string().trim().max(4000).optional(),
+  lineItems: z.array(CreateSalesOrderLineItemSchema).min(1),
+});
+export type CreateSalesOrder = z.infer<typeof CreateSalesOrderSchema>;
+
+export const UpdateSalesOrderSchema = z.object({
+  accountId: uuid.optional(),
+  contactId: uuid.optional(),
+  company: z.string().trim().min(1).max(200).optional(),
+  contactName: z.string().trim().min(1).max(200).optional(),
+  expectedDelivery: z.string().date().optional(),
+  notes: z.string().trim().max(4000).optional(),
+  lineItems: z.array(CreateSalesOrderLineItemSchema).min(1).optional(),
+  expectedVersion: z.number().int().positive(),
+});
+export type UpdateSalesOrder = z.infer<typeof UpdateSalesOrderSchema>;
+
+export const SalesOrderListQuerySchema = PaginationQuerySchema.extend({
+  status: SalesOrderStatusSchema.optional(),
+  accountId: uuid.optional(),
+  quotationId: uuid.optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});
+
+export const TransitionSalesOrderStatusSchema = z.object({
+  status: SalesOrderStatusSchema,
+  expectedVersion: z.number().int().positive(),
+});
+export type TransitionSalesOrderStatus = z.infer<
+  typeof TransitionSalesOrderStatusSchema
+>;
+
+export const FinanceApproveSalesOrderSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+});
+export type FinanceApproveSalesOrder = z.infer<
+  typeof FinanceApproveSalesOrderSchema
+>;

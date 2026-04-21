@@ -14,7 +14,7 @@
  * resource.
  */
 
-import { ROLES, type Role } from "./roles";
+import { ROLES, type Role } from "./roles.js";
 
 // ─── Permission literals ──────────────────────────────────────────────────────
 
@@ -73,13 +73,29 @@ export const PERMISSIONS = [
   "sales_orders:approve_finance",
   "sales_orders:convert_to_wo",
 
+  // products (production master)
+  "products:create",
+  "products:read",
+  "products:update",
+  "products:delete",
+
+  // bom (bill of materials)
+  "bom:read",
+  "bom:edit",
+  "bom:activate",
+  "bom:supersede",
+
   // work_orders
   "work_orders:create",
   "work_orders:read",
+  "work_orders:update",
   "work_orders:release",
   "work_orders:close",
   "work_orders:transition",
   "work_orders:assign_operator",
+
+  // wip_stages
+  "wip_stages:advance",
 
   // bmr
   "bmr:read",
@@ -135,6 +151,12 @@ export const PERMISSIONS = [
   "payments:read",
   "payments:reconcile",
 
+  // notifications
+  "notifications:read",
+  "notifications:admin_read",
+  "notifications:dispatch",
+  "notifications:templates:manage",
+
   // reports
   "reports:read",
   "reports:export",
@@ -168,6 +190,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "tickets:read",
     "quotations:read",
     "sales_orders:read",
+    "products:read",
+    "bom:read",
     "work_orders:read",
     "bmr:read",
     "devices:read",
@@ -177,6 +201,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "purchase_invoices:read",
     "sales_invoices:read",
     "payments:read",
+    "notifications:read",
+    "notifications:admin_read",
     "reports:read",
     "reports:export",
     "admin:audit:read",
@@ -208,6 +234,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "sales_orders:update",
     "sales_invoices:read",
     "payments:read",
+    "notifications:read",
   ],
 
   SALES_MANAGER: [
@@ -244,6 +271,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "sales_orders:convert_to_wo",
     "sales_invoices:read",
     "payments:read",
+    "notifications:read",
     "reports:read",
   ],
 
@@ -266,13 +294,18 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "payments:create",
     "payments:read",
     "payments:reconcile",
+    "notifications:read",
     "reports:read",
     "reports:export",
   ],
 
   PRODUCTION: [
+    "products:read",
+    "bom:read",
     "work_orders:read",
+    "work_orders:update",
     "work_orders:transition",
+    "wip_stages:advance",
     "bmr:read",
     "bmr:sign_production",
     "devices:create",
@@ -282,15 +315,26 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "ncr:read",
     "inventory:read",
     "inventory:issue",
+    "notifications:read",
   ],
 
   PRODUCTION_MANAGER: [
+    "products:create",
+    "products:read",
+    "products:update",
+    "products:delete",
+    "bom:read",
+    "bom:edit",
+    "bom:activate",
+    "bom:supersede",
     "work_orders:create",
     "work_orders:read",
+    "work_orders:update",
     "work_orders:release",
     "work_orders:close",
     "work_orders:transition",
     "work_orders:assign_operator",
+    "wip_stages:advance",
     "bmr:read",
     "bmr:sign_production",
     "bmr:close",
@@ -304,27 +348,36 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "inventory:read",
     "inventory:issue",
     "inventory:adjust",
+    "notifications:read",
     "reports:read",
   ],
 
   RD: [
     "customers:read",
     "quotations:read",
+    "products:read",
+    "bom:read",
+    "bom:edit",
     "devices:read",
     "work_orders:read",
     "bmr:read",
+    "notifications:read",
   ],
 
   QC_INSPECTOR: [
     "tickets:read",
     "tickets:comment",
+    "products:read",
+    "bom:read",
     "work_orders:read",
+    "wip_stages:advance",
     "bmr:read",
     "devices:read",
     "devices:update",
     "qc:inspect",
     "ncr:create",
     "ncr:read",
+    "notifications:read",
   ],
 
   QC_MANAGER: [
@@ -333,7 +386,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "tickets:update",
     "tickets:transition",
     "tickets:comment",
+    "products:read",
+    "bom:read",
     "work_orders:read",
+    "wip_stages:advance",
     "bmr:read",
     "bmr:sign_qc",
     "devices:read",
@@ -348,6 +404,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "ncr:sign_rca",
     "ncr:disposition",
     "ncr:close",
+    "notifications:read",
     "reports:read",
   ],
 
@@ -358,6 +415,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "inventory:receive",
     "inventory:issue",
     "purchase_orders:read",
+    "notifications:read",
   ],
 
   CUSTOMER: [

@@ -6,9 +6,13 @@
  * Real auth validation happens inside each Server Action / Route Handler.
  *
  * Cookie strategy:
- *   mobilab-session   presence flag — set on login, cleared on logout
+ *   mobilab-session   presence flag — set on login, cleared on logout.
+ *                     /auth/login writes this AFTER a successful real-API
+ *                     login so we can keep this optimistic cookie gate
+ *                     and migrate to httpOnly JWT cookies later without
+ *                     touching the proxy.
  *
- * When real JWT auth lands:
+ * When real JWT auth fully lands:
  *   1. Store the JWT in an httpOnly cookie (set by the login Server Action)
  *   2. Replace cookie presence check below with `verifyToken(cookie.value)`
  *   3. Forward claims (userId, orgId) to the app via request headers so
@@ -20,8 +24,24 @@ import type { NextRequest } from "next/server";
 
 // ─── Route Classification ─────────────────────────────────────────────────────
 
-/** Completely public — no auth cookie required. */
-const PUBLIC_PATHS = ["/login"];
+/**
+ * Completely public — no auth cookie required.
+ *
+ *   /login           — legacy mock login + dev-panel role switcher.
+ *                      Now redirects to /auth/login; left here so its own
+ *                      markup can render (its redirect effect triggers on
+ *                      mount).
+ *   /auth/login      — real-API login. Primary sign-in page.
+ *   /vendor-admin/login — vendor-admin (cross-tenant) sign-in page.
+ */
+const PUBLIC_PATHS = ["/login", "/auth/login", "/vendor-admin/login"];
+
+/**
+ * Where we send unauthenticated users. Must match an entry in PUBLIC_PATHS.
+ * Kept as a constant so swapping between mock /login and real /auth/login is
+ * a one-line change.
+ */
+const LOGIN_PATH = "/auth/login";
 
 /** Static asset prefixes — skip proxy entirely. */
 const STATIC_PREFIXES = ["/_next", "/favicon.ico", "/robots.txt", "/sitemap.xml"];
@@ -32,6 +52,16 @@ function isStaticAsset(pathname: string): boolean {
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
+function isLoginPath(pathname: string): boolean {
+  // Both old mock and new real surfaces count as "on a login page" for the
+  // authenticated-user-bounces-to-home rule.
+  return (
+    pathname === "/login" ||
+    pathname === "/auth/login" ||
+    pathname === "/vendor-admin/login"
+  );
 }
 
 // ─── Proxy ────────────────────────────────────────────────────────────────────
@@ -47,14 +77,16 @@ export function proxy(request: NextRequest) {
   const session = request.cookies.get("mobilab-session");
   const isAuthenticated = Boolean(session?.value);
 
-  // Authenticated user hits /login → send them home
-  if (isAuthenticated && pathname === "/login") {
+  // Authenticated user hits any login page → send them home.
+  // The vendor-admin console is cross-tenant and has its own auth; we only
+  // bounce tenant logins here. Vendor-admin has its own guard.
+  if (isAuthenticated && (pathname === "/login" || pathname === "/auth/login")) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  // Unauthenticated user hits protected route → send to /login
+  // Unauthenticated user hits protected route → send to the real login page.
   if (!isAuthenticated && !isPublicPath(pathname)) {
-    const loginUrl = new URL("/login", request.url);
+    const loginUrl = new URL(LOGIN_PATH, request.url);
     // Preserve the intended destination so we can redirect back after login
     if (pathname !== "/") {
       loginUrl.searchParams.set("from", pathname);

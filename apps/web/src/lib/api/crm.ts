@@ -43,6 +43,19 @@ import type {
   TransitionTicketStatus,
   TicketComment,
   AddTicketComment,
+  // Quotations
+  Quotation,
+  CreateQuotation,
+  UpdateQuotation,
+  TransitionQuotationStatus,
+  ApproveQuotation,
+  ConvertQuotation,
+  // Sales Orders
+  SalesOrder,
+  CreateSalesOrder,
+  UpdateSalesOrder,
+  TransitionSalesOrderStatus,
+  FinanceApproveSalesOrder,
 } from "@mobilab/contracts";
 
 import {
@@ -339,4 +352,122 @@ export async function apiAddTicketComment(
   body: AddTicketComment
 ): Promise<TicketComment> {
   return tenantPost(`/crm/tickets/${id}/comments`, body);
+}
+
+// ─── Quotations ─────────────────────────────────────────────────────────────
+
+export interface QuotationListQuery extends PaginationParams {
+  status?: Quotation["status"];
+  accountId?: string;
+  dealId?: string;
+  requiresApproval?: boolean;
+  search?: string;
+}
+
+export async function apiListQuotations(
+  q: QuotationListQuery = {}
+): Promise<PaginatedResponse<Quotation>> {
+  return tenantGet(`/crm/quotations${qs(q)}`);
+}
+
+export async function apiGetQuotation(id: string): Promise<Quotation> {
+  return tenantGet(`/crm/quotations/${id}`);
+}
+
+export async function apiCreateQuotation(
+  body: CreateQuotation
+): Promise<Quotation> {
+  return tenantPost(`/crm/quotations`, body);
+}
+
+export async function apiUpdateQuotation(
+  id: string,
+  body: UpdateQuotation
+): Promise<Quotation> {
+  return tenantPatch(`/crm/quotations/${id}`, body);
+}
+
+export async function apiDeleteQuotation(id: string): Promise<void> {
+  return tenantDelete(`/crm/quotations/${id}`);
+}
+
+export async function apiTransitionQuotationStatus(
+  id: string,
+  body: TransitionQuotationStatus
+): Promise<Quotation> {
+  return tenantPost(`/crm/quotations/${id}/transition`, body);
+}
+
+export async function apiApproveQuotation(
+  id: string,
+  body: ApproveQuotation
+): Promise<Quotation> {
+  return tenantPost(`/crm/quotations/${id}/approve`, body);
+}
+
+/**
+ * Convert an ACCEPTED quotation → SalesOrder. Backend creates the SO
+ * atomically (same tx) with line items copied from the quotation, then
+ * flips the quotation to CONVERTED. Returns both.
+ */
+export interface ConvertQuotationResponse {
+  quotation: Quotation;
+  salesOrder: SalesOrder;
+}
+
+export async function apiConvertQuotation(
+  id: string,
+  body: ConvertQuotation
+): Promise<ConvertQuotationResponse> {
+  return tenantPost(`/crm/quotations/${id}/convert`, body);
+}
+
+// ─── Sales Orders ───────────────────────────────────────────────────────────
+
+export interface SalesOrderListQuery extends PaginationParams {
+  status?: SalesOrder["status"];
+  accountId?: string;
+  quotationId?: string;
+  search?: string;
+}
+
+export async function apiListSalesOrders(
+  q: SalesOrderListQuery = {}
+): Promise<PaginatedResponse<SalesOrder>> {
+  return tenantGet(`/crm/sales-orders${qs(q)}`);
+}
+
+export async function apiGetSalesOrder(id: string): Promise<SalesOrder> {
+  return tenantGet(`/crm/sales-orders/${id}`);
+}
+
+export async function apiCreateSalesOrder(
+  body: CreateSalesOrder
+): Promise<SalesOrder> {
+  return tenantPost(`/crm/sales-orders`, body);
+}
+
+export async function apiUpdateSalesOrder(
+  id: string,
+  body: UpdateSalesOrder
+): Promise<SalesOrder> {
+  return tenantPatch(`/crm/sales-orders/${id}`, body);
+}
+
+export async function apiDeleteSalesOrder(id: string): Promise<void> {
+  return tenantDelete(`/crm/sales-orders/${id}`);
+}
+
+export async function apiTransitionSalesOrderStatus(
+  id: string,
+  body: TransitionSalesOrderStatus
+): Promise<SalesOrder> {
+  return tenantPost(`/crm/sales-orders/${id}/transition`, body);
+}
+
+export async function apiFinanceApproveSalesOrder(
+  id: string,
+  body: FinanceApproveSalesOrder
+): Promise<SalesOrder> {
+  return tenantPost(`/crm/sales-orders/${id}/finance-approve`, body);
 }

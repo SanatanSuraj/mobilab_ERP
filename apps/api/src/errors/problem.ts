@@ -50,6 +50,14 @@ export function registerProblemHandler(app: FastifyInstance): void {
     }
 
     // Unknown → 500. Do NOT leak the message — log it instead.
+    //
+    // NOTE: Fastify is booted with `logger: false` in apps/api/src/index.ts
+    // so `req.log.*` is an abstract/no-op logger — nothing from the next
+    // line reaches stdout. We additionally log to the process stderr via
+    // console.error so unknown errors actually surface in dev. Once the
+    // shared pino instance is wired into Fastify (options.loggerInstance),
+    // the console.error can be dropped.
+    console.error("[unhandled error]", req.method, req.url, err);
     req.log.error({ err }, "unhandled error");
     return sendProblem(req, reply, {
       code: "internal_error",

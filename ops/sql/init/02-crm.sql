@@ -258,9 +258,158 @@ CREATE INDEX IF NOT EXISTS ticket_comments_ticket_idx
 
 CREATE TABLE IF NOT EXISTS crm_number_sequences (
   org_id      uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  kind        text NOT NULL CHECK (kind IN ('DEAL', 'TICKET')),
+  kind        text NOT NULL CHECK (kind IN ('DEAL', 'TICKET', 'QUOTATION', 'SALES_ORDER')),
   year        integer NOT NULL,
   last_seq    integer NOT NULL DEFAULT 0,
   updated_at  timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (org_id, kind, year)
 );
+
+-- Redundant if the CHECK is already relaxed; drop and re-add so re-running
+-- this migration against an older DB updates the constraint.
+ALTER TABLE crm_number_sequences
+  DROP CONSTRAINT IF EXISTS crm_number_sequences_kind_check;
+ALTER TABLE crm_number_sequences
+  ADD  CONSTRAINT crm_number_sequences_kind_check
+       CHECK (kind IN ('DEAL', 'TICKET', 'QUOTATION', 'SALES_ORDER'));
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Quotations — customer-facing price + validity proposal.
+-- Numbering: Q-YYYY-NNNN (per-org, per-year).
+-- Status graph: DRAFT → AWAITING_APPROVAL → APPROVED → SENT →
+--               ACCEPTED → CONVERTED   (CONVERTED is terminal)
+--                                    → REJECTED | EXPIRED
+-- AWAITING_APPROVAL is entered by the service when grand_total exceeds the
+-- tenant's approval threshold (tenant setting, not a DB concern).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS quotations (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id                uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  quotation_number      text NOT NULL,  -- Q-YYYY-NNNN
+  deal_id               uuid REFERENCES deals(id) ON DELETE SET NULL,
+  account_id            uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  contact_id            uuid REFERENCES contacts(id) ON DELETE SET NULL,
+  company               text NOT NULL,   -- denorm for historical fidelity
+  contact_name          text NOT NULL,
+  status                text NOT NULL DEFAULT 'DRAFT'
+                          CHECK (status IN (
+                            'DRAFT', 'AWAITING_APPROVAL', 'APPROVED',
+                            'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED',
+                            'CONVERTED'
+                          )),
+  subtotal              numeric(18, 2) NOT NULL DEFAULT 0,
+  tax_amount            numeric(18, 2) NOT NULL DEFAULT 0,
+  grand_total           numeric(18, 2) NOT NULL DEFAULT 0,
+  valid_until           date,
+  notes                 text,
+  requires_approval     boolean NOT NULL DEFAULT false,
+  approved_by           uuid REFERENCES users(id) ON DELETE SET NULL,
+  approved_at           timestamptz,
+  converted_to_order_id uuid,  -- FK added below (deferred until sales_orders exists)
+  rejected_reason       text,
+  version               integer NOT NULL DEFAULT 1,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now(),
+  deleted_at            timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS quotations_number_org_unique
+  ON quotations (org_id, quotation_number);
+CREATE INDEX IF NOT EXISTS quotations_org_idx ON quotations (org_id);
+CREATE INDEX IF NOT EXISTS quotations_status_idx
+  ON quotations (org_id, status) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS quotations_account_idx
+  ON quotations (org_id, account_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS quotations_deal_idx
+  ON quotations (org_id, deal_id) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS quotation_line_items (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id         uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  quotation_id   uuid NOT NULL REFERENCES quotations(id) ON DELETE CASCADE,
+  product_code   text NOT NULL,
+  product_name   text NOT NULL,
+  quantity       integer NOT NULL CHECK (quantity > 0),
+  unit_price     numeric(18, 2) NOT NULL,
+  discount_pct   numeric(5, 2)  NOT NULL DEFAULT 0 CHECK (discount_pct BETWEEN 0 AND 100),
+  tax_pct        numeric(5, 2)  NOT NULL DEFAULT 0 CHECK (tax_pct BETWEEN 0 AND 100),
+  tax_amount     numeric(18, 2) NOT NULL DEFAULT 0,
+  line_total     numeric(18, 2) NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS quotation_line_items_org_idx ON quotation_line_items (org_id);
+CREATE INDEX IF NOT EXISTS quotation_line_items_quotation_idx
+  ON quotation_line_items (quotation_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Sales Orders — post-quotation commitment.
+-- Numbering: SO-YYYY-NNNN.
+-- Status graph: DRAFT → CONFIRMED → PROCESSING → DISPATCHED →
+--               IN_TRANSIT → DELIVERED    (DELIVERED is terminal)
+--               any-non-terminal → CANCELLED
+-- Finance approval is orthogonal (approved_by/approved_at). Fulfillment can
+-- progress while finance signs off.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS sales_orders (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id                uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  order_number          text NOT NULL,  -- SO-YYYY-NNNN
+  quotation_id          uuid REFERENCES quotations(id) ON DELETE SET NULL,
+  account_id            uuid REFERENCES accounts(id) ON DELETE SET NULL,
+  contact_id            uuid REFERENCES contacts(id) ON DELETE SET NULL,
+  company               text NOT NULL,
+  contact_name          text NOT NULL,
+  status                text NOT NULL DEFAULT 'DRAFT'
+                          CHECK (status IN (
+                            'DRAFT', 'CONFIRMED', 'PROCESSING',
+                            'DISPATCHED', 'IN_TRANSIT', 'DELIVERED',
+                            'CANCELLED'
+                          )),
+  subtotal              numeric(18, 2) NOT NULL DEFAULT 0,
+  tax_amount            numeric(18, 2) NOT NULL DEFAULT 0,
+  grand_total           numeric(18, 2) NOT NULL DEFAULT 0,
+  expected_delivery     date,
+  finance_approved_by   uuid REFERENCES users(id) ON DELETE SET NULL,
+  finance_approved_at   timestamptz,
+  notes                 text,
+  version               integer NOT NULL DEFAULT 1,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now(),
+  deleted_at            timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sales_orders_number_org_unique
+  ON sales_orders (org_id, order_number);
+CREATE INDEX IF NOT EXISTS sales_orders_org_idx ON sales_orders (org_id);
+CREATE INDEX IF NOT EXISTS sales_orders_status_idx
+  ON sales_orders (org_id, status) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS sales_orders_account_idx
+  ON sales_orders (org_id, account_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS sales_orders_quotation_idx
+  ON sales_orders (org_id, quotation_id) WHERE deleted_at IS NULL;
+
+-- Deferred FK: quotations.converted_to_order_id → sales_orders.id.
+ALTER TABLE quotations
+  DROP CONSTRAINT IF EXISTS quotations_converted_order_fk;
+ALTER TABLE quotations
+  ADD  CONSTRAINT quotations_converted_order_fk
+       FOREIGN KEY (converted_to_order_id)
+       REFERENCES sales_orders(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS sales_order_line_items (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id         uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  order_id       uuid NOT NULL REFERENCES sales_orders(id) ON DELETE CASCADE,
+  product_code   text NOT NULL,
+  product_name   text NOT NULL,
+  quantity       integer NOT NULL CHECK (quantity > 0),
+  unit_price     numeric(18, 2) NOT NULL,
+  discount_pct   numeric(5, 2)  NOT NULL DEFAULT 0 CHECK (discount_pct BETWEEN 0 AND 100),
+  tax_pct        numeric(5, 2)  NOT NULL DEFAULT 0 CHECK (tax_pct BETWEEN 0 AND 100),
+  tax_amount     numeric(18, 2) NOT NULL DEFAULT 0,
+  line_total     numeric(18, 2) NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sales_order_line_items_org_idx ON sales_order_line_items (org_id);
+CREATE INDEX IF NOT EXISTS sales_order_line_items_order_idx
+  ON sales_order_line_items (order_id);

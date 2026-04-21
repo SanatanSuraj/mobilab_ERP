@@ -1,92 +1,212 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * Sales Invoices — reads /finance/sales-invoices via useApiSalesInvoices.
+ *
+ * Phase 2 entrypoint. Shows the invoice register with status filter + inline
+ * KPIs sourced from /finance/overview (so the numbers are global, not
+ * page-window-scoped). Row click → /finance/sales-invoices/[id] for the
+ * detail + lines view.
+ *
+ * Create flow: posts a DRAFT invoice with no lines; caller then navigates to
+ * the detail page to add lines and post. This keeps the create dialog tight
+ * and avoids a mega-form. Invoice numbers auto-generate server-side.
+ */
+
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
-import { DataTable, Column } from "@/components/shared/data-table";
-import { StatusBadge } from "@/components/shared/status-badge";
+import { DataTable, type Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  salesInvoices,
-  SalesInvoice,
-  getFinCustomerById,
-} from "@/data/finance-mock";
-import { formatCurrency, formatDate } from "@/data/mock";
-import { toast } from "sonner";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  FileText,
-  CheckCircle2,
+  useApiCreateSalesInvoice,
+  useApiFinanceOverview,
+  useApiSalesInvoices,
+} from "@/hooks/useFinanceApi";
+import {
+  INVOICE_STATUSES,
+  type InvoiceStatus,
+  type SalesInvoice,
+} from "@mobilab/contracts";
+import {
+  AlertCircle,
   AlertTriangle,
+  CheckCircle2,
+  FileText,
   IndianRupee,
+  Loader2,
   Plus,
-  Info,
 } from "lucide-react";
 
-// Mock "DISPATCHED" challans for the challan selector
-interface MockChallan {
-  id: string;
-  dcNumber: string;
-  customer: string;
-  amount: number;
-  dispatchedDate: string;
-  invoiceNumber: string;
+// ─── Display helpers ─────────────────────────────────────────────────────────
+
+function formatMoney(value: string, currency = "INR"): string {
+  const n = Number(value);
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(n) ? n : 0);
 }
 
-const mockChallans: MockChallan[] = [
-  {
-    id: "dc1",
-    dcNumber: "DC-2026-001",
-    customer: "LifeCare Hospitals",
-    amount: 284000,
-    dispatchedDate: "2026-04-12",
-    invoiceNumber: "INV-2026-041",
-  },
-  {
-    id: "dc2",
-    dcNumber: "DC-2026-002",
-    customer: "Apollo Diagnostics",
-    amount: 95000,
-    dispatchedDate: "2026-04-15",
-    invoiceNumber: "INV-2026-042",
-  },
-  {
-    id: "dc3",
-    dcNumber: "DC-2026-003",
-    customer: "Max Healthcare",
-    amount: 178500,
-    dispatchedDate: "2026-04-17",
-    invoiceNumber: "INV-2026-043",
-  },
-];
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const STATUS_TONE: Record<InvoiceStatus, string> = {
+  DRAFT: "bg-amber-50 text-amber-700 border-amber-200",
+  POSTED: "bg-blue-50 text-blue-700 border-blue-200",
+  CANCELLED: "bg-gray-50 text-gray-600 border-gray-200",
+};
+
+// ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function SalesInvoicesPage() {
   const router = useRouter();
-  const [challanDialogOpen, setChallanDialogOpen] = useState(false);
-  const [generatedInvoices, setGeneratedInvoices] = useState<Set<string>>(new Set());
 
-  const totalInvoiced = salesInvoices.reduce((sum, si) => sum + si.grandTotal, 0);
-  const totalPaid = salesInvoices.reduce((sum, si) => sum + si.paidAmount, 0);
-  const totalOutstanding = salesInvoices
-    .filter((si) => si.status !== "paid" && si.status !== "cancelled")
-    .reduce((sum, si) => sum + (si.grandTotal - si.paidAmount), 0);
-  const overdueCount = salesInvoices.filter((si) => si.status === "overdue").length;
+  const [status, setStatus] = useState<InvoiceStatus | "all">("all");
+  const [search, setSearch] = useState("");
 
-  function handleGenerateInvoice(challan: MockChallan) {
-    setGeneratedInvoices((prev) => new Set([...prev, challan.id]));
-    toast.success(
-      `Invoice ${challan.invoiceNumber} auto-created from Challan ${challan.dcNumber}. Review and send to customer.`
+  const query = useMemo(
+    () => ({
+      limit: 100,
+      status: status === "all" ? undefined : status,
+      search: search.trim() || undefined,
+    }),
+    [status, search],
+  );
+
+  const invoicesQuery = useApiSalesInvoices(query);
+  const overviewQuery = useApiFinanceOverview();
+
+  // ─── Create dialog state ────────────────────────────────────────────────
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [formCustomerId, setFormCustomerId] = useState("");
+  const [formCustomerName, setFormCustomerName] = useState("");
+  const [formInvoiceDate, setFormInvoiceDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [formDueDate, setFormDueDate] = useState("");
+  const [formNotes, setFormNotes] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const createInvoice = useApiCreateSalesInvoice();
+
+  const resetForm = (): void => {
+    setFormCustomerId("");
+    setFormCustomerName("");
+    setFormInvoiceDate(new Date().toISOString().slice(0, 10));
+    setFormDueDate("");
+    setFormNotes("");
+    setSaveError(null);
+  };
+
+  const handleCreate = async (): Promise<void> => {
+    setSaveError(null);
+    if (!formInvoiceDate) {
+      setSaveError("invoice date is required");
+      return;
+    }
+    try {
+      const created = await createInvoice.mutateAsync({
+        customerId: formCustomerId.trim() || undefined,
+        customerName: formCustomerName.trim() || undefined,
+        invoiceDate: formInvoiceDate,
+        dueDate: formDueDate || undefined,
+        notes: formNotes.trim() || undefined,
+        // Zod default([]) but z.infer makes it required at type-level.
+        lines: [],
+      });
+      setDialogOpen(false);
+      resetForm();
+      router.push(`/finance/sales-invoices/${created.id}`);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "failed to create");
+    }
+  };
+
+  // ─── Loading / error shells ─────────────────────────────────────────────
+  if (invoicesQuery.isLoading) {
+    return (
+      <div className="p-6 space-y-4 max-w-[1400px] mx-auto">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
     );
-    setChallanDialogOpen(false);
   }
+
+  if (invoicesQuery.isError) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">
+              Failed to load sales invoices
+            </p>
+            <p className="text-red-700 mt-1">
+              {invoicesQuery.error instanceof Error
+                ? invoicesQuery.error.message
+                : "Unknown error"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const invoices = invoicesQuery.data?.data ?? [];
+  const total = invoicesQuery.data?.meta.total ?? invoices.length;
+
+  // Page-window totals (for the filtered list)
+  const listTotal = invoices.reduce(
+    (s, i) => s + Number(i.grandTotal || "0"),
+    0,
+  );
+  const listPaid = invoices.reduce(
+    (s, i) => s + Number(i.amountPaid || "0"),
+    0,
+  );
+
+  // Overview KPIs — global scope (AR outstanding + posted count)
+  const kpi = overviewQuery.data;
+  const arOverdue = kpi
+    ? Number(kpi.arOverdue30) +
+      Number(kpi.arOverdue60) +
+      Number(kpi.arOverdue90)
+    : 0;
 
   const columns: Column<SalesInvoice>[] = [
     {
@@ -94,23 +214,26 @@ export default function SalesInvoicesPage() {
       header: "Invoice #",
       sortable: true,
       render: (inv) => (
-        <span className="font-medium text-foreground">{inv.invoiceNumber}</span>
+        <span className="font-mono text-xs font-semibold text-blue-700">
+          {inv.invoiceNumber}
+        </span>
       ),
     },
     {
-      key: "customerId",
+      key: "customerName",
       header: "Customer",
-      render: (inv) => {
-        const customer = getFinCustomerById(inv.customerId);
-        return <span className="text-sm">{customer?.name ?? "Unknown"}</span>;
-      },
+      render: (inv) => (
+        <span className="text-sm">{inv.customerName ?? "—"}</span>
+      ),
     },
     {
       key: "invoiceDate",
       header: "Invoice Date",
       sortable: true,
       render: (inv) => (
-        <span className="text-muted-foreground text-sm">{formatDate(inv.invoiceDate)}</span>
+        <span className="text-muted-foreground text-sm">
+          {formatDate(inv.invoiceDate)}
+        </span>
       ),
     },
     {
@@ -118,7 +241,9 @@ export default function SalesInvoicesPage() {
       header: "Due Date",
       sortable: true,
       render: (inv) => (
-        <span className="text-muted-foreground text-sm">{formatDate(inv.dueDate)}</span>
+        <span className="text-muted-foreground text-sm">
+          {formatDate(inv.dueDate)}
+        </span>
       ),
     },
     {
@@ -127,160 +252,217 @@ export default function SalesInvoicesPage() {
       className: "text-right",
       sortable: true,
       render: (inv) => (
-        <span className={`font-semibold tabular-nums ${inv.status === "overdue" ? "text-red-600" : ""}`}>
-          {formatCurrency(inv.grandTotal)}
+        <span className="font-semibold tabular-nums">
+          {formatMoney(inv.grandTotal, inv.currency)}
         </span>
       ),
     },
     {
-      key: "paidAmount",
+      key: "amountPaid",
       header: "Paid",
       className: "text-right",
       render: (inv) => (
         <span className="tabular-nums text-muted-foreground">
-          {formatCurrency(inv.paidAmount)}
+          {formatMoney(inv.amountPaid, inv.currency)}
         </span>
       ),
     },
     {
       key: "status",
       header: "Status",
-      render: (inv) => <StatusBadge status={inv.status} />,
+      render: (inv) => (
+        <Badge
+          variant="outline"
+          className={`text-xs whitespace-nowrap ${STATUS_TONE[inv.status]}`}
+        >
+          {inv.status}
+        </Badge>
+      ),
     },
   ];
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
-      {/* Challan selector dialog */}
-      <Dialog open={challanDialogOpen} onOpenChange={setChallanDialogOpen}>
-        <DialogContent className="sm:max-w-[640px]">
+      {/* Create dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Create Invoice from Delivery Challan</DialogTitle>
+            <DialogTitle>New Sales Invoice</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground mb-4">
-            Select a dispatched challan to auto-generate a GST-correct invoice with zero re-entry.
+          <p className="text-sm text-muted-foreground mb-2">
+            Create a DRAFT invoice. Add lines and post it from the detail view
+            to append to customer ledger.
           </p>
-          <div className="rounded-lg border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead>Challan #</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Dispatched</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {mockChallans.map((challan) => {
-                  const alreadyGenerated = generatedInvoices.has(challan.id);
-                  return (
-                    <TableRow key={challan.id}>
-                      <TableCell className="font-mono text-xs font-medium">
-                        {challan.dcNumber}
-                      </TableCell>
-                      <TableCell className="text-sm">{challan.customer}</TableCell>
-                      <TableCell className="text-right text-sm font-semibold tabular-nums">
-                        {formatCurrency(challan.amount)}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {formatDate(challan.dispatchedDate)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
-                          DISPATCHED
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {alreadyGenerated ? (
-                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
-                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                            Generated
-                          </Badge>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            className="h-7 text-xs"
-                            onClick={() => handleGenerateInvoice(challan)}
-                          >
-                            Generate Invoice
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-2">
+              <Label htmlFor="customerId" className="text-xs">
+                Customer ID (UUID — optional)
+              </Label>
+              <Input
+                id="customerId"
+                value={formCustomerId}
+                onChange={(e) => setFormCustomerId(e.target.value)}
+                placeholder="00000000-0000-0000-0000-000000000000"
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <Label htmlFor="customerName" className="text-xs">
+                Customer Name (denormalized)
+              </Label>
+              <Input
+                id="customerName"
+                value={formCustomerName}
+                onChange={(e) => setFormCustomerName(e.target.value)}
+                placeholder="Acme Hospital"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="invoiceDate" className="text-xs">
+                  Invoice Date *
+                </Label>
+                <Input
+                  id="invoiceDate"
+                  type="date"
+                  value={formInvoiceDate}
+                  onChange={(e) => setFormInvoiceDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dueDate" className="text-xs">
+                  Due Date
+                </Label>
+                <Input
+                  id="dueDate"
+                  type="date"
+                  value={formDueDate}
+                  onChange={(e) => setFormDueDate(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <Label htmlFor="notes" className="text-xs">
+                Notes
+              </Label>
+              <Textarea
+                id="notes"
+                rows={2}
+                value={formNotes}
+                onChange={(e) => setFormNotes(e.target.value)}
+                placeholder="Payment terms, PO reference, etc."
+              />
+            </div>
+            {saveError && (
+              <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                {saveError}
+              </div>
+            )}
           </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setDialogOpen(false);
+                resetForm();
+              }}
+              disabled={createInvoice.isPending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleCreate} disabled={createInvoice.isPending}>
+              {createInvoice.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating…
+                </>
+              ) : (
+                <>Create Draft</>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <PageHeader
         title="Sales Invoices"
-        description="Manage GST-compliant sales invoices"
+        description="GST-compliant sales invoice register"
         actions={
-          <Button onClick={() => setChallanDialogOpen(true)}>
+          <Button onClick={() => setDialogOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             New Invoice
           </Button>
         }
       />
 
-      {/* Info banner: invoices are auto-generated from challans */}
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 flex items-start gap-3">
-        <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-        <div>
-          <p className="text-sm font-medium text-blue-800">
-            Invoices are auto-generated from Delivery Challans
-          </p>
-          <p className="text-xs text-blue-700 mt-0.5">
-            To create a new invoice: first dispatch the goods via a Delivery Challan, then use
-            &ldquo;Generate Invoice&rdquo; from the Challan record. This ensures zero manual re-entry and
-            GST-correct data.
-          </p>
-        </div>
-      </div>
-
+      {/* KPIs — overview-sourced (global) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
-          title="Total Invoiced"
-          value={formatCurrency(totalInvoiced)}
+          title="AR Outstanding"
+          value={kpi ? formatMoney(kpi.arOutstanding, kpi.currency) : "—"}
           icon={FileText}
           iconColor="text-blue-600"
-          change={`${salesInvoices.length} invoices`}
+          change={kpi ? `${kpi.postedSalesInvoices} posted` : ""}
           trend="neutral"
         />
         <KPICard
-          title="Total Paid"
-          value={formatCurrency(totalPaid)}
+          title="Page Total"
+          value={formatMoney(String(listTotal))}
+          icon={IndianRupee}
+          iconColor="text-amber-600"
+          change={`${total} result${total === 1 ? "" : "s"}`}
+          trend="neutral"
+        />
+        <KPICard
+          title="Page Paid"
+          value={formatMoney(String(listPaid))}
           icon={CheckCircle2}
           iconColor="text-green-600"
-          change={`${salesInvoices.filter((s) => s.status === "paid").length} invoices`}
+          change="In current filter"
           trend="up"
         />
         <KPICard
-          title="Outstanding"
-          value={formatCurrency(totalOutstanding)}
-          icon={IndianRupee}
-          iconColor="text-amber-600"
-          change={`${salesInvoices.filter((s) => s.status !== "paid" && s.status !== "cancelled").length} pending`}
-          trend="neutral"
-        />
-        <KPICard
-          title="Overdue"
-          value={String(overdueCount)}
+          title="AR Overdue"
+          value={kpi ? formatMoney(String(arOverdue), kpi.currency) : "—"}
           icon={AlertTriangle}
           iconColor="text-red-600"
-          change={overdueCount > 0 ? "Needs follow-up" : "All clear"}
-          trend={overdueCount > 0 ? "down" : "up"}
+          change={arOverdue > 0 ? "Needs follow-up" : "All clear"}
+          trend={arOverdue > 0 ? "down" : "up"}
         />
       </div>
 
+      {/* Filters row */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Status</Label>
+          <Select
+            value={status}
+            onValueChange={(v) => setStatus(v as InvoiceStatus | "all")}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              {INVOICE_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1 flex-1 min-w-[240px]">
+          <Label className="text-xs text-muted-foreground">Search</Label>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Invoice number or customer name…"
+          />
+        </div>
+      </div>
+
       <DataTable<SalesInvoice>
-        data={salesInvoices}
+        data={invoices}
         columns={columns}
         searchKey="invoiceNumber"
         searchPlaceholder="Search by invoice number..."

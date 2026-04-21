@@ -7,7 +7,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./auth/service": "./src/modules/auth/service.ts",
-    "./auth/tokens": "./src/modules/auth/tokens.ts"
+    "./auth/tokens": "./src/modules/auth/tokens.ts",
+    "./crm/quotations": "./src/modules/crm/quotations.service.ts",
+    "./crm/sales-orders": "./src/modules/crm/sales-orders.service.ts"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -27,6 +29,7 @@
     "@mobilab/contracts": "workspace:*",
     "@mobilab/db": "workspace:*",
     "@mobilab/errors": "workspace:*",
+    "@mobilab/money": "workspace:*",
     "@mobilab/observability": "workspace:*",
     "@mobilab/queue": "workspace:*",
     "@mobilab/quotas": "workspace:*",

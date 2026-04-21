@@ -21,23 +21,34 @@ import {
   AccountListQuerySchema,
   AddLeadActivitySchema,
   AddTicketCommentSchema,
+  ApproveQuotationSchema,
   ContactListQuerySchema,
   ConvertLeadSchema,
+  ConvertQuotationSchema,
   CreateAccountSchema,
   CreateContactSchema,
   CreateDealSchema,
   CreateLeadSchema,
+  CreateQuotationSchema,
+  CreateSalesOrderSchema,
   CreateTicketSchema,
   DealListQuerySchema,
+  FinanceApproveSalesOrderSchema,
   LeadListQuerySchema,
   MarkLeadLostSchema,
+  QuotationListQuerySchema,
+  SalesOrderListQuerySchema,
   TicketListQuerySchema,
   TransitionDealStageSchema,
+  TransitionQuotationStatusSchema,
+  TransitionSalesOrderStatusSchema,
   TransitionTicketStatusSchema,
   UpdateAccountSchema,
   UpdateContactSchema,
   UpdateDealSchema,
   UpdateLeadSchema,
+  UpdateQuotationSchema,
+  UpdateSalesOrderSchema,
   UpdateTicketSchema,
 } from "@mobilab/contracts";
 import { createAuthGuard, requirePermission } from "../auth/guard.js";
@@ -48,6 +59,8 @@ import type { ContactsService } from "./contacts.service.js";
 import type { LeadsService } from "./leads.service.js";
 import type { DealsService } from "./deals.service.js";
 import type { TicketsService } from "./tickets.service.js";
+import type { QuotationsService } from "./quotations.service.js";
+import type { SalesOrdersService } from "./sales-orders.service.js";
 
 export interface RegisterCrmRoutesOptions {
   accounts: AccountsService;
@@ -55,6 +68,8 @@ export interface RegisterCrmRoutesOptions {
   leads: LeadsService;
   deals: DealsService;
   tickets: TicketsService;
+  quotations: QuotationsService;
+  salesOrders: SalesOrdersService;
   guardInternal: AuthGuardOptions;
   /**
    * Sprint 1C — feature-flag preHandler factory. Every CRM endpoint gates
@@ -422,6 +437,177 @@ export async function registerCrmRoutes(
       const body = AddTicketCommentSchema.parse(req.body);
       const result = await opts.tickets.addComment(req, id, body);
       return reply.code(201).send(result);
+    }
+  );
+
+  // ─── Quotations ───────────────────────────────────────────────────────────
+  //
+  // Transitions + approvals have dedicated permissions; generic status
+  // transitions go through the shared /transition endpoint, the gated
+  // `quotations:approve` flow goes through /approve, and promotion to a
+  // SalesOrder is gated behind `quotations:convert_to_so`.
+
+  app.get(
+    "/crm/quotations",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:read")] },
+    async (req, reply) => {
+      const query = QuotationListQuerySchema.parse(req.query);
+      const result = await opts.quotations.list(req, query);
+      return reply.send(result);
+    }
+  );
+
+  app.get(
+    "/crm/quotations/:id",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:read")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const result = await opts.quotations.getById(req, id);
+      return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/crm/quotations",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:create")] },
+    async (req, reply) => {
+      const body = CreateQuotationSchema.parse(req.body);
+      const result = await opts.quotations.create(req, body);
+      return reply.code(201).send(result);
+    }
+  );
+
+  app.patch(
+    "/crm/quotations/:id",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:update")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = UpdateQuotationSchema.parse(req.body);
+      const result = await opts.quotations.update(req, id, body);
+      return reply.send(result);
+    }
+  );
+
+  app.delete(
+    "/crm/quotations/:id",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:update")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      await opts.quotations.remove(req, id);
+      return reply.code(204).send();
+    }
+  );
+
+  app.post(
+    "/crm/quotations/:id/transition",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:update")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = TransitionQuotationStatusSchema.parse(req.body);
+      const result = await opts.quotations.transitionStatus(req, id, body);
+      return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/crm/quotations/:id/approve",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:approve")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = ApproveQuotationSchema.parse(req.body);
+      const result = await opts.quotations.approve(req, id, body);
+      return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/crm/quotations/:id/convert",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:convert_to_so")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = ConvertQuotationSchema.parse(req.body);
+      const result = await opts.quotations.convertToSalesOrder(req, id, body);
+      return reply.code(201).send(result);
+    }
+  );
+
+  // ─── Sales Orders ─────────────────────────────────────────────────────────
+  //
+  // Fulfillment-side of CRM. Status transitions are gated on
+  // `sales_orders:update`. Finance approval has its own dedicated
+  // permission (`sales_orders:approve_finance`) since it's orthogonal to
+  // the fulfillment graph.
+
+  app.get(
+    "/crm/sales-orders",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("sales_orders:read")] },
+    async (req, reply) => {
+      const query = SalesOrderListQuerySchema.parse(req.query);
+      const result = await opts.salesOrders.list(req, query);
+      return reply.send(result);
+    }
+  );
+
+  app.get(
+    "/crm/sales-orders/:id",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("sales_orders:read")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const result = await opts.salesOrders.getById(req, id);
+      return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/crm/sales-orders",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("sales_orders:create")] },
+    async (req, reply) => {
+      const body = CreateSalesOrderSchema.parse(req.body);
+      const result = await opts.salesOrders.create(req, body);
+      return reply.code(201).send(result);
+    }
+  );
+
+  app.patch(
+    "/crm/sales-orders/:id",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("sales_orders:update")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = UpdateSalesOrderSchema.parse(req.body);
+      const result = await opts.salesOrders.update(req, id, body);
+      return reply.send(result);
+    }
+  );
+
+  app.delete(
+    "/crm/sales-orders/:id",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("sales_orders:update")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      await opts.salesOrders.remove(req, id);
+      return reply.code(204).send();
+    }
+  );
+
+  app.post(
+    "/crm/sales-orders/:id/transition",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("sales_orders:update")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = TransitionSalesOrderStatusSchema.parse(req.body);
+      const result = await opts.salesOrders.transitionStatus(req, id, body);
+      return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/crm/sales-orders/:id/finance-approve",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("sales_orders:approve_finance")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = FinanceApproveSalesOrderSchema.parse(req.body);
+      const result = await opts.salesOrders.financeApprove(req, id, body);
+      return reply.send(result);
     }
   );
 }

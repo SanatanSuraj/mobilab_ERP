@@ -20,9 +20,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@mobilab/contracts": ["../../packages/contracts/src/index.ts"],
-      "@mobilab/contracts/*": ["../../packages/contracts/src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": [

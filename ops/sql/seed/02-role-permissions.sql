@@ -19,6 +19,8 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
   ('MANAGEMENT', 'tickets:read'),
   ('MANAGEMENT', 'quotations:read'),
   ('MANAGEMENT', 'sales_orders:read'),
+  ('MANAGEMENT', 'products:read'),
+  ('MANAGEMENT', 'bom:read'),
   ('MANAGEMENT', 'work_orders:read'),
   ('MANAGEMENT', 'bmr:read'),
   ('MANAGEMENT', 'devices:read'),
@@ -28,6 +30,8 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
   ('MANAGEMENT', 'purchase_invoices:read'),
   ('MANAGEMENT', 'sales_invoices:read'),
   ('MANAGEMENT', 'payments:read'),
+  ('MANAGEMENT', 'notifications:read'),
+  ('MANAGEMENT', 'notifications:admin_read'),
   ('MANAGEMENT', 'reports:read'),
   ('MANAGEMENT', 'reports:export'),
   ('MANAGEMENT', 'admin:audit:read');
@@ -122,8 +126,12 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 
 -- PRODUCTION
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('PRODUCTION', 'products:read'),
+  ('PRODUCTION', 'bom:read'),
   ('PRODUCTION', 'work_orders:read'),
+  ('PRODUCTION', 'work_orders:update'),
   ('PRODUCTION', 'work_orders:transition'),
+  ('PRODUCTION', 'wip_stages:advance'),
   ('PRODUCTION', 'bmr:read'),
   ('PRODUCTION', 'bmr:sign_production'),
   ('PRODUCTION', 'devices:create'),
@@ -136,12 +144,22 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 
 -- PRODUCTION_MANAGER
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('PRODUCTION_MANAGER', 'products:create'),
+  ('PRODUCTION_MANAGER', 'products:read'),
+  ('PRODUCTION_MANAGER', 'products:update'),
+  ('PRODUCTION_MANAGER', 'products:delete'),
+  ('PRODUCTION_MANAGER', 'bom:read'),
+  ('PRODUCTION_MANAGER', 'bom:edit'),
+  ('PRODUCTION_MANAGER', 'bom:activate'),
+  ('PRODUCTION_MANAGER', 'bom:supersede'),
   ('PRODUCTION_MANAGER', 'work_orders:create'),
   ('PRODUCTION_MANAGER', 'work_orders:read'),
+  ('PRODUCTION_MANAGER', 'work_orders:update'),
   ('PRODUCTION_MANAGER', 'work_orders:release'),
   ('PRODUCTION_MANAGER', 'work_orders:close'),
   ('PRODUCTION_MANAGER', 'work_orders:transition'),
   ('PRODUCTION_MANAGER', 'work_orders:assign_operator'),
+  ('PRODUCTION_MANAGER', 'wip_stages:advance'),
   ('PRODUCTION_MANAGER', 'bmr:read'),
   ('PRODUCTION_MANAGER', 'bmr:sign_production'),
   ('PRODUCTION_MANAGER', 'bmr:close'),
@@ -161,6 +179,9 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 INSERT INTO role_permissions (role_id, permission_id) VALUES
   ('RD', 'customers:read'),
   ('RD', 'quotations:read'),
+  ('RD', 'products:read'),
+  ('RD', 'bom:read'),
+  ('RD', 'bom:edit'),
   ('RD', 'devices:read'),
   ('RD', 'work_orders:read'),
   ('RD', 'bmr:read');
@@ -169,7 +190,10 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
 INSERT INTO role_permissions (role_id, permission_id) VALUES
   ('QC_INSPECTOR', 'tickets:read'),
   ('QC_INSPECTOR', 'tickets:comment'),
+  ('QC_INSPECTOR', 'products:read'),
+  ('QC_INSPECTOR', 'bom:read'),
   ('QC_INSPECTOR', 'work_orders:read'),
+  ('QC_INSPECTOR', 'wip_stages:advance'),
   ('QC_INSPECTOR', 'bmr:read'),
   ('QC_INSPECTOR', 'devices:read'),
   ('QC_INSPECTOR', 'devices:update'),
@@ -184,7 +208,10 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
   ('QC_MANAGER', 'tickets:update'),
   ('QC_MANAGER', 'tickets:transition'),
   ('QC_MANAGER', 'tickets:comment'),
+  ('QC_MANAGER', 'products:read'),
+  ('QC_MANAGER', 'bom:read'),
   ('QC_MANAGER', 'work_orders:read'),
+  ('QC_MANAGER', 'wip_stages:advance'),
   ('QC_MANAGER', 'bmr:read'),
   ('QC_MANAGER', 'bmr:sign_qc'),
   ('QC_MANAGER', 'devices:read'),
@@ -215,3 +242,14 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
   ('CUSTOMER', 'portal:orders:read'),
   ('CUSTOMER', 'portal:invoices:read'),
   ('CUSTOMER', 'portal:devices:read');
+
+-- Notifications: every non-CUSTOMER role can read their own inbox. Service
+-- layer already filters by user_id so this is a safe broad grant. Added as a
+-- dedicated block so it's obvious this is a cross-role baseline.
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, 'notifications:read'
+  FROM roles r
+ WHERE r.id NOT IN ('CUSTOMER', 'SUPER_ADMIN')  -- SUPER_ADMIN already grabs
+                                                -- everything via the catch-all
+                                                -- INSERT above
+ON CONFLICT DO NOTHING;

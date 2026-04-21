@@ -347,7 +347,8 @@ export const ticketComments = pgTable(
 );
 
 // ─── Number sequences ────────────────────────────────────────────────────────
-// Used by the deal + ticket services to produce per-org, per-year identifiers.
+// Used by the deal + ticket + quotation + sales-order services to produce
+// per-org, per-year identifiers.
 
 export const crmNumberSequences = pgTable(
   "crm_number_sequences",
@@ -364,5 +365,199 @@ export const crmNumberSequences = pgTable(
   },
   (t) => ({
     pk: uniqueIndex("crm_number_sequences_pk").on(t.orgId, t.kind, t.year),
+  })
+);
+
+// ─── Quotations ──────────────────────────────────────────────────────────────
+
+export const quotations = pgTable(
+  "quotations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    quotationNumber: text("quotation_number").notNull(),
+    dealId: uuid("deal_id").references(() => deals.id, {
+      onDelete: "set null",
+    }),
+    accountId: uuid("account_id").references(() => accounts.id, {
+      onDelete: "set null",
+    }),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    company: text("company").notNull(),
+    contactName: text("contact_name").notNull(),
+    status: text("status").notNull().default("DRAFT"),
+    subtotal: numeric("subtotal", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    taxAmount: numeric("tax_amount", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    grandTotal: numeric("grand_total", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    validUntil: date("valid_until"),
+    notes: text("notes"),
+    requiresApproval: boolean("requires_approval").notNull().default(false),
+    approvedBy: uuid("approved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    // FK to sales_orders.id — modeled as a bare uuid to avoid a circular
+    // import (sales_orders is defined below).
+    convertedToOrderId: uuid("converted_to_order_id"),
+    rejectedReason: text("rejected_reason"),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => ({
+    orgIdx: index("quotations_org_idx").on(t.orgId),
+    statusIdx: index("quotations_status_idx").on(t.orgId, t.status),
+    accountIdx: index("quotations_account_idx").on(t.orgId, t.accountId),
+    dealIdx: index("quotations_deal_idx").on(t.orgId, t.dealId),
+    numberUnique: uniqueIndex("quotations_number_org_unique").on(
+      t.orgId,
+      t.quotationNumber
+    ),
+  })
+);
+
+export const quotationLineItems = pgTable(
+  "quotation_line_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    quotationId: uuid("quotation_id")
+      .notNull()
+      .references(() => quotations.id, { onDelete: "cascade" }),
+    productCode: text("product_code").notNull(),
+    productName: text("product_name").notNull(),
+    quantity: integer("quantity").notNull(),
+    unitPrice: numeric("unit_price", { precision: 18, scale: 2 }).notNull(),
+    discountPct: numeric("discount_pct", { precision: 5, scale: 2 })
+      .notNull()
+      .default("0"),
+    taxPct: numeric("tax_pct", { precision: 5, scale: 2 })
+      .notNull()
+      .default("0"),
+    taxAmount: numeric("tax_amount", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    lineTotal: numeric("line_total", { precision: 18, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    orgIdx: index("quotation_line_items_org_idx").on(t.orgId),
+    quotationIdx: index("quotation_line_items_quotation_idx").on(t.quotationId),
+  })
+);
+
+// ─── Sales Orders ────────────────────────────────────────────────────────────
+
+export const salesOrders = pgTable(
+  "sales_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    orderNumber: text("order_number").notNull(),
+    quotationId: uuid("quotation_id").references(() => quotations.id, {
+      onDelete: "set null",
+    }),
+    accountId: uuid("account_id").references(() => accounts.id, {
+      onDelete: "set null",
+    }),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    company: text("company").notNull(),
+    contactName: text("contact_name").notNull(),
+    status: text("status").notNull().default("DRAFT"),
+    subtotal: numeric("subtotal", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    taxAmount: numeric("tax_amount", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    grandTotal: numeric("grand_total", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    expectedDelivery: date("expected_delivery"),
+    financeApprovedBy: uuid("finance_approved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    financeApprovedAt: timestamp("finance_approved_at", {
+      withTimezone: true,
+    }),
+    notes: text("notes"),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => ({
+    orgIdx: index("sales_orders_org_idx").on(t.orgId),
+    statusIdx: index("sales_orders_status_idx").on(t.orgId, t.status),
+    accountIdx: index("sales_orders_account_idx").on(t.orgId, t.accountId),
+    quotationIdx: index("sales_orders_quotation_idx").on(
+      t.orgId,
+      t.quotationId
+    ),
+    numberUnique: uniqueIndex("sales_orders_number_org_unique").on(
+      t.orgId,
+      t.orderNumber
+    ),
+  })
+);
+
+export const salesOrderLineItems = pgTable(
+  "sales_order_line_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => salesOrders.id, { onDelete: "cascade" }),
+    productCode: text("product_code").notNull(),
+    productName: text("product_name").notNull(),
+    quantity: integer("quantity").notNull(),
+    unitPrice: numeric("unit_price", { precision: 18, scale: 2 }).notNull(),
+    discountPct: numeric("discount_pct", { precision: 5, scale: 2 })
+      .notNull()
+      .default("0"),
+    taxPct: numeric("tax_pct", { precision: 5, scale: 2 })
+      .notNull()
+      .default("0"),
+    taxAmount: numeric("tax_amount", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    lineTotal: numeric("line_total", { precision: 18, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    orgIdx: index("sales_order_line_items_org_idx").on(t.orgId),
+    orderIdx: index("sales_order_line_items_order_idx").on(t.orderId),
   })
 );

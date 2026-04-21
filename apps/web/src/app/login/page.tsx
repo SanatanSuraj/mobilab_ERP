@@ -1,27 +1,29 @@
 "use client";
 
 /**
- * Login page — /login
+ * Login page — /login (legacy mock)
  *
- * Today  (mock):
- *   • Dev panel lets you switch role instantly and "login as" any persona.
- *   • Prod-style email/password fields accept any @mobilab.in address
- *     with password "demo1234" — matches MOCK_USERS_BY_ROLE emails.
- *   • On submit: sets mobilab-session cookie + Zustand store + redirects.
+ * This page existed when auth was entirely mock. The real login surface is
+ * now at /auth/login (see apps/web/src/app/auth/login/page.tsx). To avoid
+ * users typing real credentials (admin@mobilab.local / mobilab_dev_2026)
+ * into the old mock form — which only validates against @mobilab.in emails
+ * with password "demo1234" and would show a misleading error — this page
+ * now:
  *
- * Tomorrow (real auth):
- *   1. POST credentials to a Server Action → receives JWT.
- *   2. Server Action sets httpOnly cookie (not client-side document.cookie).
- *   3. Store only receives user/role/orgId from the JWT claims.
- *   4. Remove MOCK login path entirely.
+ *   1. Redirects to /auth/login by default, preserving ?from=… so
+ *      post-login routing still works.
+ *   2. Keeps the dev-panel persona switcher behind an explicit ?dev=1 flag
+ *      for still-un-migrated prototype pages (admin/users, sidebar chip,
+ *      etc.) that read their state from the Zustand mock store.
+ *
+ * Delete this file once every prototype page reads from the real /auth/me
+ * identity and the dev-panel shortcut is no longer useful.
  */
 
-import { Suspense, useState, useTransition } from "react";
+import { Suspense, useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FlaskConical, Eye, EyeOff, Loader2, ChevronDown } from "lucide-react";
+import { FlaskConical, Loader2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   useAuthStore,
@@ -80,7 +82,7 @@ function setSessionCookie(value: string) {
 export default function LoginPage() {
   return (
     <Suspense fallback={<LoginFallback />}>
-      <LoginInner />
+      <LoginRouter />
     </Suspense>
   );
 }
@@ -93,7 +95,46 @@ function LoginFallback() {
   );
 }
 
-function LoginInner() {
+/**
+ * Decides which flavour of the /login page to render:
+ *   - Default: bounce to /auth/login (real API), preserving ?from=…
+ *   - ?dev=1: render the dev-panel quick-login for unmigrated prototype
+ *     pages that still read from the mock Zustand store.
+ */
+function LoginRouter() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const isDevPanel = params.get("dev") === "1";
+  const from = params.get("from");
+
+  useEffect(() => {
+    if (isDevPanel) return;
+    const target = new URL("/auth/login", window.location.origin);
+    if (from) target.searchParams.set("from", from);
+    router.replace(target.pathname + target.search);
+  }, [isDevPanel, from, router]);
+
+  if (isDevPanel) {
+    return <DevPanelOnly />;
+  }
+
+  // Brief "redirecting…" state while the useEffect above fires on mount.
+  return (
+    <div className="min-h-screen bg-muted/30 flex items-center justify-center p-4">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Redirecting to sign-in…
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Dev-panel-only login. Reachable via /login?dev=1. Bypasses the real API
+ * and writes directly to the mock Zustand store — for prototype pages that
+ * have not yet been migrated to the real /auth/me identity.
+ */
+function DevPanelOnly() {
   const router = useRouter();
   const params = useSearchParams();
   const redirectTo = params.get("from") ?? "/";
@@ -101,25 +142,14 @@ function LoginInner() {
   const setRole = useAuthStore((s) => s.setRole);
   const fetchPermissions = useAuthStore((s) => s.fetchPermissions);
 
-  // Form state
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
-  const [isPending, startTransition] = useTransition();
-
-  // Dev panel state
   const [selectedRole, setSelectedRole] = useState<UserRole>("PRODUCTION_MANAGER");
-  const [showDevPanel, setShowDevPanel] = useState(
-    process.env.NODE_ENV === "development"
-  );
-
-  // ── Handlers ────────────────────────────────────────────────────────────────
+  const [showDevPanel, setShowDevPanel] = useState(true);
+  const [isPending, startTransition] = useTransition();
 
   function completeLogin(role: UserRole) {
     setRole(role);
-    setSessionCookie(role); // proxy gate
-    fetchPermissions();     // populate _permSet (async, non-blocking)
+    setSessionCookie(role);
+    fetchPermissions();
   }
 
   function handleDevLogin() {
@@ -129,36 +159,9 @@ function LoginInner() {
     });
   }
 
-  function handleFormSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-
-    startTransition(async () => {
-      // ── MOCK auth ────────────────────────────────────────────────────────
-      await new Promise((r) => setTimeout(r, 400)); // simulate network
-
-      const matchedEntry = Object.entries(MOCK_USERS_BY_ROLE).find(
-        ([, u]) => u.email.toLowerCase() === email.toLowerCase()
-      );
-
-      if (!matchedEntry || password !== "demo1234") {
-        setError("Invalid email or password. Hint: use any @mobilab.in email with password demo1234");
-        return;
-      }
-      // ── END MOCK ─────────────────────────────────────────────────────────
-
-      const role = matchedEntry[0] as UserRole;
-      completeLogin(role);
-      router.push(redirectTo);
-    });
-  }
-
-  // ── Render ───────────────────────────────────────────────────────────────────
-
   return (
     <div className="min-h-screen bg-muted/30 flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-6">
-
         {/* Brand */}
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center shadow-lg">
@@ -166,119 +169,82 @@ function LoginInner() {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight">Mobilab ERP</h1>
-            <p className="text-sm text-muted-foreground">Sign in to your workspace</p>
+            <p className="text-sm text-muted-foreground">
+              Dev quick-login (mock store only)
+            </p>
           </div>
         </div>
 
-        {/* Login Card */}
+        {/* Card */}
         <Card className="shadow-sm">
           <CardContent className="pt-6 space-y-4">
-
-            {/* Email/Password form */}
-            <form onSubmit={handleFormSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="you@mobilab.in"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  disabled={isPending}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    disabled={isPending}
-                    className="pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    tabIndex={-1}
-                  >
-                    {showPassword
-                      ? <EyeOff className="h-4 w-4" />
-                      : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {error && (
-                <p className="text-xs text-destructive leading-snug">{error}</p>
-              )}
-
-              <Button type="submit" className="w-full" disabled={isPending}>
-                {isPending ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Signing in…</>
-                ) : (
-                  "Sign in"
-                )}
-              </Button>
-            </form>
-
-            {/* Dev Panel toggle */}
-            {process.env.NODE_ENV === "development" && (
-              <div className="pt-2 border-t">
-                <button
-                  type="button"
-                  onClick={() => setShowDevPanel((v) => !v)}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground w-full"
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-[11px] leading-snug text-amber-900">
+              <p className="font-medium">Dev-panel mode</p>
+              <p className="mt-1">
+                This populates the mock auth store without hitting the
+                backend. For real credentials use{" "}
+                <a
+                  href="/auth/login"
+                  className="underline font-medium"
                 >
-                  <span className="text-amber-500">🛠</span>
-                  <span className="font-medium">Dev: quick login</span>
-                  <ChevronDown
-                    className={`h-3.5 w-3.5 ml-auto transition-transform ${showDevPanel ? "rotate-180" : ""}`}
-                  />
-                </button>
+                  /auth/login
+                </a>
+                .
+              </p>
+            </div>
 
-                {showDevPanel && (
-                  <div className="mt-3 space-y-2">
-                    <select
-                      value={selectedRole}
-                      onChange={(e) => setSelectedRole(e.target.value as UserRole)}
-                      className="w-full text-xs rounded border border-border bg-background px-2.5 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      {ALL_ROLES.map((r) => (
-                        <option key={r} value={r}>
-                          {ROLE_LABELS[r]} ({MOCK_USERS_BY_ROLE[r].name})
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full text-xs"
-                      onClick={handleDevLogin}
-                      disabled={isPending}
-                    >
-                      {isPending
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : `Login as ${ROLE_LABELS[selectedRole]}`}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowDevPanel((v) => !v)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground w-full"
+              >
+                <span className="text-amber-500">🛠</span>
+                <span className="font-medium">Dev: quick login</span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 ml-auto transition-transform ${
+                    showDevPanel ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+
+              {showDevPanel && (
+                <div className="mt-3 space-y-2">
+                  <select
+                    value={selectedRole}
+                    onChange={(e) =>
+                      setSelectedRole(e.target.value as UserRole)
+                    }
+                    className="w-full text-xs rounded border border-border bg-background px-2.5 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    {ALL_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {ROLE_LABELS[r]} ({MOCK_USERS_BY_ROLE[r].name})
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs"
+                    onClick={handleDevLogin}
+                    disabled={isPending}
+                  >
+                    {isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      `Login as ${ROLE_LABELS[selectedRole]}`
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 
         <p className="text-center text-xs text-muted-foreground">
-          Mobilab ERP · ERP-ARCH-MIDSCALE-2025-005
+          Mobilab ERP · /login?dev=1 (mock)
         </p>
       </div>
     </div>

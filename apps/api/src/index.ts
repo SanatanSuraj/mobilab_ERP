@@ -7,6 +7,10 @@
  *   /metrics        Prometheus
  *   /auth/*         login / refresh / logout / me                (phase 1)
  *   /crm/*          accounts / contacts / leads / deals / tickets (phase 2)
+ *   /inventory/*    items / warehouses / stock ledger + summary  (phase 2)
+ *   /procurement/*  vendors / indents / purchase orders / GRNs   (phase 2)
+ *   /production/*   products / BOMs / work orders / WIP stages   (phase 2)
+ *   /qc/*           inspection templates / inspections / certs    (phase 2)
  */
 
 // Tracing first so pg + http get auto-instrumented.
@@ -47,7 +51,38 @@ import { ContactsService } from "./modules/crm/contacts.service.js";
 import { LeadsService } from "./modules/crm/leads.service.js";
 import { DealsService } from "./modules/crm/deals.service.js";
 import { TicketsService } from "./modules/crm/tickets.service.js";
+import { QuotationsService } from "./modules/crm/quotations.service.js";
+import { SalesOrdersService } from "./modules/crm/sales-orders.service.js";
 import { registerCrmRoutes } from "./modules/crm/routes.js";
+import { ItemsService } from "./modules/inventory/items.service.js";
+import { WarehousesService } from "./modules/inventory/warehouses.service.js";
+import { StockService } from "./modules/inventory/stock.service.js";
+import { registerInventoryRoutes } from "./modules/inventory/routes.js";
+import { VendorsService } from "./modules/procurement/vendors.service.js";
+import { IndentsService } from "./modules/procurement/indents.service.js";
+import { PurchaseOrdersService } from "./modules/procurement/purchase-orders.service.js";
+import { GrnsService } from "./modules/procurement/grns.service.js";
+import { registerProcurementRoutes } from "./modules/procurement/routes.js";
+import { ProductsService } from "./modules/production/products.service.js";
+import { BomsService } from "./modules/production/boms.service.js";
+import { WorkOrdersService } from "./modules/production/work-orders.service.js";
+import { registerProductionRoutes } from "./modules/production/routes.js";
+import { InspectionTemplatesService } from "./modules/qc/templates.service.js";
+import { QcInspectionsService } from "./modules/qc/inspections.service.js";
+import { QcCertsService } from "./modules/qc/certs.service.js";
+import { registerQcRoutes } from "./modules/qc/routes.js";
+import { SalesInvoicesService } from "./modules/finance/sales-invoices.service.js";
+import { PurchaseInvoicesService } from "./modules/finance/purchase-invoices.service.js";
+import { PaymentsService } from "./modules/finance/payments.service.js";
+import {
+  CustomerLedgerService,
+  VendorLedgerService,
+} from "./modules/finance/ledger.service.js";
+import { FinanceOverviewService } from "./modules/finance/overview.service.js";
+import { registerFinanceRoutes } from "./modules/finance/routes.js";
+import { NotificationTemplatesService } from "./modules/notifications/templates.service.js";
+import { NotificationsService } from "./modules/notifications/notifications.service.js";
+import { registerNotificationsRoutes } from "./modules/notifications/routes.js";
 import { VendorAuthService, VendorAdminService } from "@mobilab/vendor-admin";
 import { registerVendorRoutes } from "./modules/vendor/routes.js";
 
@@ -119,6 +154,55 @@ async function main(): Promise<void> {
   const leadsService = new LeadsService(pool);
   const dealsService = new DealsService(pool);
   const ticketsService = new TicketsService(pool);
+  const quotationsService = new QuotationsService(pool);
+  const salesOrdersService = new SalesOrdersService(pool);
+
+  // Inventory services — Phase 2 §12.1 #3. Same shape as CRM services: one
+  // per domain aggregate, all sharing the RLS-enforced `pool`.
+  const itemsService = new ItemsService(pool);
+  const warehousesService = new WarehousesService(pool);
+  const stockService = new StockService(pool);
+
+  // Procurement services — Phase 2 §12.1 #4. Vendors + indents + POs + GRNs.
+  // GRNs.post() writes to stock_ledger, so these services live downstream
+  // of StockService (which is accessed via stockRepo from the shared pool).
+  const vendorsService = new VendorsService(pool);
+  const indentsService = new IndentsService(pool);
+  const purchaseOrdersService = new PurchaseOrdersService(pool);
+  const grnsService = new GrnsService(pool);
+
+  // Production services — Phase 2 §12.1 #5 / §13.2. Products + BOMs + WOs.
+  // Gated by `module.manufacturing`. BOM activation atomically supersedes the
+  // prior ACTIVE bom and flips products.active_bom_id. WO creation copies the
+  // per-family wip_stage_templates into per-WO wip_stages instances.
+  const productsService = new ProductsService(pool);
+  const bomsService = new BomsService(pool);
+  const workOrdersService = new WorkOrdersService(pool);
+
+  // QC services — Phase 2 §12.1 #6 / §13.4. Inspection templates, inspections
+  // with DRAFT → IN_PROGRESS → PASSED/FAILED lifecycle, and append-only
+  // certificates issued on PASSED FINAL_QC. Gated by `module.manufacturing`.
+  const qcTemplatesService = new InspectionTemplatesService(pool);
+  const qcInspectionsService = new QcInspectionsService(pool);
+  const qcCertsService = new QcCertsService(pool);
+
+  // Finance services — Phase 2 §12.1 #7 / §13.6. Sales + purchase invoices
+  // with DRAFT → POSTED → CANCELLED lifecycle, append-only customer/vendor
+  // ledgers with computed running balance, and polymorphic payments that
+  // can settle N invoices atomically (with void reversal). CORE module —
+  // not feature-flagged.
+  const salesInvoicesService = new SalesInvoicesService(pool);
+  const purchaseInvoicesService = new PurchaseInvoicesService(pool);
+  const paymentsService = new PaymentsService(pool);
+  const customerLedgerService = new CustomerLedgerService(pool);
+  const vendorLedgerService = new VendorLedgerService(pool);
+  const financeOverviewService = new FinanceOverviewService(pool);
+
+  // Notifications services — Phase 2 §12.1 #8 / §13.7. Record-only in-app
+  // feed + template library. No dispatch in Phase 2 (that's Phase 3 event-bus
+  // wiring). CORE module — every tenant gets it, no feature flag.
+  const notificationTemplatesService = new NotificationTemplatesService(pool);
+  const notificationsService = new NotificationsService(pool);
 
   // Sprint 3 — vendor-admin stack. Uses the BYPASSRLS `vendorPool`, shares
   // the same TokenFactory (vendor tokens are a different audience within
@@ -233,12 +317,87 @@ async function main(): Promise<void> {
     leads: leadsService,
     deals: dealsService,
     tickets: ticketsService,
+    quotations: quotationsService,
+    salesOrders: salesOrdersService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
       tenantStatus,
     },
     requireFeature,
+  });
+
+  await registerInventoryRoutes(app, {
+    items: itemsService,
+    warehouses: warehousesService,
+    stock: stockService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+    requireFeature,
+  });
+
+  await registerProcurementRoutes(app, {
+    vendors: vendorsService,
+    indents: indentsService,
+    purchaseOrders: purchaseOrdersService,
+    grns: grnsService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+    requireFeature,
+  });
+
+  await registerProductionRoutes(app, {
+    products: productsService,
+    boms: bomsService,
+    workOrders: workOrdersService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+    requireFeature,
+  });
+
+  await registerQcRoutes(app, {
+    templates: qcTemplatesService,
+    inspections: qcInspectionsService,
+    certs: qcCertsService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+    requireFeature,
+  });
+
+  await registerFinanceRoutes(app, {
+    salesInvoices: salesInvoicesService,
+    purchaseInvoices: purchaseInvoicesService,
+    payments: paymentsService,
+    customerLedger: customerLedgerService,
+    vendorLedger: vendorLedgerService,
+    overview: financeOverviewService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+  });
+
+  await registerNotificationsRoutes(app, {
+    templates: notificationTemplatesService,
+    notifications: notificationsService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
   });
 
   // Sprint 3 — /vendor-admin/* surface. Lives alongside tenant routes but

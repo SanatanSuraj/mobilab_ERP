@@ -26,34 +26,52 @@ import {
 import {
   apiAddLeadActivity,
   apiAddTicketComment,
+  apiApproveQuotation,
   apiConvertLead,
+  apiConvertQuotation,
   apiCreateLead,
+  apiCreateQuotation,
+  apiCreateSalesOrder,
   apiDeleteLead,
+  apiDeleteQuotation,
+  apiDeleteSalesOrder,
+  apiFinanceApproveSalesOrder,
   apiGetAccount,
   apiGetContact,
   apiGetDeal,
   apiGetLead,
+  apiGetQuotation,
+  apiGetSalesOrder,
   apiGetTicket,
   apiListAccounts,
   apiListContacts,
   apiListDeals,
   apiListLeadActivities,
   apiListLeads,
+  apiListQuotations,
+  apiListSalesOrders,
   apiListTicketComments,
   apiListTickets,
   apiMarkLeadLost,
   apiTransitionDealStage,
+  apiTransitionQuotationStatus,
+  apiTransitionSalesOrderStatus,
   apiTransitionTicketStatus,
   apiUpdateAccount,
   apiUpdateDeal,
   apiUpdateLead,
+  apiUpdateQuotation,
+  apiUpdateSalesOrder,
   apiUpdateTicket,
   type AccountListQuery,
   type ContactListQuery,
   type ConvertLeadResponse,
+  type ConvertQuotationResponse,
   type DealListQuery,
   type LeadListQuery,
   type PaginatedResponse,
+  type QuotationListQuery,
+  type SalesOrderListQuery,
   type TicketListQuery,
 } from "@/lib/api/crm";
 
@@ -61,19 +79,30 @@ import type {
   Account,
   AddLeadActivity,
   AddTicketComment,
+  ApproveQuotation,
   ConvertLead,
+  ConvertQuotation,
   CreateLead,
+  CreateQuotation,
+  CreateSalesOrder,
   Deal,
+  FinanceApproveSalesOrder,
   Lead,
   LeadActivity,
   MarkLeadLost,
+  Quotation,
+  SalesOrder,
   Ticket,
   TicketComment,
   TransitionDealStage,
+  TransitionQuotationStatus,
+  TransitionSalesOrderStatus,
   TransitionTicketStatus,
   UpdateAccount,
   UpdateDeal,
   UpdateLead,
+  UpdateQuotation,
+  UpdateSalesOrder,
   UpdateTicket,
 } from "@mobilab/contracts";
 
@@ -117,6 +146,20 @@ export const crmApiKeys = {
     detail: (id: string) => ["crm-api", "tickets", "detail", id] as const,
     comments: (id: string) =>
       ["crm-api", "tickets", "comments", id] as const,
+  },
+  quotations: {
+    all: ["crm-api", "quotations"] as const,
+    list: (q: QuotationListQuery) =>
+      ["crm-api", "quotations", "list", q] as const,
+    detail: (id: string) =>
+      ["crm-api", "quotations", "detail", id] as const,
+  },
+  salesOrders: {
+    all: ["crm-api", "sales-orders"] as const,
+    list: (q: SalesOrderListQuery) =>
+      ["crm-api", "sales-orders", "list", q] as const,
+    detail: (id: string) =>
+      ["crm-api", "sales-orders", "detail", id] as const,
   },
 };
 
@@ -488,6 +531,180 @@ export function useApiUpdateTicket(id: string) {
     onSuccess: (ticket) => {
       qc.setQueryData(crmApiKeys.tickets.detail(id), ticket);
       qc.invalidateQueries({ queryKey: crmApiKeys.tickets.all });
+    },
+  });
+}
+
+// ─── Quotations: reads ─────────────────────────────────────────────────────
+
+export function useApiQuotations(query: QuotationListQuery = {}) {
+  return useQuery({
+    queryKey: crmApiKeys.quotations.list(query),
+    queryFn: () => apiListQuotations(query),
+    // Quotation lists don't churn fast — lifecycle state changes happen
+    // at human cadence. 30s matches accounts/contacts.
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiQuotation(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? crmApiKeys.quotations.detail(id)
+      : ["crm-api", "quotations", "detail", "__none__"],
+    queryFn: () => apiGetQuotation(id!),
+    enabled: Boolean(id),
+    staleTime: 30_000,
+  });
+}
+
+// ─── Quotations: writes ────────────────────────────────────────────────────
+
+export function useApiCreateQuotation() {
+  const qc = useQueryClient();
+  return useMutation<Quotation, Error, CreateQuotation>({
+    mutationFn: (body) => apiCreateQuotation(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: crmApiKeys.quotations.all });
+    },
+  });
+}
+
+export function useApiUpdateQuotation(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Quotation, Error, UpdateQuotation>({
+    mutationFn: (body) => apiUpdateQuotation(id, body),
+    onSuccess: (q) => {
+      qc.setQueryData(crmApiKeys.quotations.detail(id), q);
+      qc.invalidateQueries({ queryKey: crmApiKeys.quotations.all });
+    },
+  });
+}
+
+export function useApiDeleteQuotation() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (id) => apiDeleteQuotation(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: crmApiKeys.quotations.all });
+    },
+  });
+}
+
+export function useApiTransitionQuotationStatus(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Quotation, Error, TransitionQuotationStatus>({
+    mutationFn: (body) => apiTransitionQuotationStatus(id, body),
+    onSuccess: (q) => {
+      qc.setQueryData(crmApiKeys.quotations.detail(id), q);
+      qc.invalidateQueries({ queryKey: crmApiKeys.quotations.all });
+    },
+  });
+}
+
+export function useApiApproveQuotation(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Quotation, Error, ApproveQuotation>({
+    mutationFn: (body) => apiApproveQuotation(id, body),
+    onSuccess: (q) => {
+      qc.setQueryData(crmApiKeys.quotations.detail(id), q);
+      qc.invalidateQueries({ queryKey: crmApiKeys.quotations.all });
+    },
+  });
+}
+
+/**
+ * Convert a quotation → sales order. The response contains both entities;
+ * we update the quotation cache, then blow away the sales-orders cache so
+ * the new SO appears in the orders list. Returning the full response lets
+ * the caller navigate to the new SO on success.
+ */
+export function useApiConvertQuotation(id: string) {
+  const qc = useQueryClient();
+  return useMutation<ConvertQuotationResponse, Error, ConvertQuotation>({
+    mutationFn: (body) => apiConvertQuotation(id, body),
+    onSuccess: (res) => {
+      qc.setQueryData(crmApiKeys.quotations.detail(id), res.quotation);
+      qc.invalidateQueries({ queryKey: crmApiKeys.quotations.all });
+      qc.invalidateQueries({ queryKey: crmApiKeys.salesOrders.all });
+    },
+  });
+}
+
+// ─── Sales Orders: reads ───────────────────────────────────────────────────
+
+export function useApiSalesOrders(query: SalesOrderListQuery = {}) {
+  return useQuery({
+    queryKey: crmApiKeys.salesOrders.list(query),
+    queryFn: () => apiListSalesOrders(query),
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiSalesOrder(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? crmApiKeys.salesOrders.detail(id)
+      : ["crm-api", "sales-orders", "detail", "__none__"],
+    queryFn: () => apiGetSalesOrder(id!),
+    enabled: Boolean(id),
+    staleTime: 30_000,
+  });
+}
+
+// ─── Sales Orders: writes ──────────────────────────────────────────────────
+
+export function useApiCreateSalesOrder() {
+  const qc = useQueryClient();
+  return useMutation<SalesOrder, Error, CreateSalesOrder>({
+    mutationFn: (body) => apiCreateSalesOrder(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: crmApiKeys.salesOrders.all });
+    },
+  });
+}
+
+export function useApiUpdateSalesOrder(id: string) {
+  const qc = useQueryClient();
+  return useMutation<SalesOrder, Error, UpdateSalesOrder>({
+    mutationFn: (body) => apiUpdateSalesOrder(id, body),
+    onSuccess: (so) => {
+      qc.setQueryData(crmApiKeys.salesOrders.detail(id), so);
+      qc.invalidateQueries({ queryKey: crmApiKeys.salesOrders.all });
+    },
+  });
+}
+
+export function useApiDeleteSalesOrder() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (id) => apiDeleteSalesOrder(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: crmApiKeys.salesOrders.all });
+    },
+  });
+}
+
+export function useApiTransitionSalesOrderStatus(id: string) {
+  const qc = useQueryClient();
+  return useMutation<SalesOrder, Error, TransitionSalesOrderStatus>({
+    mutationFn: (body) => apiTransitionSalesOrderStatus(id, body),
+    onSuccess: (so) => {
+      qc.setQueryData(crmApiKeys.salesOrders.detail(id), so);
+      qc.invalidateQueries({ queryKey: crmApiKeys.salesOrders.all });
+    },
+  });
+}
+
+export function useApiFinanceApproveSalesOrder(id: string) {
+  const qc = useQueryClient();
+  return useMutation<SalesOrder, Error, FinanceApproveSalesOrder>({
+    mutationFn: (body) => apiFinanceApproveSalesOrder(id, body),
+    onSuccess: (so) => {
+      qc.setQueryData(crmApiKeys.salesOrders.detail(id), so);
+      qc.invalidateQueries({ queryKey: crmApiKeys.salesOrders.all });
     },
   });
 }

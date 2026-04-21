@@ -1,794 +1,487 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * GRNs & QC — reads /procurement/grns via useApiGrns.
+ *
+ * Contract deltas vs the older mock (QCInspection / GRN in
+ * procurement-mock.ts):
+ *   - QC in Phase 2 is a `qcStatus` enum on each grn_line (PENDING /
+ *     ACCEPTED / REJECTED / PARTIAL) — there's no separate QCInspection
+ *     aggregate, no checklist, no defect-code catalogue. The rich mock UI
+ *     belongs to a dedicated QC module (Phase 2 §12.1 #5), which will add
+ *     qc_inspections + qc_checks tables and route /qc/* wrapping these
+ *     fields.
+ *   - GRN statuses simplify to DRAFT / POSTED (mock had a PENDING_QC /
+ *     QC_COMPLETED chain). Posting a GRN is an atomic write:
+ *       1. stock_ledger += accepted_qty   (per grn_line)
+ *       2. po_lines.received_qty += accepted_qty
+ *       3. PO status re-projected (PARTIALLY_RECEIVED / RECEIVED)
+ *       4. GRN status → POSTED
+ *     All in one transaction; a DRAFT is the only editable state.
+ *
+ * List view only: creating a new GRN requires a parent PO + lines, which
+ * is a multi-step flow best handled from the PO detail page (Phase 3).
+ * Here we surface the real GRN pipeline and let a user POST DRAFT rows.
+ */
+
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
-import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  qcInspections,
-  procurementGRNs,
-  QCInspection,
-  QCCheckItem,
-  GRN,
-  formatCurrency,
-  formatDate,
-} from "@/data/procurement-mock";
+  useApiGrn,
+  useApiGrns,
+  useApiPostGrn,
+  useApiVendors,
+} from "@/hooks/useProcurementApi";
+import { useApiWarehouses } from "@/hooks/useInventoryApi";
 import {
-  ClipboardCheck,
-  Clock,
+  GRN_STATUSES,
+  type Grn,
+  type GrnStatus,
+} from "@mobilab/contracts";
+import {
+  AlertCircle,
+  ArrowRight,
   CheckCircle2,
-  XCircle,
-  AlertTriangle,
   FileText,
-  Package,
-  BadgeCheck,
-  BarChart3,
+  PackageCheck,
+  PackageSearch,
+  PlayCircle,
 } from "lucide-react";
 
-type CheckResult = "PASS" | "FAIL" | "NA";
-
-function QCInspectDialog({
-  inspection,
-  open,
-  onOpenChange,
-  onSubmit,
-}: {
-  inspection: QCInspection;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onSubmit: (id: string, passed: boolean, qtyAccepted: number) => void;
-}) {
-  const [checkResults, setCheckResults] = useState<Record<string, CheckResult>>(
-    () =>
-      Object.fromEntries(
-        inspection.checklist.map((c) => [c.id, c.result])
-      )
-  );
-  const [defectReason, setDefectReason] = useState(
-    inspection.defectReason ?? ""
-  );
-  const [qtyAccepted, setQtyAccepted] = useState(
-    inspection.qtyAccepted > 0 ? inspection.qtyAccepted : inspection.qtyInspected
-  );
-  const [submitted, setSubmitted] = useState(false);
-  const [submitPassed, setSubmitPassed] = useState(true);
-
-  const hasFail = Object.values(checkResults).some((r) => r === "FAIL");
-  const qtyRejected = inspection.qtyInspected - qtyAccepted;
-
-  function setCheck(id: string, result: CheckResult) {
-    setCheckResults((prev) => ({ ...prev, [id]: result }));
-  }
-
-  function handleSubmit(pass: boolean) {
-    setSubmitPassed(pass);
-    setSubmitted(true);
-    onSubmit(inspection.id, pass, qtyAccepted);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>QC Inspection — {inspection.itemName}</DialogTitle>
-        </DialogHeader>
-
-        {/* Header info */}
-        <div className="grid grid-cols-2 gap-3 text-sm bg-muted/40 rounded-lg p-3">
-          <div>
-            <span className="text-muted-foreground">Vendor: </span>
-            <span className="font-medium">{inspection.vendorName}</span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Inward Ref: </span>
-            <span className="font-mono font-medium">{inspection.inwardNumber}</span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Item Code: </span>
-            <span className="font-mono">{inspection.itemCode}</span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Qty to Inspect: </span>
-            <span className="font-bold">{inspection.qtyInspected}</span>
-          </div>
-        </div>
-
-        {submitted ? (
-          <div
-            className={`rounded-md border p-4 text-sm font-medium ${
-              submitPassed
-                ? "bg-green-50 border-green-200 text-green-800"
-                : "bg-red-50 border-red-200 text-red-800"
-            }`}
-          >
-            {submitPassed
-              ? "✓ GRN auto-generated. Stock updated in Inventory."
-              : "✗ QC Failed. Items sent to Quarantine. Create RTV to return to vendor."}
-          </div>
-        ) : (
-          <div className="space-y-5">
-            {/* Checklist */}
-            <div>
-              <h4 className="text-sm font-semibold mb-3">QC Checklist</h4>
-              <div className="space-y-2">
-                {inspection.checklist.map((check) => (
-                  <div
-                    key={check.id}
-                    className="flex items-center justify-between gap-3 p-2.5 rounded-lg border bg-background"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">
-                        {check.checkName}
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className="text-xs mt-0.5 bg-blue-50 text-blue-700 border-blue-200"
-                      >
-                        {check.category}
-                      </Badge>
-                    </div>
-                    <div className="flex gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setCheck(check.id, "PASS")}
-                        className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
-                          checkResults[check.id] === "PASS"
-                            ? "bg-green-600 text-white border-green-600"
-                            : "bg-white text-green-700 border-green-300 hover:bg-green-50"
-                        }`}
-                      >
-                        PASS
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCheck(check.id, "FAIL")}
-                        className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
-                          checkResults[check.id] === "FAIL"
-                            ? "bg-red-600 text-white border-red-600"
-                            : "bg-white text-red-700 border-red-300 hover:bg-red-50"
-                        }`}
-                      >
-                        FAIL
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCheck(check.id, "NA")}
-                        className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
-                          checkResults[check.id] === "NA"
-                            ? "bg-gray-500 text-white border-gray-500"
-                            : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-                        }`}
-                      >
-                        N/A
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Defect Reason */}
-            {hasFail && (
-              <div className="space-y-1.5">
-                <Label>Defect Reason</Label>
-                <Textarea
-                  placeholder="Describe the defect(s) found…"
-                  value={defectReason}
-                  onChange={(e) => setDefectReason(e.target.value)}
-                  rows={3}
-                />
-              </div>
-            )}
-
-            {/* Qty Summary */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>
-                  Qty Accepted (max {inspection.qtyInspected})
-                </Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={inspection.qtyInspected}
-                  value={qtyAccepted}
-                  onChange={(e) =>
-                    setQtyAccepted(
-                      Math.min(
-                        inspection.qtyInspected,
-                        Math.max(0, Number(e.target.value))
-                      )
-                    )
-                  }
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Qty Rejected (auto)</Label>
-                <Input
-                  value={qtyRejected}
-                  readOnly
-                  className="bg-muted/40"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          {!submitted && (
-            <>
-              <Button
-                onClick={() => handleSubmit(true)}
-                disabled={hasFail}
-                className="bg-green-600 hover:bg-green-700 text-white"
-              >
-                Submit — QC PASS
-              </Button>
-              <Button
-                onClick={() => handleSubmit(false)}
-                className="bg-red-600 hover:bg-red-700 text-white"
-              >
-                Submit — QC FAIL
-              </Button>
-            </>
-          )}
-          {submitted && (
-            <Button onClick={() => onOpenChange(false)}>Close</Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
-function GRNDetailDialog({
-  grn,
-  open,
-  onOpenChange,
-}: {
-  grn: GRN;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>GRN Details — {grn.grnNumber}</DialogTitle>
-        </DialogHeader>
+const STATUS_TONE: Record<GrnStatus, string> = {
+  DRAFT: "bg-amber-50 text-amber-700 border-amber-200",
+  POSTED: "bg-green-50 text-green-700 border-green-200",
+};
 
-        <div className="space-y-5">
-          {/* Header Info */}
-          <div className="grid grid-cols-3 gap-3 text-sm bg-muted/40 rounded-lg p-3">
-            <div>
-              <span className="text-muted-foreground">GRN: </span>
-              <span className="font-mono font-bold">{grn.grnNumber}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Inward: </span>
-              <span className="font-mono">{grn.inwardNumber}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">PO: </span>
-              <span className="font-mono">{grn.poNumber}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Vendor: </span>
-              <span className="font-medium">{grn.vendorName}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Warehouse: </span>
-              <span>{grn.warehouseName}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Status: </span>
-              <StatusBadge status={grn.status} />
-            </div>
-            <div>
-              <span className="text-muted-foreground">Created: </span>
-              <span>{formatDate(grn.createdAt)}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Total Value: </span>
-              <span className="font-bold text-green-700">
-                {formatCurrency(grn.totalAcceptedValue)}
-              </span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Confirmed By: </span>
-              <span>{grn.confirmedBy ?? "—"}</span>
-            </div>
-          </div>
+export default function GrnQcPage() {
+  // ─── Filters ────────────────────────────────────────────────────────────
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<GrnStatus | "all">("all");
 
-          {/* Lines Table */}
-          <div>
-            <h4 className="text-sm font-semibold mb-2">GRN Lines</h4>
-            <div className="rounded-lg border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead>Item Code</TableHead>
-                    <TableHead>Item Name</TableHead>
-                    <TableHead className="text-right">Accepted</TableHead>
-                    <TableHead className="text-right">Rejected</TableHead>
-                    <TableHead>Batch #</TableHead>
-                    <TableHead>Expiry</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead className="text-right">Line Value</TableHead>
-                    <TableHead>QC Result</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {grn.lines.map((line) => (
-                    <TableRow key={line.id}>
-                      <TableCell className="font-mono text-xs">
-                        {line.itemCode}
-                      </TableCell>
-                      <TableCell className="text-sm">{line.itemName}</TableCell>
-                      <TableCell className="text-right text-green-700 font-medium">
-                        {line.qtyAccepted} {line.unit}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {line.qtyRejected > 0 ? (
-                          <span className="text-red-600 font-medium">
-                            {line.qtyRejected} {line.unit}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {line.batchNumber}
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        {line.expiryDate ? formatDate(line.expiryDate) : "—"}
-                      </TableCell>
-                      <TableCell className="text-right text-xs">
-                        {formatCurrency(line.unitPrice)}
-                      </TableCell>
-                      <TableCell className="text-right font-medium text-sm">
-                        {formatCurrency(line.lineValue)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={line.qcResult} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-
-          {/* Integration Callout */}
-          {grn.purchaseInvoiceDraft && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-              <span className="font-medium">→ Purchase Invoice </span>
-              <span className="font-mono font-bold">
-                {grn.purchaseInvoiceDraft}
-              </span>
-              <span> created in Finance &amp; Accounting</span>
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+  const query = useMemo(
+    () => ({
+      limit: 100,
+      search: search.trim() || undefined,
+      status: status === "all" ? undefined : status,
+    }),
+    [search, status]
   );
-}
 
-export default function GRNQCPage() {
-  const [inspections, setInspections] = useState<QCInspection[]>(qcInspections);
-  const [inspectOpen, setInspectOpen] = useState(false);
-  const [selectedInspection, setSelectedInspection] =
-    useState<QCInspection | null>(null);
+  const grnsQuery = useApiGrns(query);
+  const vendorsQuery = useApiVendors({ limit: 200 });
+  const warehousesQuery = useApiWarehouses({ limit: 100 });
 
-  const [grnDetailOpen, setGRNDetailOpen] = useState(false);
-  const [selectedGRN, setSelectedGRN] = useState<GRN | null>(null);
+  const [postTargetId, setPostTargetId] = useState<string | null>(null);
 
-  function handleInspectSubmit(
-    id: string,
-    passed: boolean,
-    qtyAccepted: number
-  ) {
-    setInspections((prev) =>
-      prev.map((insp) =>
-        insp.id === id
-          ? {
-              ...insp,
-              status: passed
-                ? insp.qtyAccepted === insp.qtyInspected
-                  ? "PASSED"
-                  : "PARTIALLY_PASSED"
-                : "FAILED",
-              qtyAccepted: passed ? qtyAccepted : 0,
-              qtyRejected: passed
-                ? insp.qtyInspected - qtyAccepted
-                : insp.qtyInspected,
-            }
-          : insp
-      )
+  // Loading / error shells
+  if (grnsQuery.isLoading) {
+    return (
+      <div className="p-6 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
     );
   }
 
-  // QC KPIs
-  const qcTotal = inspections.length;
-  const qcPending = inspections.filter((i) => i.status === "PENDING").length;
-  const qcInProgress = inspections.filter(
-    (i) => i.status === "IN_PROGRESS"
-  ).length;
-  const qcPassed = inspections.filter((i) => i.status === "PASSED").length;
-  const qcPartial = inspections.filter(
-    (i) => i.status === "PARTIALLY_PASSED"
-  ).length;
-  const qcFailed = inspections.filter((i) => i.status === "FAILED").length;
+  if (grnsQuery.isError) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">Failed to load GRNs</p>
+            <p className="text-red-700 mt-1">
+              {grnsQuery.error instanceof Error
+                ? grnsQuery.error.message
+                : "Unknown error"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  // GRN KPIs
-  const grnTotal = procurementGRNs.length;
-  const grnConfirmed = procurementGRNs.filter(
-    (g) => g.status === "CONFIRMED"
-  ).length;
-  const grnStockUpdated = procurementGRNs.filter((g) => g.stockUpdated).length;
-  const grnTotalValue = procurementGRNs.reduce(
-    (sum, g) => sum + g.totalAcceptedValue,
-    0
-  );
+  const grns = grnsQuery.data?.data ?? [];
+  const total = grnsQuery.data?.meta.total ?? grns.length;
+  const vendors = vendorsQuery.data?.data ?? [];
+  const warehouses = warehousesQuery.data?.data ?? [];
 
-  const qcColumns: Column<QCInspection>[] = [
+  // KPIs
+  const draftCount = grns.filter((g) => g.status === "DRAFT").length;
+  const postedCount = grns.filter((g) => g.status === "POSTED").length;
+
+  const columns: Column<Grn>[] = [
     {
-      key: "id",
-      header: "Inspection ID",
-      render: (row) => (
-        <span className="font-mono text-xs text-muted-foreground">{row.id}</span>
-      ),
-    },
-    {
-      key: "inwardNumber",
-      header: "Inward Ref",
-      render: (row) => (
-        <span className="font-mono text-sm font-medium">{row.inwardNumber}</span>
-      ),
-    },
-    {
-      key: "poNumber",
-      header: "PO Number",
-      render: (row) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {row.poNumber}
+      key: "grnNumber",
+      header: "GRN #",
+      render: (g) => (
+        <span className="font-mono text-xs font-semibold text-blue-700">
+          {g.grnNumber}
         </span>
       ),
     },
-    { key: "vendorName", header: "Vendor" },
     {
-      key: "itemCode",
-      header: "Item",
-      render: (row) => (
-        <div>
-          <div className="font-mono text-xs text-muted-foreground">
-            {row.itemCode}
-          </div>
-          <div className="text-sm">{row.itemName}</div>
-        </div>
-      ),
-    },
-    {
-      key: "qty",
-      header: "Qty",
-      render: (row) => (
-        <div className="text-sm space-y-0.5">
-          <div className="text-muted-foreground">
-            Inspected: {row.qtyInspected}
-          </div>
-          <div className="text-green-700 font-medium">
-            Accepted: {row.qtyAccepted}
-          </div>
-          {row.qtyRejected > 0 && (
-            <div className="text-red-600 font-medium">
-              Rejected: {row.qtyRejected}
-            </div>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      render: (row) => <StatusBadge status={row.status} />,
-    },
-    {
-      key: "inspectedBy",
-      header: "Inspector",
-      render: (row) => (
-        <div className="text-sm">
-          <div>{row.inspectedBy ?? "—"}</div>
-          {row.inspectedAt && (
-            <div className="text-xs text-muted-foreground">
-              {formatDate(row.inspectedAt)}
-            </div>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: "actions",
-      header: "Actions",
-      render: (row) => {
-        const canInspect =
-          row.status === "PENDING" || row.status === "IN_PROGRESS";
+      key: "vendorId",
+      header: "Vendor",
+      render: (g) => {
+        const vendor = vendors.find((v) => v.id === g.vendorId);
         return (
-          <Button
-            variant={canInspect ? "default" : "outline"}
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => {
-              setSelectedInspection(row);
-              setInspectOpen(true);
-            }}
-          >
-            {canInspect ? "Inspect" : "View Result"}
-          </Button>
+          <span className="text-sm">
+            {vendor?.name ?? (
+              <span className="font-mono text-xs text-muted-foreground">
+                {g.vendorId.slice(0, 8)}…
+              </span>
+            )}
+          </span>
         );
       },
     },
-  ];
-
-  const grnColumns: Column<GRN>[] = [
     {
-      key: "grnNumber",
-      header: "GRN Number",
-      render: (row) => (
-        <span className="font-mono font-bold text-sm">{row.grnNumber}</span>
-      ),
-    },
-    {
-      key: "refs",
-      header: "Inward / PO",
-      render: (row) => (
-        <div>
-          <div className="font-mono text-xs">{row.inwardNumber}</div>
-          <div className="font-mono text-xs text-muted-foreground">
-            {row.poNumber}
-          </div>
-        </div>
-      ),
-    },
-    { key: "vendorName", header: "Vendor" },
-    { key: "warehouseName", header: "Warehouse" },
-    {
-      key: "createdAt",
-      header: "Created At",
-      render: (row) => (
-        <span className="text-sm">{formatDate(row.createdAt)}</span>
-      ),
-    },
-    {
-      key: "lines",
-      header: "Lines",
-      render: (row) => (
-        <span className="text-sm text-muted-foreground">
-          {row.lines.length} item{row.lines.length !== 1 ? "s" : ""}
-        </span>
-      ),
-    },
-    {
-      key: "totalAcceptedValue",
-      header: "Total Value",
-      className: "text-right",
-      render: (row) => (
-        <span className="font-medium text-sm text-right block">
-          {formatCurrency(row.totalAcceptedValue)}
-        </span>
-      ),
-    },
-    {
-      key: "purchaseInvoiceDraft",
-      header: "Purchase Invoice",
-      render: (row) =>
-        row.purchaseInvoiceDraft ? (
-          <Badge
-            variant="outline"
-            className="bg-green-50 text-green-700 border-green-200 text-xs font-mono"
-          >
-            {row.purchaseInvoiceDraft}
-          </Badge>
-        ) : (
-          <Badge
-            variant="outline"
-            className="bg-amber-50 text-amber-700 border-amber-200 text-xs"
-          >
-            Draft Pending
-          </Badge>
-        ),
-    },
-    {
-      key: "stockUpdated",
-      header: "Stock",
-      render: (row) =>
-        row.stockUpdated ? (
-          <span className="text-green-700 text-xs font-medium">
-            ✓ Stock Updated
+      key: "warehouseId",
+      header: "Warehouse",
+      render: (g) => {
+        const wh = warehouses.find((w) => w.id === g.warehouseId);
+        return (
+          <span className="text-sm">
+            {wh?.name ?? (
+              <span className="font-mono text-xs text-muted-foreground">
+                {g.warehouseId.slice(0, 8)}…
+              </span>
+            )}
           </span>
-        ) : (
-          <span className="text-amber-600 text-xs font-medium">Pending</span>
-        ),
+        );
+      },
+    },
+    {
+      key: "receivedDate",
+      header: "Received",
+      render: (g) => (
+        <span className="text-sm text-muted-foreground">
+          {formatDate(g.receivedDate)}
+        </span>
+      ),
+    },
+    {
+      key: "invoiceNumber",
+      header: "Invoice",
+      render: (g) => (
+        <span className="text-sm">
+          {g.invoiceNumber ? (
+            <>
+              <span className="font-mono">{g.invoiceNumber}</span>
+              {g.invoiceDate && (
+                <span className="text-xs text-muted-foreground ml-1">
+                  · {formatDate(g.invoiceDate)}
+                </span>
+              )}
+            </>
+          ) : (
+            "—"
+          )}
+        </span>
+      ),
     },
     {
       key: "status",
       header: "Status",
-      render: (row) => <StatusBadge status={row.status} />,
+      render: (g) => (
+        <Badge
+          variant="outline"
+          className={`text-xs whitespace-nowrap ${STATUS_TONE[g.status]}`}
+        >
+          {g.status}
+        </Badge>
+      ),
     },
     {
-      key: "actions",
-      header: "Actions",
-      render: (row) => (
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => {
-            setSelectedGRN(row);
-            setGRNDetailOpen(true);
-          }}
-        >
-          View Details
-        </Button>
+      key: "postedAt",
+      header: "Posted",
+      render: (g) => (
+        <span className="text-xs text-muted-foreground">
+          {g.postedAt ? formatDate(g.postedAt) : "—"}
+        </span>
       ),
+    },
+    {
+      key: "id",
+      header: "Actions",
+      render: (g) =>
+        g.status === "DRAFT" ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs h-7 gap-1"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPostTargetId(g.id);
+            }}
+          >
+            <PlayCircle className="h-3.5 w-3.5" />
+            Post
+          </Button>
+        ) : null,
     },
   ];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="p-6 max-w-[1400px] mx-auto">
       <PageHeader
-        title="GRN & QC"
-        description="Quality inspection → Goods Receipt → Stock induction"
+        title="Goods Receipt Notes"
+        description="Received against purchase orders. Posting writes to the stock ledger and closes the PO line."
       />
 
-      <Tabs defaultValue="qc">
-        <TabsList>
-          <TabsTrigger value="qc">QC Inspections</TabsTrigger>
-          <TabsTrigger value="grn">GRN Register</TabsTrigger>
-        </TabsList>
-
-        {/* QC TAB */}
-        <TabsContent value="qc" className="space-y-5 mt-5">
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-            <KPICard
-              title="Total"
-              value={String(qcTotal)}
-              icon={ClipboardCheck}
-              iconColor="text-blue-600"
-            />
-            <KPICard
-              title="Pending"
-              value={String(qcPending)}
-              icon={Clock}
-              iconColor="text-amber-600"
-            />
-            <KPICard
-              title="In Progress"
-              value={String(qcInProgress)}
-              icon={AlertTriangle}
-              iconColor="text-orange-600"
-            />
-            <KPICard
-              title="Passed"
-              value={String(qcPassed)}
-              icon={CheckCircle2}
-              iconColor="text-green-600"
-            />
-            <KPICard
-              title="Partially Passed"
-              value={String(qcPartial)}
-              icon={BadgeCheck}
-              iconColor="text-cyan-600"
-            />
-            <KPICard
-              title="Failed"
-              value={String(qcFailed)}
-              icon={XCircle}
-              iconColor="text-red-600"
-            />
-          </div>
-
-          <Card>
-            <CardContent className="p-0">
-              <DataTable
-                data={inspections}
-                columns={qcColumns}
-                searchKey="vendorName"
-                searchPlaceholder="Search by vendor…"
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* GRN TAB */}
-        <TabsContent value="grn" className="space-y-5 mt-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <KPICard
-              title="Total GRNs"
-              value={String(grnTotal)}
-              icon={FileText}
-              iconColor="text-blue-600"
-            />
-            <KPICard
-              title="Confirmed"
-              value={String(grnConfirmed)}
-              icon={CheckCircle2}
-              iconColor="text-green-600"
-            />
-            <KPICard
-              title="Stock Updated"
-              value={String(grnStockUpdated)}
-              icon={Package}
-              iconColor="text-indigo-600"
-            />
-            <KPICard
-              title="Total Value Accepted"
-              value={formatCurrency(grnTotalValue)}
-              icon={BarChart3}
-              iconColor="text-emerald-600"
-            />
-          </div>
-
-          <Card>
-            <CardContent className="p-0">
-              <DataTable
-                data={procurementGRNs}
-                columns={grnColumns}
-                searchKey="vendorName"
-                searchPlaceholder="Search by vendor…"
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* QC Inspect Dialog */}
-      {selectedInspection && (
-        <QCInspectDialog
-          inspection={selectedInspection}
-          open={inspectOpen}
-          onOpenChange={setInspectOpen}
-          onSubmit={handleInspectSubmit}
+      {/* KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <KPICard
+          title="Total GRNs"
+          value={String(total)}
+          icon={PackageCheck}
+          iconColor="text-primary"
         />
+        <KPICard
+          title="Drafts Awaiting Post"
+          value={String(draftCount)}
+          icon={FileText}
+          iconColor="text-amber-500"
+        />
+        <KPICard
+          title="Posted"
+          value={String(postedCount)}
+          icon={CheckCircle2}
+          iconColor="text-green-600"
+        />
+      </div>
+
+      <DataTable<Grn>
+        data={grns}
+        columns={columns}
+        searchKey="grnNumber"
+        searchPlaceholder="Search GRN #..."
+        pageSize={10}
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Input
+              placeholder="Search GRN / invoice..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-56"
+            />
+            <Select
+              value={status}
+              onValueChange={(v) =>
+                setStatus((v ?? "all") as GrnStatus | "all")
+              }
+            >
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                {GRN_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        }
+      />
+
+      {grns.length === 0 && (
+        <div className="mt-6 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 p-8 text-center flex flex-col items-center gap-2">
+          <PackageSearch className="h-8 w-8 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">
+            No GRNs match the current filter.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            GRNs are created from the PO detail page when goods arrive.
+          </p>
+        </div>
       )}
 
-      {/* GRN Detail Dialog */}
-      {selectedGRN && (
-        <GRNDetailDialog
-          grn={selectedGRN}
-          open={grnDetailOpen}
-          onOpenChange={setGRNDetailOpen}
+      {postTargetId && (
+        <PostGrnDialog
+          grnId={postTargetId}
+          onClose={() => setPostTargetId(null)}
         />
       )}
     </div>
+  );
+}
+
+// ─── Post-GRN dialog ────────────────────────────────────────────────────────
+
+function PostGrnDialog({
+  grnId,
+  onClose,
+}: {
+  grnId: string;
+  onClose: () => void;
+}) {
+  const grnQuery = useApiGrn(grnId);
+  const postGrn = useApiPostGrn(grnId);
+  const [error, setError] = useState<string | null>(null);
+
+  const grn = grnQuery.data;
+  const lines = grn?.lines ?? [];
+
+  async function handlePost(): Promise<void> {
+    if (!grn) return;
+    setError(null);
+    try {
+      await postGrn.mutateAsync({ expectedVersion: grn.version });
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Posting failed");
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
+            Post GRN {grn ? grn.grnNumber : ""}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          {grnQuery.isLoading && <Skeleton className="h-32 w-full" />}
+          {error && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          {grn && (
+            <>
+              <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Received on</span>
+                  <span className="font-medium">
+                    {formatDate(grn.receivedDate)}
+                  </span>
+                </div>
+                {grn.invoiceNumber && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Invoice #</span>
+                    <span className="font-mono">{grn.invoiceNumber}</span>
+                  </div>
+                )}
+                {grn.vehicleNumber && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Vehicle</span>
+                    <span>{grn.vehicleNumber}</span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-1 border-t mt-1">
+                  <span className="text-muted-foreground">Lines</span>
+                  <span className="font-medium">{lines.length}</span>
+                </div>
+              </div>
+              <div className="rounded-md border text-sm">
+                <div className="grid grid-cols-[1fr_80px_80px] gap-2 p-2 bg-muted/40 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <span>Line</span>
+                  <span className="text-right">Received</span>
+                  <span className="text-right">Rejected</span>
+                </div>
+                {lines.map((line) => {
+                  const rec = Number.parseFloat(line.quantity) || 0;
+                  const rej = Number.parseFloat(line.qcRejectedQty) || 0;
+                  const accepted = (rec - rej).toFixed(3);
+                  return (
+                    <div
+                      key={line.id}
+                      className="grid grid-cols-[1fr_80px_80px] gap-2 p-2 border-t text-xs items-center"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span className="font-mono text-muted-foreground">
+                          L{line.lineNo}
+                        </span>
+                        {line.batchNo && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] bg-blue-50 text-blue-700 border-blue-200"
+                          >
+                            {line.batchNo}
+                          </Badge>
+                        )}
+                        <ArrowRight className="h-3 w-3 text-muted-foreground/50" />
+                        <span className="text-muted-foreground">
+                          Accepted {accepted} {line.uom}
+                        </span>
+                      </span>
+                      <span className="text-right font-medium">
+                        {line.quantity}
+                      </span>
+                      <span className="text-right text-red-600">
+                        {line.qcRejectedQty}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Posting is atomic: stock ledger entries are written, the
+                parent PO's line received quantities are bumped, and the PO
+                header status is recomputed. This cannot be undone.
+              </p>
+            </>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={onClose}
+            disabled={postGrn.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handlePost}
+            disabled={
+              postGrn.isPending || !grn || lines.length === 0
+            }
+          >
+            {postGrn.isPending ? "Posting…" : "Confirm & Post"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

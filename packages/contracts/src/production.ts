@@ -1,0 +1,390 @@
+/**
+ * Production contracts — zod schemas shared by the API + web app.
+ *
+ * ARCHITECTURE.md §13.2. Matches ops/sql/init/05-production.sql.
+ *
+ * Scope (Phase 2):
+ *   - products (master)
+ *   - bom_versions (+ bom_lines)
+ *   - wip_stage_templates (per product_family)
+ *   - work_orders (+ wip_stages)
+ *
+ * Explicitly deferred to Phase 3: ECN workflow, BMR dual-sign, scrap, downtime,
+ * OEE, MRP atomic reservation, shop-floor live view, operator capability,
+ * assembly lines L1-L5, dedicated device_ids 13-state lifecycle.
+ *
+ * Rules (same as crm.ts / inventory.ts / procurement.ts):
+ *   - Money + quantities are decimal-strings. NEVER Number().
+ *   - Enums are UPPER_SNAKE to match DB CHECK constraints.
+ *   - Headers have optimistic concurrency via expectedVersion.
+ *   - Line CRUD is siblings-of-header: separate endpoints, bumps header.version
+ *     via service-layer side-effects.
+ */
+
+import { z } from "zod";
+import { PaginationQuerySchema } from "./pagination.js";
+
+// ─── Shared helpers ──────────────────────────────────────────────────────────
+
+/** NUMERIC(18,2) money-style. */
+const decimalStr = z
+  .string()
+  .trim()
+  .regex(/^-?\d+(\.\d+)?$/u, 'must be a decimal string like "1000.50"');
+
+/** NUMERIC(18,3) quantity — three decimals for metres / grams. */
+const qtyStr = z
+  .string()
+  .trim()
+  .regex(/^-?\d+(\.\d{1,3})?$/u, 'must be a quantity string like "12.500"');
+
+/** NUMERIC(10,2) duration in hours. */
+const hoursStr = z
+  .string()
+  .trim()
+  .regex(/^\d+(\.\d{1,2})?$/u, 'must be a non-negative hours string like "4.50"');
+
+const uuid = z.string().uuid();
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+export const PRODUCT_FAMILIES = [
+  "INSTRUMENT",
+  "DEVICE",
+  "REAGENT",
+  "CONSUMABLE",
+] as const;
+export const ProductFamilySchema = z.enum(PRODUCT_FAMILIES);
+export type ProductFamily = z.infer<typeof ProductFamilySchema>;
+
+export const BOM_STATUSES = [
+  "DRAFT",
+  "ACTIVE",
+  "SUPERSEDED",
+  "OBSOLETE",
+] as const;
+export const BomStatusSchema = z.enum(BOM_STATUSES);
+export type BomStatus = z.infer<typeof BomStatusSchema>;
+
+export const BOM_LINE_TRACKING_TYPES = ["SERIAL", "BATCH", "NONE"] as const;
+export const BomLineTrackingTypeSchema = z.enum(BOM_LINE_TRACKING_TYPES);
+export type BomLineTrackingType = z.infer<typeof BomLineTrackingTypeSchema>;
+
+export const WO_STATUSES = [
+  "PLANNED",
+  "MATERIAL_CHECK",
+  "IN_PROGRESS",
+  "QC_HOLD",
+  "REWORK",
+  "COMPLETED",
+  "CANCELLED",
+] as const;
+export const WoStatusSchema = z.enum(WO_STATUSES);
+export type WoStatus = z.infer<typeof WoStatusSchema>;
+
+export const WO_PRIORITIES = ["LOW", "NORMAL", "HIGH", "CRITICAL"] as const;
+export const WoPrioritySchema = z.enum(WO_PRIORITIES);
+export type WoPriority = z.infer<typeof WoPrioritySchema>;
+
+export const WIP_STAGE_STATUSES = [
+  "PENDING",
+  "IN_PROGRESS",
+  "QC_HOLD",
+  "REWORK",
+  "COMPLETED",
+] as const;
+export const WipStageStatusSchema = z.enum(WIP_STAGE_STATUSES);
+export type WipStageStatus = z.infer<typeof WipStageStatusSchema>;
+
+export const WIP_STAGE_QC_RESULTS = ["PASS", "FAIL"] as const;
+export const WipStageQcResultSchema = z.enum(WIP_STAGE_QC_RESULTS);
+export type WipStageQcResult = z.infer<typeof WipStageQcResultSchema>;
+
+export const PRODUCTION_NUMBER_KINDS = ["WO"] as const;
+export const ProductionNumberKindSchema = z.enum(PRODUCTION_NUMBER_KINDS);
+export type ProductionNumberKind = z.infer<typeof ProductionNumberKindSchema>;
+
+// ─── Products ────────────────────────────────────────────────────────────────
+
+export const ProductSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  productCode: z.string(),
+  name: z.string(),
+  family: ProductFamilySchema,
+  description: z.string().nullable(),
+  uom: z.string(),
+  standardCycleDays: z.number().int().nonnegative(),
+  hasSerialTracking: z.boolean(),
+  reworkLimit: z.number().int().nonnegative(),
+  activeBomId: uuid.nullable(),
+  notes: z.string().nullable(),
+  isActive: z.boolean(),
+  version: z.number().int().positive(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  deletedAt: z.string().nullable(),
+});
+export type Product = z.infer<typeof ProductSchema>;
+
+export const CreateProductSchema = z.object({
+  productCode: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1).max(200),
+  family: ProductFamilySchema.default("INSTRUMENT"),
+  description: z.string().trim().max(2000).optional(),
+  uom: z.string().trim().min(1).max(16).default("PCS"),
+  standardCycleDays: z.number().int().nonnegative().default(0),
+  hasSerialTracking: z.boolean().default(true),
+  reworkLimit: z.number().int().nonnegative().default(2),
+  notes: z.string().trim().max(2000).optional(),
+  isActive: z.boolean().default(true),
+});
+export type CreateProduct = z.infer<typeof CreateProductSchema>;
+
+export const UpdateProductSchema = CreateProductSchema.partial().extend({
+  expectedVersion: z.number().int().positive(),
+});
+export type UpdateProduct = z.infer<typeof UpdateProductSchema>;
+
+export const ProductListQuerySchema = PaginationQuerySchema.extend({
+  family: ProductFamilySchema.optional(),
+  isActive: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});
+
+// ─── BOM Versions + Lines ───────────────────────────────────────────────────
+
+export const BomVersionSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  productId: uuid,
+  versionLabel: z.string(),
+  status: BomStatusSchema,
+  effectiveFrom: z.string().nullable(),
+  effectiveTo: z.string().nullable(),
+  totalStdCost: decimalStr,
+  ecnRef: z.string().nullable(),
+  notes: z.string().nullable(),
+  createdBy: uuid.nullable(),
+  approvedBy: uuid.nullable(),
+  approvedAt: z.string().nullable(),
+  version: z.number().int().positive(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  deletedAt: z.string().nullable(),
+});
+export type BomVersion = z.infer<typeof BomVersionSchema>;
+
+export const BomLineSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  bomId: uuid,
+  lineNo: z.number().int().positive(),
+  componentItemId: uuid,
+  qtyPerUnit: qtyStr,
+  uom: z.string(),
+  referenceDesignator: z.string().nullable(),
+  isCritical: z.boolean(),
+  trackingType: BomLineTrackingTypeSchema,
+  leadTimeDays: z.number().int().nonnegative(),
+  stdUnitCost: decimalStr,
+  notes: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type BomLine = z.infer<typeof BomLineSchema>;
+
+export const BomVersionWithLinesSchema = BomVersionSchema.extend({
+  lines: z.array(BomLineSchema),
+});
+export type BomVersionWithLines = z.infer<typeof BomVersionWithLinesSchema>;
+
+export const CreateBomLineSchema = z.object({
+  componentItemId: uuid,
+  lineNo: z.number().int().positive().optional(),
+  qtyPerUnit: qtyStr,
+  uom: z.string().trim().min(1).max(16),
+  referenceDesignator: z.string().trim().max(120).optional(),
+  isCritical: z.boolean().default(false),
+  trackingType: BomLineTrackingTypeSchema.default("NONE"),
+  leadTimeDays: z.number().int().nonnegative().default(0),
+  stdUnitCost: decimalStr.default("0"),
+  notes: z.string().trim().max(2000).optional(),
+});
+export type CreateBomLine = z.infer<typeof CreateBomLineSchema>;
+
+export const UpdateBomLineSchema = CreateBomLineSchema.partial();
+export type UpdateBomLine = z.infer<typeof UpdateBomLineSchema>;
+
+export const CreateBomVersionSchema = z.object({
+  productId: uuid,
+  versionLabel: z.string().trim().min(1).max(32),
+  effectiveFrom: z.string().date().optional(),
+  effectiveTo: z.string().date().optional(),
+  ecnRef: z.string().trim().max(64).optional(),
+  notes: z.string().trim().max(2000).optional(),
+  lines: z.array(CreateBomLineSchema).default([]),
+});
+export type CreateBomVersion = z.infer<typeof CreateBomVersionSchema>;
+
+export const UpdateBomVersionSchema = z.object({
+  versionLabel: z.string().trim().min(1).max(32).optional(),
+  effectiveFrom: z.string().date().optional(),
+  effectiveTo: z.string().date().optional(),
+  status: BomStatusSchema.optional(),
+  ecnRef: z.string().trim().max(64).optional(),
+  notes: z.string().trim().max(2000).optional(),
+  expectedVersion: z.number().int().positive(),
+});
+export type UpdateBomVersion = z.infer<typeof UpdateBomVersionSchema>;
+
+export const BomListQuerySchema = PaginationQuerySchema.extend({
+  productId: uuid.optional(),
+  status: BomStatusSchema.optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});
+
+/**
+ * ActivateBom — promotes a BOM to ACTIVE, transitioning any prior ACTIVE
+ * BOM on the same product to SUPERSEDED. Atomic.
+ */
+export const ActivateBomSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  effectiveFrom: z.string().date().optional(),
+});
+export type ActivateBom = z.infer<typeof ActivateBomSchema>;
+
+// ─── WIP Stage Templates ────────────────────────────────────────────────────
+
+export const WipStageTemplateSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  productFamily: ProductFamilySchema,
+  sequenceNumber: z.number().int().positive(),
+  stageName: z.string(),
+  requiresQcSignoff: z.boolean(),
+  expectedDurationHours: hoursStr,
+  responsibleRole: z.string(),
+  notes: z.string().nullable(),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type WipStageTemplate = z.infer<typeof WipStageTemplateSchema>;
+
+export const WipStageTemplateListQuerySchema = z.object({
+  productFamily: ProductFamilySchema.optional(),
+});
+
+// ─── Work Orders + WIP Stages ───────────────────────────────────────────────
+
+export const WorkOrderSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  pid: z.string(),
+  productId: uuid,
+  bomId: uuid,
+  bomVersionLabel: z.string(),
+  quantity: qtyStr,
+  status: WoStatusSchema,
+  priority: WoPrioritySchema,
+  targetDate: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  dealId: uuid.nullable(),
+  assignedTo: uuid.nullable(),
+  createdBy: uuid.nullable(),
+  currentStageIndex: z.number().int().nonnegative(),
+  reworkCount: z.number().int().nonnegative(),
+  lotNumber: z.string().nullable(),
+  deviceSerials: z.array(z.string()),
+  notes: z.string().nullable(),
+  version: z.number().int().positive(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  deletedAt: z.string().nullable(),
+});
+export type WorkOrder = z.infer<typeof WorkOrderSchema>;
+
+export const WipStageSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  woId: uuid,
+  templateId: uuid.nullable(),
+  sequenceNumber: z.number().int().positive(),
+  stageName: z.string(),
+  requiresQcSignoff: z.boolean(),
+  expectedDurationHours: hoursStr,
+  status: WipStageStatusSchema,
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  qcResult: WipStageQcResultSchema.nullable(),
+  qcNotes: z.string().nullable(),
+  reworkCount: z.number().int().nonnegative(),
+  assignedTo: uuid.nullable(),
+  notes: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type WipStage = z.infer<typeof WipStageSchema>;
+
+export const WorkOrderWithStagesSchema = WorkOrderSchema.extend({
+  stages: z.array(WipStageSchema),
+});
+export type WorkOrderWithStages = z.infer<typeof WorkOrderWithStagesSchema>;
+
+export const CreateWorkOrderSchema = z.object({
+  /** Optional — service auto-generates PID-YYYY-NNNN via production_number_sequences if absent. */
+  pid: z.string().trim().min(1).max(32).optional(),
+  productId: uuid,
+  /** Optional — defaults to product's activeBomId if absent. Must be ACTIVE or DRAFT BOM. */
+  bomId: uuid.optional(),
+  quantity: qtyStr,
+  priority: WoPrioritySchema.default("NORMAL"),
+  targetDate: z.string().date().optional(),
+  dealId: uuid.optional(),
+  assignedTo: uuid.optional(),
+  lotNumber: z.string().trim().max(64).optional(),
+  /** Optional — service generates {productCode}-YYYY-NNNN if product.hasSerialTracking. */
+  deviceSerials: z.array(z.string().trim().min(1).max(64)).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+export type CreateWorkOrder = z.infer<typeof CreateWorkOrderSchema>;
+
+export const UpdateWorkOrderSchema = z.object({
+  status: WoStatusSchema.optional(),
+  priority: WoPrioritySchema.optional(),
+  targetDate: z.string().date().optional(),
+  assignedTo: uuid.optional(),
+  lotNumber: z.string().trim().max(64).optional(),
+  deviceSerials: z.array(z.string().trim().min(1).max(64)).optional(),
+  notes: z.string().trim().max(2000).optional(),
+  expectedVersion: z.number().int().positive(),
+});
+export type UpdateWorkOrder = z.infer<typeof UpdateWorkOrderSchema>;
+
+export const WorkOrderListQuerySchema = PaginationQuerySchema.extend({
+  status: WoStatusSchema.optional(),
+  priority: WoPrioritySchema.optional(),
+  productId: uuid.optional(),
+  assignedTo: uuid.optional(),
+  dealId: uuid.optional(),
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});
+
+// ─── WIP Stage mutations ────────────────────────────────────────────────────
+
+export const AdvanceWipStageSchema = z.object({
+  /** Transition to IN_PROGRESS (must be PENDING). */
+  action: z.enum(["START", "COMPLETE", "QC_PASS", "QC_FAIL", "REWORK_DONE"]),
+  qcNotes: z.string().trim().max(2000).optional(),
+  assignedTo: uuid.optional(),
+  notes: z.string().trim().max(2000).optional(),
+  expectedStageVersion: z.number().int().nonnegative().optional(),
+});
+export type AdvanceWipStage = z.infer<typeof AdvanceWipStageSchema>;

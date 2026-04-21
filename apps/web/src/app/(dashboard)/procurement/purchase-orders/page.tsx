@@ -1,20 +1,37 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * Purchase Orders — reads /procurement/purchase-orders via
+ * useApiPurchaseOrders.
+ *
+ * Contract deltas vs the older mock (PurchaseOrder in procurement-mock.ts):
+ *   - Status vocabulary is DRAFT / PENDING_APPROVAL / APPROVED / SENT /
+ *     PARTIALLY_RECEIVED / RECEIVED / CANCELLED. Mock's PENDING_FINANCE /
+ *     PENDING_MGMT double-approval model collapses to a single
+ *     PENDING_APPROVAL step; workflow stages are a Phase 3 concern.
+ *   - Header totals are decimal strings (subtotal, taxTotal, discountTotal,
+ *     grandTotal), maintained server-side from the sum of po_lines.
+ *   - "Cost centre", "proforma uploaded", "approval logs" — not in Phase 2.
+ *   - PO creation requires `vendorId` + at least a list of items (via
+ *     `lines[]`). The list page only creates an EMPTY DRAFT; line entry
+ *     happens on the PO detail page.
+ *
+ * Clicking a row routes to /procurement/purchase-orders/:id (detail page).
+ */
+
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
-import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,240 +42,266 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  purchaseOrders as initialPOs,
-  vendors,
-  PurchaseOrder,
-  POStatus,
-  formatCurrency,
-  formatDate,
-} from "@/data/procurement-mock";
+  useApiCreatePurchaseOrder,
+  useApiPurchaseOrders,
+  useApiVendors,
+} from "@/hooks/useProcurementApi";
+import { useApiWarehouses } from "@/hooks/useInventoryApi";
 import {
-  ShoppingBag,
-  Clock,
+  PO_STATUSES,
+  type PoStatus,
+  type PurchaseOrder,
+} from "@mobilab/contracts";
+import {
+  AlertCircle,
   CheckCircle2,
-  PackageOpen,
+  Clock,
+  FileText,
   PackageCheck,
+  PackageOpen,
   Plus,
-  Eye,
+  ShoppingBag,
 } from "lucide-react";
+
+function formatMoney(raw: string | null | undefined): string {
+  if (raw == null || raw === "") return "—";
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return raw ?? "—";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const STATUS_TONE: Record<PoStatus, string> = {
+  DRAFT: "bg-gray-50 text-gray-700 border-gray-200",
+  PENDING_APPROVAL: "bg-amber-50 text-amber-700 border-amber-200",
+  APPROVED: "bg-blue-50 text-blue-700 border-blue-200",
+  SENT: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  PARTIALLY_RECEIVED: "bg-purple-50 text-purple-700 border-purple-200",
+  RECEIVED: "bg-green-50 text-green-700 border-green-200",
+  CANCELLED: "bg-red-50 text-red-700 border-red-200",
+};
 
 export default function PurchaseOrdersPage() {
   const router = useRouter();
-  const [poList, setPOList] = useState<PurchaseOrder[]>(initialPOs);
-  const [newPOOpen, setNewPOOpen] = useState(false);
 
-  // Filters
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [vendorFilter, setVendorFilter] = useState("ALL");
+  // ─── Filters ────────────────────────────────────────────────────────────
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<PoStatus | "all">("all");
+  const [vendorFilter, setVendorFilter] = useState<string>("all");
 
-  // New PO form state
+  const query = useMemo(
+    () => ({
+      limit: 100,
+      search: search.trim() || undefined,
+      status: status === "all" ? undefined : status,
+      vendorId: vendorFilter === "all" ? undefined : vendorFilter,
+    }),
+    [search, status, vendorFilter]
+  );
+
+  const posQuery = useApiPurchaseOrders(query);
+  const vendorsQuery = useApiVendors({ limit: 200, isActive: true });
+  const warehousesQuery = useApiWarehouses({ limit: 100, isActive: true });
+  const createPo = useApiCreatePurchaseOrder();
+
+  // ─── Create dialog state ────────────────────────────────────────────────
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [formVendorId, setFormVendorId] = useState("");
-  const [formWarehouse, setFormWarehouse] = useState("wh1");
-  const [formDeliveryDate, setFormDeliveryDate] = useState("");
-  const [formCostCentre, setFormCostCentre] = useState("");
+  const [formWarehouseId, setFormWarehouseId] = useState("");
+  const [formExpectedDate, setFormExpectedDate] = useState("");
+  const [formPaymentTermsDays, setFormPaymentTermsDays] = useState("30");
   const [formNotes, setFormNotes] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const activeVendors = vendors.filter((v) => v.status === "ACTIVE");
+  const vendors = vendorsQuery.data?.data ?? [];
+  const warehouses = warehousesQuery.data?.data ?? [];
 
-  // KPIs
-  const total = poList.length;
-  const draftPending = poList.filter(
-    (p) =>
-      p.status === "DRAFT" ||
-      p.status === "PENDING_FINANCE" ||
-      p.status === "PENDING_MGMT"
-  ).length;
-  const approvedSent = poList.filter(
-    (p) => p.status === "APPROVED" || p.status === "PO_SENT"
-  ).length;
-  const partiallyReceived = poList.filter(
-    (p) => p.status === "PARTIALLY_RECEIVED"
-  ).length;
-  const fulfilled = poList.filter((p) => p.status === "FULFILLED").length;
-
-  // Filtered
-  const filtered = poList.filter((p) => {
-    if (statusFilter !== "ALL" && p.status !== statusFilter) return false;
-    if (vendorFilter !== "ALL" && p.vendorId !== vendorFilter) return false;
-    return true;
-  });
-
-  function handleCreateDraft() {
-    const vendor = vendors.find((v) => v.id === formVendorId);
-    if (!vendor) return;
-    const newPO: PurchaseOrder = {
-      id: `po-new-${Date.now()}`,
-      poNumber: `MLB-PO-2026-${String(Math.floor(Math.random() * 900) + 100)}`,
-      vendorId: formVendorId,
-      vendorName: vendor.tradeName,
-      vendorGstin: vendor.gstin,
-      warehouseId: formWarehouse,
-      warehouseName: formWarehouse === "wh1" ? "Guwahati HQ" : "Noida Secondary",
-      requiredDeliveryDate: formDeliveryDate,
-      status: "DRAFT" as POStatus,
-      lines: [],
-      subtotal: 0,
-      gstAmount: 0,
-      totalValue: 0,
-      approvalLogs: [],
-      proformaUploaded: false,
-      createdBy: "Current User",
-      createdAt: new Date().toISOString().split("T")[0],
-      costCentre: formCostCentre,
-      notes: formNotes || undefined,
-    };
-    setPOList([newPO, ...poList]);
-    setNewPOOpen(false);
-    setFormVendorId("");
-    setFormWarehouse("wh1");
-    setFormDeliveryDate("");
-    setFormCostCentre("");
-    setFormNotes("");
-  }
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  function isDeliveryOverdue(po: PurchaseOrder) {
+  // Loading / error shells
+  if (posQuery.isLoading) {
     return (
-      (po.status === "APPROVED" || po.status === "PO_SENT") &&
-      new Date(po.requiredDeliveryDate) < today
+      <div className="p-6 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-5 gap-4">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
     );
   }
+
+  if (posQuery.isError) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">
+              Failed to load purchase orders
+            </p>
+            <p className="text-red-700 mt-1">
+              {posQuery.error instanceof Error
+                ? posQuery.error.message
+                : "Unknown error"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const pos = posQuery.data?.data ?? [];
+  const total = posQuery.data?.meta.total ?? pos.length;
+
+  // KPIs — scoped to the current page window. Global totals would need
+  // dedicated aggregate endpoints.
+  const draftPending = pos.filter(
+    (p) => p.status === "DRAFT" || p.status === "PENDING_APPROVAL"
+  ).length;
+  const approvedOrSent = pos.filter(
+    (p) => p.status === "APPROVED" || p.status === "SENT"
+  ).length;
+  const partiallyReceived = pos.filter(
+    (p) => p.status === "PARTIALLY_RECEIVED"
+  ).length;
+  const received = pos.filter((p) => p.status === "RECEIVED").length;
 
   const columns: Column<PurchaseOrder>[] = [
     {
       key: "poNumber",
       header: "PO #",
-      sortable: true,
-      render: (po) => (
-        <span className="font-mono font-bold text-sm">{po.poNumber}</span>
+      render: (p) => (
+        <span className="font-mono text-xs font-semibold text-blue-700">
+          {p.poNumber}
+        </span>
       ),
     },
     {
-      key: "vendorName",
+      key: "vendorId",
       header: "Vendor",
-      render: (po) => (
-        <div>
-          <p className="font-semibold text-sm">{po.vendorName}</p>
-          <p className="font-mono text-xs text-muted-foreground">
-            {po.vendorGstin}
-          </p>
-        </div>
-      ),
+      render: (p) => {
+        const vendor = vendors.find((v) => v.id === p.vendorId);
+        return (
+          <span className="text-sm">
+            {vendor?.name ?? (
+              <span className="font-mono text-xs text-muted-foreground">
+                {p.vendorId.slice(0, 8)}…
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     {
-      key: "warehouseName",
-      header: "Warehouse",
-      render: (po) => <span className="text-sm">{po.warehouseName}</span>,
-    },
-    {
-      key: "createdAt",
-      header: "Created",
-      sortable: true,
-      render: (po) => (
+      key: "orderDate",
+      header: "Order Date",
+      render: (p) => (
         <span className="text-sm text-muted-foreground">
-          {formatDate(po.createdAt)}
+          {formatDate(p.orderDate)}
         </span>
       ),
     },
     {
-      key: "requiredDeliveryDate",
-      header: "Required Delivery",
-      render: (po) => (
-        <span
-          className={
-            isDeliveryOverdue(po)
-              ? "text-red-600 font-medium text-sm"
-              : "text-sm"
-          }
-        >
-          {formatDate(po.requiredDeliveryDate)}
-        </span>
-      ),
-    },
-    {
-      key: "lines",
-      header: "Lines",
-      render: (po) => (
+      key: "expectedDate",
+      header: "Expected",
+      render: (p) => (
         <span className="text-sm text-muted-foreground">
-          {po.lines.length} item{po.lines.length !== 1 ? "s" : ""}
+          {formatDate(p.expectedDate)}
         </span>
       ),
     },
     {
-      key: "totalValue",
+      key: "grandTotal",
       header: "Value",
-      render: (po) => (
-        <div className="text-right space-y-0.5">
-          <p className="text-xs text-muted-foreground">
-            {formatCurrency(po.subtotal)} + GST {formatCurrency(po.gstAmount)}
-          </p>
-          <p className="font-bold text-sm">{formatCurrency(po.totalValue)}</p>
-        </div>
+      className: "text-right",
+      render: (p) => (
+        <span className="text-sm font-medium text-right block">
+          {formatMoney(p.grandTotal)}
+        </span>
       ),
     },
     {
-      key: "proformaUploaded",
-      header: "Proforma",
-      render: (po) =>
-        po.proformaUploaded ? (
-          <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">
-            PI Received
-          </Badge>
-        ) : (
-          <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs">
-            Awaiting PI
-          </Badge>
-        ),
+      key: "currency",
+      header: "Currency",
+      render: (p) => (
+        <span className="text-xs text-muted-foreground">{p.currency}</span>
+      ),
     },
     {
       key: "status",
       header: "Status",
-      render: (po) => <StatusBadge status={po.status} />,
-    },
-    {
-      key: "createdBy",
-      header: "Created By",
-      render: (po) => <span className="text-sm">{po.createdBy}</span>,
-    },
-    {
-      key: "id",
-      header: "Actions",
-      render: (po) => (
-        <Button
-          size="sm"
+      render: (p) => (
+        <Badge
           variant="outline"
-          className="h-7 text-xs"
-          onClick={(e) => {
-            e.stopPropagation();
-            router.push(`/procurement/purchase-orders/${po.id}`);
-          }}
+          className={`text-xs whitespace-nowrap ${STATUS_TONE[p.status]}`}
         >
-          <Eye className="h-3.5 w-3.5 mr-1" />
-          View
-        </Button>
+          {p.status.replace(/_/g, " ")}
+        </Badge>
       ),
     },
   ];
 
+  async function handleSave(): Promise<void> {
+    setSaveError(null);
+    if (!formVendorId) {
+      setSaveError("Pick a vendor.");
+      return;
+    }
+    const termsDays = Number.parseInt(formPaymentTermsDays, 10);
+    if (!Number.isFinite(termsDays) || termsDays < 0) {
+      setSaveError("Payment terms must be a non-negative number of days.");
+      return;
+    }
+    try {
+      const created = await createPo.mutateAsync({
+        vendorId: formVendorId,
+        deliveryWarehouseId: formWarehouseId || undefined,
+        expectedDate: formExpectedDate || undefined,
+        paymentTermsDays: termsDays,
+        notes: formNotes.trim() || undefined,
+        // Zod defaults these server-side; z.infer<> output still wants them.
+        currency: "INR",
+        lines: [],
+      });
+      setDialogOpen(false);
+      setFormVendorId("");
+      setFormWarehouseId("");
+      setFormExpectedDate("");
+      setFormPaymentTermsDays("30");
+      setFormNotes("");
+      router.push(`/procurement/purchase-orders/${created.id}`);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Save failed");
+    }
+  }
+
   return (
-    <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+    <div className="p-6 max-w-[1400px] mx-auto">
       <PageHeader
         title="Purchase Orders"
-        description="Full PO lifecycle from draft to fulfilment"
-        actions={
-          <Button onClick={() => setNewPOOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            New PO
-          </Button>
-        }
+        description="Purchase orders — one header, many item lines. Totals are server-computed."
       />
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <KPICard
           title="Total POs"
           value={String(total)}
@@ -273,7 +316,7 @@ export default function PurchaseOrdersPage() {
         />
         <KPICard
           title="Approved / Sent"
-          value={String(approvedSent)}
+          value={String(approvedOrSent)}
           icon={CheckCircle2}
           iconColor="text-blue-600"
         />
@@ -281,101 +324,92 @@ export default function PurchaseOrdersPage() {
           title="Partially Received"
           value={String(partiallyReceived)}
           icon={PackageOpen}
-          iconColor="text-cyan-600"
+          iconColor="text-purple-600"
         />
         <KPICard
-          title="Fulfilled"
-          value={String(fulfilled)}
+          title="Received"
+          value={String(received)}
           icon={PackageCheck}
-          iconColor="text-green-700"
+          iconColor="text-green-600"
         />
       </div>
 
-      {/* Filter bar */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-wrap gap-4 items-end">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Status</Label>
-              <Select
-                value={statusFilter}
-                onValueChange={(v) => setStatusFilter(v ?? "ALL")}
-              >
-                <SelectTrigger className="w-48 h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Statuses</SelectItem>
-                  <SelectItem value="DRAFT">Draft</SelectItem>
-                  <SelectItem value="PENDING_FINANCE">
-                    Pending Finance
-                  </SelectItem>
-                  <SelectItem value="PENDING_MGMT">Pending Mgmt</SelectItem>
-                  <SelectItem value="APPROVED">Approved</SelectItem>
-                  <SelectItem value="PO_SENT">PO Sent</SelectItem>
-                  <SelectItem value="PARTIALLY_RECEIVED">
-                    Partially Received
-                  </SelectItem>
-                  <SelectItem value="FULFILLED">Fulfilled</SelectItem>
-                  <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                  <SelectItem value="AMENDED">Amended</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Vendor</Label>
-              <Select
-                value={vendorFilter}
-                onValueChange={(v) => setVendorFilter(v ?? "ALL")}
-              >
-                <SelectTrigger className="w-52 h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Vendors</SelectItem>
-                  {vendors.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.tradeName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {(statusFilter !== "ALL" || vendorFilter !== "ALL") && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => {
-                  setStatusFilter("ALL");
-                  setVendorFilter("ALL");
-                }}
-              >
-                Clear Filters
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <DataTable
-        data={filtered}
+      <DataTable<PurchaseOrder>
+        data={pos}
         columns={columns}
         searchKey="poNumber"
-        searchPlaceholder="Search by PO number..."
+        searchPlaceholder="Search PO number..."
+        onRowClick={(p) => router.push(`/procurement/purchase-orders/${p.id}`)}
         pageSize={10}
-        onRowClick={(po) =>
-          router.push(`/procurement/purchase-orders/${po.id}`)
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Input
+              placeholder="Search PO / notes..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-48"
+            />
+            <Select
+              value={status}
+              onValueChange={(v) => setStatus((v ?? "all") as PoStatus | "all")}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                {PO_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s.replace(/_/g, " ")}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={vendorFilter}
+              onValueChange={(v) => setVendorFilter(v ?? "all")}
+            >
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Vendor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Vendors</SelectItem>
+                {vendors.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {v.code} — {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={() => setDialogOpen(true)} className="gap-1.5">
+              <Plus className="h-4 w-4" />
+              New PO
+            </Button>
+          </div>
         }
       />
 
-      {/* New PO Dialog */}
-      <Dialog open={newPOOpen} onOpenChange={setNewPOOpen}>
-        <DialogContent className="max-w-md">
+      {pos.length === 0 && (
+        <div className="mt-6 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 p-8 text-center flex flex-col items-center gap-2">
+          <FileText className="h-8 w-8 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">
+            No purchase orders match the current filter.
+          </p>
+        </div>
+      )}
+
+      {/* Create dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>New Purchase Order</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {saveError && (
+              <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
+                {saveError}
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Vendor</Label>
               <Select
@@ -383,12 +417,12 @@ export default function PurchaseOrdersPage() {
                 onValueChange={(v) => setFormVendorId(v ?? "")}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select active vendor..." />
+                  <SelectValue placeholder="Select vendor..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {activeVendors.map((v) => (
+                  {vendors.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
-                      {v.tradeName} — {v.category}
+                      {v.code} — {v.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -397,55 +431,66 @@ export default function PurchaseOrdersPage() {
             <div className="space-y-1.5">
               <Label>Delivery Warehouse</Label>
               <Select
-                value={formWarehouse}
-                onValueChange={(v) => setFormWarehouse(v ?? "wh1")}
+                value={formWarehouseId}
+                onValueChange={(v) => setFormWarehouseId(v ?? "")}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Optional — select warehouse..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="wh1">Guwahati HQ</SelectItem>
-                  <SelectItem value="wh2">Noida Secondary</SelectItem>
+                  {warehouses.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.code} — {w.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label>Required Delivery Date</Label>
-              <Input
-                type="date"
-                value={formDeliveryDate}
-                onChange={(e) => setFormDeliveryDate(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Cost Centre</Label>
-              <Input
-                value={formCostCentre}
-                onChange={(e) => setFormCostCentre(e.target.value)}
-                placeholder="e.g. PROD-GUW, STORES-NOI"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Expected Date</Label>
+                <Input
+                  type="date"
+                  value={formExpectedDate}
+                  onChange={(e) => setFormExpectedDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Payment Terms (days)</Label>
+                <Input
+                  type="number"
+                  value={formPaymentTermsDays}
+                  onChange={(e) => setFormPaymentTermsDays(e.target.value)}
+                />
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label>Notes</Label>
               <Textarea
+                rows={2}
                 value={formNotes}
                 onChange={(e) => setFormNotes(e.target.value)}
-                placeholder="Any additional notes..."
-                rows={2}
+                placeholder="Optional PO notes..."
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              Add line items from the PO detail page after creating the
+              header.
+            </p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setNewPOOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setDialogOpen(false)}
+              disabled={createPo.isPending}
+            >
               Cancel
             </Button>
             <Button
-              onClick={handleCreateDraft}
-              disabled={
-                !formVendorId || !formDeliveryDate || !formCostCentre
-              }
+              onClick={handleSave}
+              disabled={createPo.isPending || !formVendorId}
             >
-              Create as Draft
+              {createPo.isPending ? "Saving…" : "Create Draft"}
             </Button>
           </DialogFooter>
         </DialogContent>

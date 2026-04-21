@@ -1,8 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Monorepo: transpile workspace packages in the Next build.
-  transpilePackages: ["@mobilab/contracts"],
+  // @mobilab/contracts is consumed as a precompiled workspace package:
+  // its package.json "exports" map points at ./dist/*.js (with ./dist/*.d.ts
+  // for types), so we do NOT need `transpilePackages` here. Turbopack is
+  // strict about ESM ".js" specifiers inside source-only packages (rejects
+  // `import "./billing.js"` that points at `billing.ts`), so always consume
+  // the compiled output. `pnpm turbo build` runs the contracts `build`
+  // script first via the `^build` dependency in turbo.json.
 
   // Per ARCHITECTURE.md Appendix D — retire deprecated namespaces.
   // These redirects keep existing bookmarks working while we consolidate.

@@ -2,11 +2,19 @@
  * Gate 8 — Cross-tenant isolation for CRM tables.
  *
  * For every CRM tenant-scoped table, inserts under one org must be invisible
- * under another org. Repeats the gate-5 pattern across accounts, contacts,
- * leads, lead_activities, deals, tickets, ticket_comments.
+ * under another org. Repeats the gate-5 pattern across the full CRM surface:
+ * accounts, contacts, leads, lead_activities, deals, deal_line_items,
+ * tickets, ticket_comments, quotations, quotation_line_items, sales_orders,
+ * sales_order_line_items, crm_number_sequences.
  *
  * This is the ARCHITECTURE.md §9.2 / §13.1 contract — if any table here
  * leaks, the whole CRM module is unsafe to ship.
+ *
+ * NOTE: gate-12 is the *catalog-level* companion — it asserts every org_id
+ * table has RLS enabled+forced with a sane policy. This gate goes further
+ * by inserting a row under one org and proving zero rows surface under
+ * another. The two together protect against both wiring mistakes (gate-12)
+ * and subtle policy misconfigurations (gate-8).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -17,13 +25,18 @@ import { makeTestPool, waitForPg, DEV_ORG_ID } from "./_helpers.js";
 const OTHER_ORG_ID = "00000000-0000-0000-0000-0000000000c1";
 
 // Stable UUIDs for the "other org" rows so re-running the gate is idempotent.
-const OTHER_ACCOUNT_ID  = "00000000-0000-0000-0000-0000000000c2";
-const OTHER_CONTACT_ID  = "00000000-0000-0000-0000-0000000000c3";
-const OTHER_LEAD_ID     = "00000000-0000-0000-0000-0000000000c4";
-const OTHER_ACTIVITY_ID = "00000000-0000-0000-0000-0000000000c5";
-const OTHER_DEAL_ID     = "00000000-0000-0000-0000-0000000000c6";
-const OTHER_TICKET_ID   = "00000000-0000-0000-0000-0000000000c7";
-const OTHER_COMMENT_ID  = "00000000-0000-0000-0000-0000000000c8";
+const OTHER_ACCOUNT_ID      = "00000000-0000-0000-0000-0000000000c2";
+const OTHER_CONTACT_ID      = "00000000-0000-0000-0000-0000000000c3";
+const OTHER_LEAD_ID         = "00000000-0000-0000-0000-0000000000c4";
+const OTHER_ACTIVITY_ID     = "00000000-0000-0000-0000-0000000000c5";
+const OTHER_DEAL_ID         = "00000000-0000-0000-0000-0000000000c6";
+const OTHER_TICKET_ID       = "00000000-0000-0000-0000-0000000000c7";
+const OTHER_COMMENT_ID      = "00000000-0000-0000-0000-0000000000c8";
+const OTHER_DEAL_LINE_ID    = "00000000-0000-0000-0000-0000000000c9";
+const OTHER_QUOTATION_ID    = "00000000-0000-0000-0000-0000000000ca";
+const OTHER_QUOTE_LINE_ID   = "00000000-0000-0000-0000-0000000000cb";
+const OTHER_SO_ID           = "00000000-0000-0000-0000-0000000000cc";
+const OTHER_SO_LINE_ID      = "00000000-0000-0000-0000-0000000000cd";
 
 const TENANT_TABLES = [
   "accounts",
@@ -31,8 +44,14 @@ const TENANT_TABLES = [
   "leads",
   "lead_activities",
   "deals",
+  "deal_line_items",
   "tickets",
   "ticket_comments",
+  "quotations",
+  "quotation_line_items",
+  "sales_orders",
+  "sales_order_line_items",
+  "crm_number_sequences",
 ] as const;
 
 describe("gate-8: CRM cross-tenant isolation", () => {
@@ -93,6 +112,58 @@ describe("gate-8: CRM cross-tenant isolation", () => {
          ) VALUES ($1, $2, $3, 'INTERNAL', 'Other tenant comment')
          ON CONFLICT (id) DO NOTHING`,
         [OTHER_COMMENT_ID, OTHER_ORG_ID, OTHER_TICKET_ID]
+      );
+      // Deal line item — depends on the deal created above.
+      await client.query(
+        `INSERT INTO deal_line_items (
+           id, org_id, deal_id, product_code, product_name,
+           quantity, unit_price, line_total
+         ) VALUES ($1, $2, $3, 'SKU-OTHER', 'Other SKU',
+                   1, '100.00', '100.00')
+         ON CONFLICT (id) DO NOTHING`,
+        [OTHER_DEAL_LINE_ID, OTHER_ORG_ID, OTHER_DEAL_ID]
+      );
+      // Quotation + one line item. Minimum set of columns; totals stay at
+      // the table's numeric defaults so we don't have to recompute them.
+      await client.query(
+        `INSERT INTO quotations (
+           id, org_id, quotation_number, company, contact_name, status
+         ) VALUES ($1, $2, 'OTHER-Q-0001', 'Other Co', 'Other Contact', 'DRAFT')
+         ON CONFLICT (id) DO NOTHING`,
+        [OTHER_QUOTATION_ID, OTHER_ORG_ID]
+      );
+      await client.query(
+        `INSERT INTO quotation_line_items (
+           id, org_id, quotation_id, product_code, product_name,
+           quantity, unit_price, line_total
+         ) VALUES ($1, $2, $3, 'SKU-OTHER', 'Other SKU',
+                   1, '100.00', '100.00')
+         ON CONFLICT (id) DO NOTHING`,
+        [OTHER_QUOTE_LINE_ID, OTHER_ORG_ID, OTHER_QUOTATION_ID]
+      );
+      // Sales order + one line item. Same pattern as quotations.
+      await client.query(
+        `INSERT INTO sales_orders (
+           id, org_id, order_number, company, contact_name, status
+         ) VALUES ($1, $2, 'OTHER-SO-0001', 'Other Co', 'Other Contact', 'DRAFT')
+         ON CONFLICT (id) DO NOTHING`,
+        [OTHER_SO_ID, OTHER_ORG_ID]
+      );
+      await client.query(
+        `INSERT INTO sales_order_line_items (
+           id, org_id, order_id, product_code, product_name,
+           quantity, unit_price, line_total
+         ) VALUES ($1, $2, $3, 'SKU-OTHER', 'Other SKU',
+                   1, '100.00', '100.00')
+         ON CONFLICT (id) DO NOTHING`,
+        [OTHER_SO_LINE_ID, OTHER_ORG_ID, OTHER_SO_ID]
+      );
+      // Number sequence — composite PK (org_id, kind, year), no `id` col.
+      await client.query(
+        `INSERT INTO crm_number_sequences (org_id, kind, year, last_seq)
+         VALUES ($1, 'QUOTATION', 2026, 1)
+         ON CONFLICT (org_id, kind, year) DO NOTHING`,
+        [OTHER_ORG_ID]
       );
     });
   });

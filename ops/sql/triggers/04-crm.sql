@@ -104,4 +104,51 @@ CREATE TRIGGER ticket_comments_audit
 AFTER INSERT OR DELETE ON ticket_comments
 FOR EACH ROW EXECUTE FUNCTION audit.tg_log();
 
+-- ── quotations ──────────────────────────────────────────────────────────────
+DROP TRIGGER IF EXISTS quotations_updated_at ON quotations;
+CREATE TRIGGER quotations_updated_at
+BEFORE UPDATE ON quotations
+FOR EACH ROW EXECUTE FUNCTION public.tg_set_updated_at();
+
+DROP TRIGGER IF EXISTS quotations_version ON quotations;
+CREATE TRIGGER quotations_version
+BEFORE UPDATE ON quotations
+FOR EACH ROW EXECUTE FUNCTION public.tg_bump_version();
+
+DROP TRIGGER IF EXISTS quotations_audit ON quotations;
+CREATE TRIGGER quotations_audit
+AFTER INSERT OR UPDATE OR DELETE ON quotations
+FOR EACH ROW EXECUTE FUNCTION audit.tg_log();
+
+-- ── quotation_line_items ────────────────────────────────────────────────────
+-- No version/updated_at — line items are immutable once created (replaced
+-- via DELETE+INSERT inside the same tx when a quotation is edited). Audit
+-- still fires so the tamper-evident ledger includes every line-item edit.
+DROP TRIGGER IF EXISTS quotation_line_items_audit ON quotation_line_items;
+CREATE TRIGGER quotation_line_items_audit
+AFTER INSERT OR UPDATE OR DELETE ON quotation_line_items
+FOR EACH ROW EXECUTE FUNCTION audit.tg_log();
+
+-- ── sales_orders ────────────────────────────────────────────────────────────
+DROP TRIGGER IF EXISTS sales_orders_updated_at ON sales_orders;
+CREATE TRIGGER sales_orders_updated_at
+BEFORE UPDATE ON sales_orders
+FOR EACH ROW EXECUTE FUNCTION public.tg_set_updated_at();
+
+DROP TRIGGER IF EXISTS sales_orders_version ON sales_orders;
+CREATE TRIGGER sales_orders_version
+BEFORE UPDATE ON sales_orders
+FOR EACH ROW EXECUTE FUNCTION public.tg_bump_version();
+
+DROP TRIGGER IF EXISTS sales_orders_audit ON sales_orders;
+CREATE TRIGGER sales_orders_audit
+AFTER INSERT OR UPDATE OR DELETE ON sales_orders
+FOR EACH ROW EXECUTE FUNCTION audit.tg_log();
+
+-- ── sales_order_line_items ──────────────────────────────────────────────────
+DROP TRIGGER IF EXISTS sales_order_line_items_audit ON sales_order_line_items;
+CREATE TRIGGER sales_order_line_items_audit
+AFTER INSERT OR UPDATE OR DELETE ON sales_order_line_items
+FOR EACH ROW EXECUTE FUNCTION audit.tg_log();
+
 -- crm_number_sequences is a counter; no audit (it's not a domain entity).

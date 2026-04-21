@@ -5,52 +5,115 @@ import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { KPICard } from "@/components/shared/kpi-card";
-import { orders, getAccountById, type Order } from "@/data/crm-mock";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatDate } from "@/data/mock";
+import { useApiSalesOrders } from "@/hooks/useCrmApi";
+import type { SalesOrder } from "@mobilab/contracts";
 import {
   ShoppingCart,
   Clock,
   Truck,
   CheckCircle2,
-  Check,
-  X,
-  MessageCircle,
-  Mail,
+  AlertCircle,
 } from "lucide-react";
+
+/**
+ * Orders list — /crm/orders backed by useApiSalesOrders.
+ *
+ * Contract deltas from mock (src/data/crm-mock.ts → Order):
+ *   - Status is UPPER_CASE (DRAFT, CONFIRMED, PROCESSING, DISPATCHED,
+ *     IN_TRANSIT, DELIVERED, CANCELLED).
+ *   - Totals are decimal *strings*; toNumber() only for display.
+ *   - Line items count from sub-array length (never includes deleted items).
+ *   - No more whatsappSent/emailSent/fgAvailable prototype columns — those
+ *     live on notifications/inventory modules, not on the SO itself.
+ */
+
+function toNumber(v: string | null | undefined): number {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 export default function OrdersPage() {
   const router = useRouter();
+  const ordersQuery = useApiSalesOrders({ limit: 50 });
+
+  if (ordersQuery.isLoading) {
+    return (
+      <div className="p-6 space-y-4">
+        <Skeleton className="h-8 w-40" />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  if (ordersQuery.isError) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">Failed to load orders</p>
+            <p className="text-red-700 mt-1">
+              {ordersQuery.error instanceof Error
+                ? ordersQuery.error.message
+                : "Unknown error"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const orders = ordersQuery.data?.data ?? [];
 
   const totalOrders = orders.length;
-  const processing = orders.filter((o) => o.status === "processing" || o.status === "confirmed").length;
-  const dispatched = orders.filter((o) => o.status === "dispatched" || o.status === "in_transit").length;
-  const delivered = orders.filter((o) => o.status === "delivered").length;
+  const processing = orders.filter(
+    (o) => o.status === "PROCESSING" || o.status === "CONFIRMED"
+  ).length;
+  const dispatched = orders.filter(
+    (o) => o.status === "DISPATCHED" || o.status === "IN_TRANSIT"
+  ).length;
+  const delivered = orders.filter((o) => o.status === "DELIVERED").length;
 
-  const columns: Column<Order>[] = [
+  const columns: Column<SalesOrder>[] = [
     {
       key: "orderNumber",
       header: "Order #",
       sortable: true,
       render: (order) => (
-        <span className="font-medium text-sm">{order.orderNumber}</span>
+        <span className="font-medium text-sm font-mono">
+          {order.orderNumber}
+        </span>
       ),
     },
     {
-      key: "accountId",
-      header: "Account",
-      render: (order) => {
-        const account = getAccountById(order.accountId);
-        return (
-          <span className="text-sm">{account?.name ?? "N/A"}</span>
-        );
-      },
+      key: "company",
+      header: "Company",
+      render: (order) => <span className="text-sm">{order.company}</span>,
+    },
+    {
+      key: "contactName",
+      header: "Contact",
+      render: (order) => (
+        <span className="text-sm text-muted-foreground">
+          {order.contactName}
+        </span>
+      ),
     },
     {
       key: "items",
       header: "Items",
       render: (order) => (
         <span className="text-sm text-muted-foreground">
-          {order.items.length} item{order.items.length !== 1 ? "s" : ""}
+          {order.lineItems.length} item
+          {order.lineItems.length !== 1 ? "s" : ""}
         </span>
       ),
     },
@@ -60,7 +123,9 @@ export default function OrdersPage() {
       sortable: true,
       className: "text-right",
       render: (order) => (
-        <span className="text-sm font-medium">{formatCurrency(order.grandTotal)}</span>
+        <span className="text-sm font-medium">
+          {formatCurrency(toNumber(order.grandTotal))}
+        </span>
       ),
     },
     {
@@ -69,11 +134,13 @@ export default function OrdersPage() {
       render: (order) => <StatusBadge status={order.status} />,
     },
     {
-      key: "orderDate",
-      header: "Order Date",
+      key: "createdAt",
+      header: "Created",
       sortable: true,
       render: (order) => (
-        <span className="text-sm text-muted-foreground">{formatDate(order.orderDate)}</span>
+        <span className="text-sm text-muted-foreground">
+          {formatDate(order.createdAt.slice(0, 10))}
+        </span>
       ),
     },
     {
@@ -81,32 +148,8 @@ export default function OrdersPage() {
       header: "Expected Delivery",
       render: (order) => (
         <span className="text-sm text-muted-foreground">
-          {formatDate(order.expectedDelivery)}
+          {order.expectedDelivery ? formatDate(order.expectedDelivery) : "—"}
         </span>
-      ),
-    },
-    {
-      key: "fgAvailable",
-      header: "FG",
-      render: (order) =>
-        order.fgAvailable ? (
-          <Check className="h-4 w-4 text-green-600" />
-        ) : (
-          <X className="h-4 w-4 text-red-500" />
-        ),
-    },
-    {
-      key: "notifications",
-      header: "Notified",
-      render: (order) => (
-        <div className="flex items-center gap-1.5">
-          {order.whatsappSent && (
-            <MessageCircle className="h-3.5 w-3.5 text-green-600" />
-          )}
-          {order.emailSent && (
-            <Mail className="h-3.5 w-3.5 text-blue-600" />
-          )}
-        </div>
       ),
     },
   ];
@@ -145,7 +188,7 @@ export default function OrdersPage() {
         />
       </div>
 
-      <DataTable
+      <DataTable<SalesOrder>
         data={orders}
         columns={columns}
         searchKey="orderNumber"

@@ -10,7 +10,11 @@
  * also forbids `Number(...)` / `parseFloat(...)` in files that import Money.
  */
 
-import Decimal from "decimal.js";
+// Named import is more portable across moduleResolution: "Bundler" (used by
+// this package) and "NodeNext" (used by apps/api). `import Decimal from …`
+// resolves differently under each, producing TS2709 / TS2339 errors when
+// this package is consumed from a NodeNext context.
+import { Decimal } from "decimal.js";
 
 // ─── Precision configuration ──────────────────────────────────────────────────
 

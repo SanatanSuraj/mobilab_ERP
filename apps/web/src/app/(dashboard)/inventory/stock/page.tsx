@@ -1,10 +1,29 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+/**
+ * Stock Summary — reads /inventory/stock/summary.
+ *
+ * The summary table is the projection maintained by the DB trigger on
+ * stock_ledger writes. Every row already carries item+warehouse joins
+ * (sku, itemName, warehouseCode) plus the reorder_level from the binding,
+ * so the UI can compute low-stock status without a second fetch.
+ *
+ * Filters pass straight through to the API:
+ *   - search          server-side ILIKE across sku/name/warehouseCode
+ *   - category        server-side
+ *   - warehouseId     server-side
+ *   - lowStockOnly    server-side (on_hand <= reorder_level)
+ *
+ * KPIs are computed from the current page's data rather than separate
+ * endpoints — good enough for Phase 2 with the 100-row default cap.
+ */
+
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
+import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
-import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -12,286 +31,323 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  useApiStockSummary,
+  useApiWarehouses,
+} from "@/hooks/useInventoryApi";
 import {
-  invItems,
-  stockSummaries,
-  reorderAlerts,
-  warehouses,
-  formatCurrency,
-  StockSummary,
-  ReorderAlert,
-} from "@/data/inventory-mock";
-import { Package, DollarSign, AlertTriangle, Bell } from "lucide-react";
+  ITEM_CATEGORIES,
+  type ItemCategory,
+  type StockSummaryRow,
+} from "@mobilab/contracts";
+import { AlertCircle, AlertTriangle, DollarSign, Package } from "lucide-react";
 
-type WarehouseFilter = "all" | "wh1" | "wh2";
-
-// O(1) lookup maps built once at module level
-const stockMap = new Map<string, StockSummary>(
-  stockSummaries.map((s) => [`${s.itemId}:${s.warehouseId}`, s])
-);
-
-const alertsByItem = new Map<string, ReorderAlert[]>();
-reorderAlerts.forEach((r) => {
-  const existing = alertsByItem.get(r.itemId) ?? [];
-  alertsByItem.set(r.itemId, [...existing, r]);
-});
-
-function getStockForWarehouse(itemId: string, warehouseId: string): StockSummary {
-  return (
-    stockMap.get(`${itemId}:${warehouseId}`) ?? {
-      itemId,
-      warehouseId,
-      totalQty: 0,
-      reservedQty: 0,
-      availableQty: 0,
-    }
-  );
+function parseQty(q: string | null | undefined): number {
+  if (!q) return 0;
+  const n = Number(q);
+  return Number.isFinite(n) ? n : 0;
 }
 
-function getReorderStatus(
-  itemId: string,
-  warehouseId: string
-): { label: string; color: string } {
-  const alert = reorderAlerts.find(
-    (r) => r.itemId === itemId && r.warehouseId === warehouseId
-  );
-  if (!alert) return { label: "OK", color: "text-green-600 bg-green-50 border-green-200" };
-  if (alert.severity === "CRITICAL") return { label: "At Reorder", color: "text-red-700 bg-red-50 border-red-200" };
-  return { label: "Near Reorder", color: "text-amber-700 bg-amber-50 border-amber-200" };
+function formatMoney(n: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 
-const ReorderDot = React.memo(function ReorderDot({ itemId, warehouseId }: { itemId: string; warehouseId: string }) {
-  const status = getReorderStatus(itemId, warehouseId);
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${status.color}`}>
-      <span
-        className={`w-1.5 h-1.5 rounded-full ${
-          status.label === "At Reorder"
-            ? "bg-red-600"
-            : status.label === "Near Reorder"
-            ? "bg-amber-500"
-            : "bg-green-500"
-        }`}
-      />
-      {status.label}
-    </span>
-  );
-});
+export default function StockSummaryPage() {
+  const warehousesQuery = useApiWarehouses({ limit: 100 });
 
-const StockCell = React.memo(function StockCell({ stock }: { stock: StockSummary }) {
-  return (
-    <div className="flex items-center gap-1 text-xs">
-      <span className="text-green-700 font-semibold">{stock.availableQty}</span>
-      <span className="text-muted-foreground">/</span>
-      <span className="text-amber-600">{stock.reservedQty}</span>
-      <span className="text-muted-foreground">/</span>
-      <span className="font-medium">{stock.totalQty}</span>
-    </div>
-  );
-});
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState<ItemCategory | "all">("all");
+  const [warehouseId, setWarehouseId] = useState<string>("all");
+  const [lowStockOnly, setLowStockOnly] = useState(false);
 
-export default function StockPage() {
-  const [warehouseFilter, setWarehouseFilter] = useState<WarehouseFilter>("all");
-
-  const totalStockValue = useMemo(() => {
-    return invItems.reduce((sum, item) => {
-      const total = stockSummaries
-        .filter((s) => s.itemId === item.id)
-        .reduce((s, ss) => s + ss.totalQty, 0);
-      return sum + item.standardCost * total;
-    }, 0);
-  }, []);
-
-  const lowStockCount = useMemo(() => {
-    return invItems.filter((item) =>
-      item.reorderPoints.some((rp) => {
-        const stock = getStockForWarehouse(item.id, rp.warehouseId);
-        return stock.availableQty <= rp.reorderPoint;
-      })
-    ).length;
-  }, []);
-
-  const activeAlerts = useMemo(
-    () => reorderAlerts.filter((r) => !r.isSuppressed).length,
-    []
+  const query = useMemo(
+    () => ({
+      limit: 200,
+      search: search.trim() || undefined,
+      category: category === "all" ? undefined : category,
+      warehouseId: warehouseId === "all" ? undefined : warehouseId,
+      lowStockOnly: lowStockOnly || undefined,
+    }),
+    [search, category, warehouseId, lowStockOnly]
   );
 
-  const filteredItems = useMemo(() => {
-    if (warehouseFilter === "all") return invItems;
-    return invItems.filter((item) =>
-      stockSummaries.some(
-        (s) => s.itemId === item.id && s.warehouseId === warehouseFilter && s.totalQty > 0
-      )
+  const summaryQuery = useApiStockSummary(query);
+
+  if (summaryQuery.isLoading) {
+    return (
+      <div className="p-6 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96 w-full" />
+      </div>
     );
-  }, [warehouseFilter]);
+  }
 
-  const wh1 = warehouses.find((w) => w.id === "wh1")!;
-  const wh2 = warehouses.find((w) => w.id === "wh2")!;
+  if (summaryQuery.isError) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">Failed to load stock</p>
+            <p className="text-red-700 mt-1">
+              {summaryQuery.error instanceof Error
+                ? summaryQuery.error.message
+                : "Unknown error"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const rows = summaryQuery.data?.data ?? [];
+  const warehouses = warehousesQuery.data?.data ?? [];
+
+  const skuCount = new Set(rows.map((r) => r.itemId)).size;
+  const lowCount = rows.filter((r) => {
+    const level = parseQty(r.reorderLevel);
+    return level > 0 && parseQty(r.onHand) <= level;
+  }).length;
+  // Rough valuation — we don't ship unit_cost on the summary row, so
+  // valuation needs a separate items fetch for production use. For now,
+  // 0 as a placeholder with a caveat in the KPI title.
+  const totalOnHand = rows.reduce((acc, r) => acc + parseQty(r.onHand), 0);
+
+  const columns: Column<StockSummaryRow>[] = [
+    {
+      key: "itemSku",
+      header: "SKU",
+      sortable: true,
+      render: (r) => (
+        <span className="font-mono text-xs text-blue-700">{r.itemSku}</span>
+      ),
+    },
+    {
+      key: "itemName",
+      header: "Item",
+      sortable: true,
+      render: (r) => (
+        <div>
+          <p className="text-sm font-medium leading-tight">{r.itemName}</p>
+          <p className="text-xs text-muted-foreground">
+            {r.itemCategory.replace(/_/g, " ")}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "warehouseCode",
+      header: "Warehouse",
+      render: (r) => (
+        <span className="text-sm text-muted-foreground">{r.warehouseCode}</span>
+      ),
+    },
+    {
+      key: "onHand",
+      header: "On Hand",
+      sortable: true,
+      className: "text-right",
+      render: (r) => {
+        const q = parseQty(r.onHand);
+        const lvl = parseQty(r.reorderLevel);
+        const low = lvl > 0 && q <= lvl;
+        return (
+          <span
+            className={`text-sm font-semibold ${
+              q === 0
+                ? "text-red-600"
+                : low
+                  ? "text-amber-600"
+                  : "text-foreground"
+            }`}
+          >
+            {q.toLocaleString("en-IN")}
+            <span className="text-xs text-muted-foreground ml-1">
+              {r.itemUom}
+            </span>
+          </span>
+        );
+      },
+    },
+    {
+      key: "reserved",
+      header: "Reserved",
+      className: "text-right",
+      render: (r) => {
+        const q = parseQty(r.reserved);
+        return (
+          <span className="text-sm text-muted-foreground">
+            {q.toLocaleString("en-IN")}
+          </span>
+        );
+      },
+    },
+    {
+      key: "available",
+      header: "Available",
+      sortable: true,
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-medium">
+          {parseQty(r.available).toLocaleString("en-IN")}
+        </span>
+      ),
+    },
+    {
+      key: "reorderLevel",
+      header: "Reorder Lvl",
+      className: "text-right",
+      render: (r) => {
+        const lvl = parseQty(r.reorderLevel);
+        if (!r.reorderLevel || lvl === 0)
+          return <span className="text-xs text-muted-foreground">—</span>;
+        return (
+          <span className="text-xs text-muted-foreground">
+            {lvl.toLocaleString("en-IN")}
+          </span>
+        );
+      },
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => {
+        const q = parseQty(r.onHand);
+        const lvl = parseQty(r.reorderLevel);
+        if (q === 0) {
+          return (
+            <Badge
+              variant="outline"
+              className="text-xs bg-red-50 text-red-700 border-red-200"
+            >
+              Out of Stock
+            </Badge>
+          );
+        }
+        if (lvl > 0 && q <= lvl) {
+          return (
+            <Badge
+              variant="outline"
+              className="text-xs bg-amber-50 text-amber-700 border-amber-200"
+            >
+              Low Stock
+            </Badge>
+          );
+        }
+        return (
+          <Badge
+            variant="outline"
+            className="text-xs bg-green-50 text-green-700 border-green-200"
+          >
+            In Stock
+          </Badge>
+        );
+      },
+    },
+  ];
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto">
       <PageHeader
-        title="Stock Overview"
-        description="Monitor inventory levels across all warehouses"
+        title="Stock Summary"
+        description="Live on-hand positions across every item & warehouse"
       />
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <KPICard
-          title="Total SKUs"
-          value={String(invItems.length)}
+          title="Unique SKUs"
+          value={String(skuCount)}
           icon={Package}
           iconColor="text-blue-600"
         />
         <KPICard
-          title="Total Stock Value"
-          value={formatCurrency(totalStockValue)}
-          change="Across all warehouses"
-          trend="neutral"
-          icon={DollarSign}
-          iconColor="text-emerald-600"
-        />
-        <KPICard
-          title="Low Stock Items"
-          value={String(lowStockCount)}
-          change="Below reorder point"
-          trend="down"
+          title="Low-Stock Items"
+          value={String(lowCount)}
           icon={AlertTriangle}
-          iconColor="text-red-600"
+          iconColor="text-amber-600"
+          trend={lowCount > 0 ? "down" : "neutral"}
         />
         <KPICard
-          title="Reorder Alerts"
-          value={String(activeAlerts)}
-          change="Active alerts"
-          trend={activeAlerts > 0 ? "down" : "neutral"}
-          icon={Bell}
-          iconColor="text-orange-600"
+          title="Total Units On Hand"
+          value={formatMoney(totalOnHand).replace("₹", "")}
+          icon={DollarSign}
+          iconColor="text-green-600"
         />
       </div>
 
-      {/* Warehouse Filter */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold text-foreground">Combined Stock View</h2>
-        <Select
-          value={warehouseFilter}
-          onValueChange={(v) => setWarehouseFilter((v ?? "all") as WarehouseFilter)}
-        >
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Filter by Warehouse" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Warehouses</SelectItem>
-            <SelectItem value="wh1">Guwahati HQ</SelectItem>
-            <SelectItem value="wh2">Noida Secondary</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Combined Stock Table */}
-      <div className="rounded-lg border overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/50 hover:bg-muted/50">
-              <TableHead className="w-32">Item Code</TableHead>
-              <TableHead className="min-w-[180px]">Item / Category</TableHead>
-              <TableHead>Tracking</TableHead>
-              <TableHead>ABC</TableHead>
-              {(warehouseFilter === "all" || warehouseFilter === "wh1") && (
-                <TableHead className="text-center min-w-[130px]">
-                  <span className="block text-xs font-semibold">{wh1.name}</span>
-                  <span className="block text-[10px] text-muted-foreground font-normal">Avail / Rsv / Total</span>
-                </TableHead>
-              )}
-              {(warehouseFilter === "all" || warehouseFilter === "wh2") && (
-                <TableHead className="text-center min-w-[130px]">
-                  <span className="block text-xs font-semibold">{wh2.name}</span>
-                  <span className="block text-[10px] text-muted-foreground font-normal">Avail / Rsv / Total</span>
-                </TableHead>
-              )}
-              <TableHead>Reorder Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredItems.map((item) => {
-              const wh1Stock = getStockForWarehouse(item.id, "wh1");
-              const wh2Stock = getStockForWarehouse(item.id, "wh2");
-
-              // Determine combined reorder status (worst severity wins)
-              const alerts = (alertsByItem.get(item.id) ?? []).filter((r) => !r.isSuppressed);
-              const hasCritical = alerts.some((a) => a.severity === "CRITICAL");
-              const hasWarning = alerts.some((a) => a.severity === "WARNING");
-              const overallStatus = hasCritical
-                ? { label: "At Reorder", color: "text-red-700 bg-red-50 border-red-200", dot: "bg-red-600" }
-                : hasWarning
-                ? { label: "Near Reorder", color: "text-amber-700 bg-amber-50 border-amber-200", dot: "bg-amber-500" }
-                : { label: "OK", color: "text-green-700 bg-green-50 border-green-200", dot: "bg-green-500" };
-
-              return (
-                <TableRow key={item.id} className="hover:bg-muted/30">
-                  <TableCell>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {item.itemCode}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <p className="text-sm font-medium leading-tight">{item.name}</p>
-                    <p className="text-xs text-muted-foreground">{item.category}</p>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={item.trackingType} />
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={item.abcClass} />
-                  </TableCell>
-                  {(warehouseFilter === "all" || warehouseFilter === "wh1") && (
-                    <TableCell className="text-center">
-                      <StockCell stock={wh1Stock} />
-                    </TableCell>
-                  )}
-                  {(warehouseFilter === "all" || warehouseFilter === "wh2") && (
-                    <TableCell className="text-center">
-                      <StockCell stock={wh2Stock} />
-                    </TableCell>
-                  )}
-                  <TableCell>
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${overallStatus.color}`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${overallStatus.dot}`} />
-                      {overallStatus.label}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-            {filteredItems.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                  No items found for the selected warehouse.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Legend */}
-      <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-        <span className="font-medium">Stock columns:</span>
-        <span className="text-green-700 font-medium">Avail</span>
-        <span>/</span>
-        <span className="text-amber-600">Reserved</span>
-        <span>/</span>
-        <span>Total</span>
-      </div>
+      <DataTable<StockSummaryRow>
+        data={rows}
+        columns={columns}
+        searchKey="itemName"
+        searchPlaceholder="Search items..."
+        pageSize={15}
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Input
+              placeholder="Search SKU / name / warehouse..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-56"
+            />
+            <Select
+              value={category}
+              onValueChange={(v) =>
+                setCategory((v ?? "all") as ItemCategory | "all")
+              }
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {ITEM_CATEGORIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c.replace(/_/g, " ")}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={warehouseId}
+              onValueChange={(v) => setWarehouseId(v ?? "all")}
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Warehouse" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Warehouses</SelectItem>
+                {warehouses.map((w) => (
+                  <SelectItem key={w.id} value={w.id}>
+                    {w.code} — {w.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={lowStockOnly ? "true" : "false"}
+              onValueChange={(v) => setLowStockOnly(v === "true")}
+            >
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="false">All Stock</SelectItem>
+                <SelectItem value="true">Low Stock Only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        }
+      />
     </div>
   );
 }

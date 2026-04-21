@@ -1,9 +1,30 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * PO detail — reads /procurement/purchase-orders/:id (returns
+ * PurchaseOrderWithLines) via useApiPurchaseOrder.
+ *
+ * Capabilities:
+ *   - Add / update / delete line items (while PO is in DRAFT status);
+ *     server recomputes subtotal/tax_total/discount_total/grand_total.
+ *   - Status transitions:
+ *       DRAFT → PENDING_APPROVAL
+ *       PENDING_APPROVAL → APPROVED  (approval workflow collapses to a
+ *                                     single step in Phase 2)
+ *       APPROVED → SENT              (service stamps sentAt)
+ *       DRAFT | PENDING_APPROVAL | APPROVED → CANCELLED
+ *         (service stamps cancelledAt + cancelReason)
+ *   - Everything uses optimistic concurrency via `expectedVersion`; 409
+ *     bubbles up as an ApiProblem.
+ *
+ * Deltas vs mock:
+ *   - Approval logs + finance/mgmt dual-sign + proforma-invoice upload
+ *     are Phase 3. The mock flow squashes into a single APPROVED state.
+ *   - totalValue is derived from `grandTotal` (decimal string).
+ */
+
+import { use, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PageHeader } from "@/components/shared/page-header";
-import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,11 +36,20 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -30,41 +60,131 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  purchaseOrders,
-  PurchaseOrder,
-  POStatus,
-  formatCurrency,
-  formatDate,
-} from "@/data/procurement-mock";
+  useApiAddPoLine,
+  useApiDeletePoLine,
+  useApiPurchaseOrder,
+  useApiUpdatePurchaseOrder,
+  useApiVendor,
+} from "@/hooks/useProcurementApi";
+import { useApiItems } from "@/hooks/useInventoryApi";
+import type { PoStatus } from "@mobilab/contracts";
 import {
+  AlertCircle,
   ArrowLeft,
+  Ban,
   CheckCircle2,
-  XCircle,
-  Clock,
-  Upload,
-  Download,
-  FileText,
+  Plus,
   Send,
+  Trash2,
 } from "lucide-react";
 
-export default function PODetailPage({
+function formatMoney(raw: string | null | undefined): string {
+  if (raw == null || raw === "") return "—";
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return raw ?? "—";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const STATUS_TONE: Record<PoStatus, string> = {
+  DRAFT: "bg-gray-50 text-gray-700 border-gray-200",
+  PENDING_APPROVAL: "bg-amber-50 text-amber-700 border-amber-200",
+  APPROVED: "bg-blue-50 text-blue-700 border-blue-200",
+  SENT: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  PARTIALLY_RECEIVED: "bg-purple-50 text-purple-700 border-purple-200",
+  RECEIVED: "bg-green-50 text-green-700 border-green-200",
+  CANCELLED: "bg-red-50 text-red-700 border-red-200",
+};
+
+export default function PoDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = use(params);
   const router = useRouter();
-  const found = purchaseOrders.find((p) => p.id === params.id);
-  const [po, setPO] = useState<PurchaseOrder | null>(found ?? null);
-  const [rejectOpen, setRejectOpen] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
-  const [uploadPIOpen, setUploadPIOpen] = useState(false);
-  const [piRef, setPIRef] = useState("");
 
-  if (!po) {
+  const poQuery = useApiPurchaseOrder(id);
+  const po = poQuery.data;
+  const vendorQuery = useApiVendor(po?.vendorId);
+
+  const itemsQuery = useApiItems({ limit: 200, isActive: true });
+  const items = itemsQuery.data?.data ?? [];
+
+  const updatePo = useApiUpdatePurchaseOrder(id);
+  const addLine = useApiAddPoLine(id);
+  const deleteLine = useApiDeletePoLine(id);
+
+  // Dialog state
+  const [lineDialogOpen, setLineDialogOpen] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+
+  // Line form
+  const [formItemId, setFormItemId] = useState("");
+  const [formQty, setFormQty] = useState("");
+  const [formUom, setFormUom] = useState("");
+  const [formUnitPrice, setFormUnitPrice] = useState("");
+  const [formDiscount, setFormDiscount] = useState("0");
+  const [formTax, setFormTax] = useState("0");
+  const [lineError, setLineError] = useState<string | null>(null);
+
+  const [cancelReason, setCancelReason] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const selectedItem = useMemo(
+    () => items.find((i) => i.id === formItemId),
+    [items, formItemId]
+  );
+
+  if (poQuery.isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 space-y-4">
-        <p className="text-muted-foreground">Purchase Order not found.</p>
-        <Button variant="outline" onClick={() => router.push("/procurement/purchase-orders")}>
+      <div className="p-6 max-w-[1400px] mx-auto space-y-4">
+        <Skeleton className="h-6 w-24" />
+        <Skeleton className="h-10 w-72" />
+        <Skeleton className="h-48 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  if (poQuery.isError || !po) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-4">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">
+              {poQuery.isError
+                ? "Failed to load purchase order"
+                : "Purchase order not found"}
+            </p>
+            {poQuery.isError && (
+              <p className="text-red-700 mt-1">
+                {poQuery.error instanceof Error
+                  ? poQuery.error.message
+                  : "Unknown error"}
+              </p>
+            )}
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => router.push("/procurement/purchase-orders")}
+        >
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Purchase Orders
         </Button>
@@ -72,552 +192,529 @@ export default function PODetailPage({
     );
   }
 
-  function approveFinance() {
+  const vendor = vendorQuery.data;
+  const editable = po.status === "DRAFT";
+
+  async function changeStatus(next: PoStatus): Promise<void> {
     if (!po) return;
-    setPO({
-      ...po,
-      status: "APPROVED" as POStatus,
-      approvedAt: new Date().toISOString(),
-      approvalLogs: po.approvalLogs.map((log) =>
-        log.action === "PENDING"
-          ? {
-              ...log,
-              action: "APPROVED" as const,
-              note: "Finance approved",
-              actionedAt: new Date().toISOString(),
-            }
-          : log
-      ),
-    });
+    setActionError(null);
+    try {
+      await updatePo.mutateAsync({
+        status: next,
+        expectedVersion: po.version,
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Status update failed");
+    }
   }
 
-  function approveMgmt() {
+  async function cancelPo(): Promise<void> {
     if (!po) return;
-    setPO({
-      ...po,
-      status: "APPROVED" as POStatus,
-      approvedAt: new Date().toISOString(),
-      approvalLogs: po.approvalLogs.map((log) =>
-        log.action === "PENDING"
-          ? {
-              ...log,
-              action: "APPROVED" as const,
-              note: "Management approved",
-              actionedAt: new Date().toISOString(),
-            }
-          : log
-      ),
-    });
+    setActionError(null);
+    try {
+      await updatePo.mutateAsync({
+        status: "CANCELLED",
+        cancelReason: cancelReason.trim() || undefined,
+        expectedVersion: po.version,
+      });
+      setCancelDialogOpen(false);
+      setCancelReason("");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Cancel failed");
+    }
   }
 
-  function handleReject() {
-    if (!po) return;
-    setPO({
-      ...po,
-      status: "CANCELLED" as POStatus,
-      approvalLogs: po.approvalLogs.map((log) =>
-        log.action === "PENDING"
-          ? {
-              ...log,
-              action: "REJECTED" as const,
-              note: rejectReason,
-              actionedAt: new Date().toISOString(),
-            }
-          : log
-      ),
-    });
-    setRejectOpen(false);
-    setRejectReason("");
+  async function handleAddLine(): Promise<void> {
+    setLineError(null);
+    if (!formItemId || !formQty || !formUom || !formUnitPrice) {
+      setLineError("Item, quantity, UoM and unit price are required.");
+      return;
+    }
+    try {
+      await addLine.mutateAsync({
+        itemId: formItemId,
+        quantity: formQty,
+        uom: formUom,
+        unitPrice: formUnitPrice,
+        discountPct: formDiscount || "0",
+        taxPct: formTax || "0",
+      });
+      setLineDialogOpen(false);
+      setFormItemId("");
+      setFormQty("");
+      setFormUom("");
+      setFormUnitPrice("");
+      setFormDiscount("0");
+      setFormTax("0");
+    } catch (err) {
+      setLineError(err instanceof Error ? err.message : "Add line failed");
+    }
   }
 
-  function markSentToVendor() {
-    if (!po) return;
-    setPO({
-      ...po,
-      status: "PO_SENT" as POStatus,
-      sentAt: new Date().toISOString(),
-    });
+  async function handleDeleteLine(lineId: string): Promise<void> {
+    setActionError(null);
+    try {
+      await deleteLine.mutateAsync(lineId);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Delete failed");
+    }
   }
 
-  function handleUploadPI() {
-    if (!po || !piRef) return;
-    setPO({
-      ...po,
-      proformaUploaded: true,
-      proformaInvoiceRef: piRef,
-    });
-    setUploadPIOpen(false);
-    setPIRef("");
-  }
-
-  const linkedIndentIds = po.lines
-    .filter((l) => l.indentId)
-    .map((l) => l.indentId as string);
+  const canSubmit = po.status === "DRAFT" && po.lines.length > 0;
+  const canApprove = po.status === "PENDING_APPROVAL";
+  const canSend = po.status === "APPROVED";
+  const canCancel =
+    po.status === "DRAFT" ||
+    po.status === "PENDING_APPROVAL" ||
+    po.status === "APPROVED";
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
-      {/* Header */}
+      {/* Back button */}
       <div>
         <Button
           variant="ghost"
           size="sm"
-          className="mb-3 -ml-2"
           onClick={() => router.push("/procurement/purchase-orders")}
         >
-          <ArrowLeft className="h-4 w-4 mr-1" />
+          <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Purchase Orders
         </Button>
-        <PageHeader
-          title={po.poNumber}
-          description={`Created by ${po.createdBy} on ${formatDate(po.createdAt)}`}
-          actions={<StatusBadge status={po.status} className="text-sm px-3 py-1" />}
-        />
       </div>
 
+      {actionError && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
+          {actionError}
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold tracking-tight font-mono">
+              {po.poNumber}
+            </h1>
+            <Badge
+              variant="outline"
+              className={`text-xs whitespace-nowrap ${STATUS_TONE[po.status]}`}
+            >
+              {po.status.replace(/_/g, " ")}
+            </Badge>
+            <Badge variant="outline" className="text-xs">
+              {po.currency}
+            </Badge>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            {vendor ? vendor.name : "…"} · Ordered {formatDate(po.orderDate)}
+            {po.expectedDate && ` · Expected ${formatDate(po.expectedDate)}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {canSubmit && (
+            <Button
+              size="sm"
+              onClick={() => changeStatus("PENDING_APPROVAL")}
+              disabled={updatePo.isPending}
+            >
+              Submit for Approval
+            </Button>
+          )}
+          {canApprove && (
+            <Button
+              size="sm"
+              onClick={() => changeStatus("APPROVED")}
+              disabled={updatePo.isPending}
+              className="gap-1"
+            >
+              <CheckCircle2 className="h-4 w-4" /> Approve
+            </Button>
+          )}
+          {canSend && (
+            <Button
+              size="sm"
+              onClick={() => changeStatus("SENT")}
+              disabled={updatePo.isPending}
+              className="gap-1"
+            >
+              <Send className="h-4 w-4" /> Mark Sent
+            </Button>
+          )}
+          {canCancel && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-red-600 border-red-300 hover:bg-red-50 gap-1"
+              onClick={() => setCancelDialogOpen(true)}
+              disabled={updatePo.isPending}
+            >
+              <Ban className="h-4 w-4" /> Cancel
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Two-column layout */}
       <div className="grid grid-cols-3 gap-6">
-        {/* Left: 2/3 */}
+        {/* Left: header info */}
         <div className="col-span-2 space-y-6">
-          {/* PO Information */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">PO Information</CardTitle>
+              <CardTitle className="text-base">PO Header</CardTitle>
             </CardHeader>
-            <CardContent>
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                <div>
-                  <dt className="text-muted-foreground">Vendor</dt>
-                  <dd className="font-semibold">{po.vendorName}</dd>
-                  <dd className="font-mono text-xs text-muted-foreground">
-                    GSTIN: {po.vendorGstin}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Warehouse</dt>
-                  <dd className="font-semibold">{po.warehouseName}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Required Delivery</dt>
-                  <dd className="font-semibold">
-                    {formatDate(po.requiredDeliveryDate)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Cost Centre</dt>
-                  <dd className="font-mono font-semibold">{po.costCentre}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Created By</dt>
-                  <dd>{po.createdBy}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Created At</dt>
-                  <dd>{formatDate(po.createdAt)}</dd>
-                </div>
-                {po.approvedAt && (
-                  <div>
-                    <dt className="text-muted-foreground">Approved At</dt>
-                    <dd>{formatDate(po.approvedAt)}</dd>
-                  </div>
-                )}
-                {po.sentAt && (
-                  <div>
-                    <dt className="text-muted-foreground">Sent At</dt>
-                    <dd>{formatDate(po.sentAt)}</dd>
-                  </div>
-                )}
-                {po.notes && (
-                  <div className="col-span-2">
-                    <dt className="text-muted-foreground">Notes</dt>
-                    <dd className="text-foreground">{po.notes}</dd>
-                  </div>
-                )}
-              </dl>
-            </CardContent>
-          </Card>
-
-          {/* Line Items */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Line Items</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead>Item Code</TableHead>
-                    <TableHead>Item Name</TableHead>
-                    <TableHead className="text-right">Qty Ordered</TableHead>
-                    <TableHead className="text-right">Qty Received</TableHead>
-                    <TableHead>Unit</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead>HSN</TableHead>
-                    <TableHead className="text-right">GST %</TableHead>
-                    <TableHead className="text-right">Line Total</TableHead>
-                    <TableHead>Progress</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {po.lines.map((line) => {
-                    const progress =
-                      line.qty > 0
-                        ? Math.round((line.qtyReceived / line.qty) * 100)
-                        : 0;
-                    return (
-                      <TableRow key={line.id}>
-                        <TableCell className="font-mono text-xs">
-                          {line.itemCode}
-                        </TableCell>
-                        <TableCell className="font-medium text-sm">
-                          {line.itemName}
-                        </TableCell>
-                        <TableCell className="text-right text-sm">
-                          {line.qty}
-                        </TableCell>
-                        <TableCell className="text-right text-sm">
-                          {line.qtyReceived}
-                        </TableCell>
-                        <TableCell className="text-sm">{line.unit}</TableCell>
-                        <TableCell className="text-right text-sm">
-                          {formatCurrency(line.unitPrice)}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {line.hsnCode}
-                        </TableCell>
-                        <TableCell className="text-right text-sm">
-                          {line.gstRate}%
-                        </TableCell>
-                        <TableCell className="text-right font-semibold text-sm">
-                          {formatCurrency(line.lineTotal)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2 min-w-[80px]">
-                            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-blue-500 rounded-full transition-all"
-                                style={{ width: `${progress}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-muted-foreground w-8">
-                              {progress}%
-                            </span>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  {po.lines.length === 0 && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={10}
-                        className="text-center py-6 text-muted-foreground"
-                      >
-                        No line items
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-              {/* Footer totals */}
-              <div className="border-t p-4">
-                <div className="flex justify-end">
-                  <dl className="space-y-1 text-sm min-w-[240px]">
-                    <div className="flex justify-between">
-                      <dt className="text-muted-foreground">Subtotal</dt>
-                      <dd>{formatCurrency(po.subtotal)}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-muted-foreground">GST</dt>
-                      <dd>{formatCurrency(po.gstAmount)}</dd>
-                    </div>
-                    <div className="flex justify-between font-bold text-base border-t pt-1 mt-1">
-                      <dt>Total</dt>
-                      <dd>{formatCurrency(po.totalValue)}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Approval Trail */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Approval Trail</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {po.approvalLogs.map((log, idx) => (
-                  <div key={log.id} className="flex gap-4">
-                    {/* Icon */}
-                    <div className="flex-shrink-0 mt-0.5">
-                      {log.action === "APPROVED" && (
-                        <CheckCircle2 className="h-5 w-5 text-green-600" />
-                      )}
-                      {log.action === "REJECTED" && (
-                        <XCircle className="h-5 w-5 text-red-600" />
-                      )}
-                      {log.action === "PENDING" && (
-                        <Clock className="h-5 w-5 text-amber-500" />
-                      )}
-                      {log.action === "ESCALATED" && (
-                        <CheckCircle2 className="h-5 w-5 text-blue-600" />
-                      )}
-                    </div>
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm">
-                          {log.approver}
-                        </span>
-                        <Badge variant="outline" className="text-xs">
-                          {log.role}
-                        </Badge>
-                        <Badge
-                          className={
-                            log.action === "APPROVED"
-                              ? "bg-green-100 text-green-700 border-green-200 text-xs"
-                              : log.action === "REJECTED"
-                              ? "bg-red-100 text-red-700 border-red-200 text-xs"
-                              : log.action === "PENDING"
-                              ? "bg-amber-100 text-amber-700 border-amber-200 text-xs"
-                              : "bg-blue-100 text-blue-700 border-blue-200 text-xs"
-                          }
-                        >
-                          {log.action}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Threshold: {log.threshold}
-                      </p>
-                      {log.note && (
-                        <p className="text-sm mt-1 text-foreground">
-                          {log.note}
-                        </p>
-                      )}
-                      {log.actionedAt && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {formatDate(log.actionedAt)}
-                        </p>
-                      )}
-                    </div>
-                    {/* Connector line */}
-                    {idx < po.approvalLogs.length - 1 && (
-                      <div className="absolute left-[1.125rem] top-5 bottom-0 w-px bg-border" />
-                    )}
-                  </div>
-                ))}
-                {po.approvalLogs.length === 0 && (
-                  <p className="text-muted-foreground text-sm">
-                    No approval activity yet.
+            <CardContent className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                  Vendor
+                </p>
+                <p className="font-medium">{vendor?.name ?? "—"}</p>
+                {vendor?.gstin && (
+                  <p className="text-xs text-muted-foreground font-mono">
+                    {vendor.gstin}
                   </p>
                 )}
               </div>
+              <div>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                  Payment Terms
+                </p>
+                <p>Net {po.paymentTermsDays} days</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                  Order Date
+                </p>
+                <p>{formatDate(po.orderDate)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                  Expected Date
+                </p>
+                <p>{formatDate(po.expectedDate)}</p>
+              </div>
+              {po.approvedAt && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                    Approved
+                  </p>
+                  <p>{formatDate(po.approvedAt)}</p>
+                </div>
+              )}
+              {po.sentAt && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                    Sent
+                  </p>
+                  <p>{formatDate(po.sentAt)}</p>
+                </div>
+              )}
+              {po.cancelledAt && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                    Cancelled
+                  </p>
+                  <p>{formatDate(po.cancelledAt)}</p>
+                  {po.cancelReason && (
+                    <p className="text-xs text-red-600 mt-0.5">
+                      {po.cancelReason}
+                    </p>
+                  )}
+                </div>
+              )}
+              {po.notes && (
+                <div className="col-span-2 pt-2 border-t">
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                    Notes
+                  </p>
+                  <p>{po.notes}</p>
+                </div>
+              )}
             </CardContent>
           </Card>
-        </div>
 
-        {/* Right: 1/3 */}
-        <div className="space-y-6">
-          {/* Actions */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {po.status === "PENDING_FINANCE" && (
-                <>
-                  <Button
-                    className="w-full bg-green-600 hover:bg-green-700 text-white"
-                    onClick={approveFinance}
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Approve (Finance)
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full border-red-300 text-red-600 hover:bg-red-50"
-                    onClick={() => setRejectOpen(true)}
-                  >
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Reject
-                  </Button>
-                </>
-              )}
-              {po.status === "PENDING_MGMT" && (
-                <>
-                  <Button
-                    className="w-full bg-green-600 hover:bg-green-700 text-white"
-                    onClick={approveMgmt}
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Approve (Management)
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full border-red-300 text-red-600 hover:bg-red-50"
-                    onClick={() => setRejectOpen(true)}
-                  >
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Reject
-                  </Button>
-                </>
-              )}
-              {po.status === "APPROVED" && (
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base">
+                Line Items
+                <span className="ml-2 text-xs text-muted-foreground font-normal">
+                  ({po.lines.length})
+                </span>
+              </CardTitle>
+              {editable && (
                 <Button
-                  className="w-full"
-                  onClick={markSentToVendor}
+                  size="sm"
+                  onClick={() => setLineDialogOpen(true)}
+                  className="gap-1"
                 >
-                  <Send className="h-4 w-4 mr-2" />
-                  Mark as Sent to Vendor
+                  <Plus className="h-4 w-4" /> Add Line
                 </Button>
               )}
-              {po.status !== "PENDING_FINANCE" &&
-                po.status !== "PENDING_MGMT" &&
-                po.status !== "APPROVED" && (
-                  <p className="text-sm text-muted-foreground text-center py-2">
-                    No actions available for current status.
-                  </p>
-                )}
-            </CardContent>
-          </Card>
-
-          {/* Proforma Invoice */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Proforma Invoice</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {po.proformaUploaded ? (
-                <>
-                  <div className="flex items-center gap-2 text-sm">
-                    <FileText className="h-4 w-4 text-green-600" />
-                    <span className="font-mono font-medium">
-                      {po.proformaInvoiceRef}
-                    </span>
-                  </div>
-                  <Badge className="bg-green-100 text-green-700 border-green-200">
-                    PI Received
-                  </Badge>
-                  <Button variant="outline" size="sm" className="w-full">
-                    <Download className="h-4 w-4 mr-2" />
-                    Download
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    No proforma invoice uploaded yet.
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => setUploadPIOpen(true)}
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload PI
-                  </Button>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Linked Indents */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Linked Indents</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {linkedIndentIds.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No linked indents.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {linkedIndentIds.map((indentId) => (
-                    <div
-                      key={indentId}
-                      className="flex items-center gap-2 text-sm"
-                    >
-                      <div className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
-                      <span className="font-mono text-indigo-600 font-medium text-xs">
-                        {indentId}
-                      </span>
-                    </div>
-                  ))}
+            <CardContent className="p-0">
+              {po.lines.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  No line items yet. Click "Add Line" to add the first one.
                 </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableHead className="w-10 text-xs">#</TableHead>
+                      <TableHead className="text-xs">Item</TableHead>
+                      <TableHead className="text-right text-xs">Qty</TableHead>
+                      <TableHead className="text-right text-xs">Unit Price</TableHead>
+                      <TableHead className="text-right text-xs">Disc %</TableHead>
+                      <TableHead className="text-right text-xs">Tax %</TableHead>
+                      <TableHead className="text-right text-xs">Total</TableHead>
+                      <TableHead className="text-right text-xs">Received</TableHead>
+                      {editable && <TableHead className="w-10" />}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {po.lines.map((line) => {
+                      const item = items.find((i) => i.id === line.itemId);
+                      return (
+                        <TableRow key={line.id}>
+                          <TableCell className="text-xs font-mono text-muted-foreground">
+                            {line.lineNo}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            <p className="font-medium">
+                              {item?.name ?? line.itemId.slice(0, 8)}
+                            </p>
+                            {item && (
+                              <p className="text-xs font-mono text-muted-foreground">
+                                {item.sku}
+                              </p>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right text-sm">
+                            {line.quantity} {line.uom}
+                          </TableCell>
+                          <TableCell className="text-right text-sm">
+                            {formatMoney(line.unitPrice)}
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground">
+                            {line.discountPct}%
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground">
+                            {line.taxPct}%
+                          </TableCell>
+                          <TableCell className="text-right text-sm font-medium">
+                            {formatMoney(line.lineTotal)}
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground">
+                            {line.receivedQty}
+                          </TableCell>
+                          {editable && (
+                            <TableCell>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-red-600"
+                                disabled={deleteLine.isPending}
+                                onClick={() => handleDeleteLine(line.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right: totals */}
+        <div className="col-span-1 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Totals</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Subtotal</span>
+                <span className="font-medium">{formatMoney(po.subtotal)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Discount</span>
+                <span className="font-medium text-red-600">
+                  − {formatMoney(po.discountTotal)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Tax</span>
+                <span className="font-medium">{formatMoney(po.taxTotal)}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t font-bold">
+                <span>Grand Total</span>
+                <span>{formatMoney(po.grandTotal)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Metadata</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Version</span>
+                <span className="font-mono">{po.version}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Created</span>
+                <span>{formatDate(po.createdAt)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Last updated</span>
+                <span>{formatDate(po.updatedAt)}</span>
+              </div>
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* Reject Dialog */}
-      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
-        <DialogContent className="max-w-md">
+      {/* Add line dialog */}
+      <Dialog open={lineDialogOpen} onOpenChange={setLineDialogOpen}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Reject Purchase Order</DialogTitle>
+            <DialogTitle>Add PO Line</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <p className="text-sm text-muted-foreground">
-              Please provide a reason for rejecting{" "}
-              <span className="font-mono font-medium">{po.poNumber}</span>.
-            </p>
+          <div className="space-y-4 py-2">
+            {lineError && (
+              <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
+                {lineError}
+              </div>
+            )}
             <div className="space-y-1.5">
-              <Label>Rejection Reason</Label>
-              <Textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="State the reason for rejection..."
-                rows={3}
-              />
+              <Label>Item</Label>
+              <Select
+                value={formItemId}
+                onValueChange={(v) => {
+                  setFormItemId(v ?? "");
+                  const item = items.find((i) => i.id === v);
+                  if (item) {
+                    setFormUom(item.uom);
+                    setFormUnitPrice(item.unitCost);
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select item..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {items.map((it) => (
+                    <SelectItem key={it.id} value={it.id}>
+                      {it.sku} — {it.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label>Qty</Label>
+                <Input
+                  type="number"
+                  value={formQty}
+                  onChange={(e) => setFormQty(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>UoM</Label>
+                <Input
+                  value={formUom}
+                  onChange={(e) => setFormUom(e.target.value)}
+                  placeholder={selectedItem?.uom ?? "EA"}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Unit Price (₹)</Label>
+                <Input
+                  type="number"
+                  value={formUnitPrice}
+                  onChange={(e) => setFormUnitPrice(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Discount %</Label>
+                <Input
+                  type="number"
+                  value={formDiscount}
+                  onChange={(e) => setFormDiscount(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Tax %</Label>
+                <Input
+                  type="number"
+                  value={formTax}
+                  onChange={(e) => setFormTax(e.target.value)}
+                  placeholder="18"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRejectOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setLineDialogOpen(false)}
+              disabled={addLine.isPending}
+            >
               Cancel
             </Button>
-            <Button
-              className="bg-red-600 hover:bg-red-700 text-white"
-              onClick={handleReject}
-              disabled={!rejectReason.trim()}
-            >
-              Confirm Rejection
+            <Button onClick={handleAddLine} disabled={addLine.isPending}>
+              {addLine.isPending ? "Adding…" : "Add Line"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Upload PI Dialog */}
-      <Dialog open={uploadPIOpen} onOpenChange={setUploadPIOpen}>
-        <DialogContent className="max-w-sm">
+      {/* Cancel dialog */}
+      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Upload Proforma Invoice</DialogTitle>
+            <DialogTitle>Cancel Purchase Order</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              This will flip the PO to CANCELLED. Optionally note the reason.
+            </p>
             <div className="space-y-1.5">
-              <Label>PI Reference Number</Label>
-              <input
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                value={piRef}
-                onChange={(e) => setPIRef(e.target.value)}
-                placeholder="e.g. PI-VND-2026-001"
+              <Label>Reason</Label>
+              <Textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                rows={3}
+                placeholder="e.g. Vendor out of stock"
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label>File (mock)</Label>
-              <div className="border-2 border-dashed rounded-lg p-6 text-center text-sm text-muted-foreground">
-                <Upload className="h-6 w-6 mx-auto mb-2 opacity-40" />
-                Click to select file (demo only)
-              </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUploadPIOpen(false)}>
-              Cancel
+            <Button
+              variant="outline"
+              onClick={() => setCancelDialogOpen(false)}
+              disabled={updatePo.isPending}
+            >
+              Keep Open
             </Button>
-            <Button onClick={handleUploadPI} disabled={!piRef.trim()}>
-              Upload
+            <Button
+              variant="outline"
+              className="text-red-600 border-red-300 hover:bg-red-50"
+              onClick={cancelPo}
+              disabled={updatePo.isPending}
+            >
+              {updatePo.isPending ? "Cancelling…" : "Confirm Cancel"}
             </Button>
           </DialogFooter>
         </DialogContent>

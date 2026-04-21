@@ -32,12 +32,56 @@ import {
   type AuthenticatedResponse,
   type MultiTenantResponse,
 } from "@/lib/api/auth";
+import {
+  useAuthStore,
+  MOCK_USERS_BY_ROLE,
+  type UserRole,
+} from "@/store/auth.store";
 
 // Token storage: we use sessionStorage for dev simplicity. Production should
 // move to httpOnly cookies set by a Next.js Route Handler that proxies to
 // the API so the access token never touches JS.
 const ACCESS_KEY = "mobilab-access";
 const REFRESH_KEY = "mobilab-refresh";
+
+/**
+ * The proxy (proxy.ts) does an optimistic `mobilab-session` cookie check on
+ * every protected route. The real access+refresh tokens live in
+ * sessionStorage — but if we don't also set this cookie, the proxy bounces
+ * the user straight back to /auth/login after they sign in. Set it to any
+ * truthy value; the proxy only checks presence.
+ */
+const SESSION_COOKIE = "mobilab-session";
+
+/**
+ * Pick a single `UserRole` from the set of roles on the JWT `user.roles`
+ * array. The mock Zustand store drives the rendering of the still-un-migrated
+ * prototype pages (admin users list, sidebar, topbar, etc.), and that store
+ * assumes one active role at a time. We just pick the most privileged role
+ * we recognise — the store is only a scaffold for unmigrated pages and will
+ * be retired once every page reads from the real /auth/me endpoint.
+ */
+const ROLE_PRIORITY: UserRole[] = [
+  "SUPER_ADMIN",
+  "MANAGEMENT",
+  "FINANCE",
+  "SALES_MANAGER",
+  "SALES_REP",
+  "PRODUCTION_MANAGER",
+  "PRODUCTION",
+  "QC_MANAGER",
+  "QC_INSPECTOR",
+  "RD",
+  "STORES",
+  "CUSTOMER",
+];
+
+function pickPrimaryRole(roles: readonly string[]): UserRole | null {
+  for (const candidate of ROLE_PRIORITY) {
+    if (roles.includes(candidate)) return candidate;
+  }
+  return null;
+}
 
 export default function RealLoginPage() {
   return (
@@ -71,6 +115,9 @@ function LoginForm() {
   const redirectTo = params.get("from") ?? "/";
   const surface = params.get("surface") === "portal" ? "portal" : "internal";
 
+  const setRole = useAuthStore((s) => s.setRole);
+  const fetchPermissions = useAuthStore((s) => s.fetchPermissions);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -78,10 +125,56 @@ function LoginForm() {
   const [isPending, startTransition] = useTransition();
   const [picker, setPicker] = useState<PickerState | null>(null);
 
-  /** Common post-auth step: stash tokens + redirect. */
+  /**
+   * Common post-auth step. Runs three things in this order:
+   *   1. Stash the JWT pair in sessionStorage so tenantFetch() can read them.
+   *   2. Populate the mock Zustand store with a derived role so unmigrated
+   *      prototype pages (admin UI, sidebar persona chip, dashboard widgets)
+   *      render correctly.
+   *   3. Set the `mobilab-session` cookie that proxy.ts checks on every
+   *      protected route. Without this, the proxy immediately bounces the
+   *      user back here after a successful sign-in.
+   */
   function completeAuth(res: AuthenticatedResponse): void {
     sessionStorage.setItem(ACCESS_KEY, res.accessToken);
     sessionStorage.setItem(REFRESH_KEY, res.refreshToken);
+
+    const primaryRole = pickPrimaryRole(res.user.roles);
+    if (primaryRole) {
+      setRole(primaryRole);
+      // Overwrite the mock persona's display name/email with the real user's
+      // identity so the topbar / sidebar chip matches who's actually signed
+      // in. setRole() seeds MOCK_USERS_BY_ROLE[role] which has placeholder
+      // @mobilab.in emails — we overwrite that with the real JWT identity.
+      //
+      // IMPORTANT: do NOT overwrite `orgId` here. The mock Next.js API
+      // routes at apps/web/src/app/api/* key their fixtures by the slug
+      // MOCK_ORG_ID ("org_mobilab") and receive it via the X-Org-Id
+      // header that @/lib/api-client.ts reads from this store. Replacing
+      // the slug with the real tenant UUID (e.g. ...-a001) makes every
+      // unmigrated mock-backed page 500. Real /crm/* pages use tenantFetch,
+      // which pulls the org UUID straight from the JWT `org` claim — they
+      // don't need the store to carry it.
+      useAuthStore.setState({
+        user: {
+          id: res.user.id,
+          name: res.user.name || res.user.email,
+          email: res.user.email,
+          avatar:
+            MOCK_USERS_BY_ROLE[primaryRole].avatar ||
+            res.user.email.slice(0, 2).toUpperCase(),
+        },
+      });
+      void fetchPermissions();
+    }
+
+    // SameSite=Lax is safe for same-origin navigation and blocks CSRF.
+    // Not httpOnly because this is a presence-only cookie for the optimistic
+    // proxy gate — the real credential material is the access token in
+    // sessionStorage. Production should switch to an httpOnly JWT cookie
+    // set by a Route Handler.
+    document.cookie = `${SESSION_COOKIE}=1; path=/; SameSite=Lax`;
+
     router.push(redirectTo);
   }
 

@@ -21,7 +21,7 @@
  */
 
 import { z } from "zod";
-import { PLAN_CODES, TENANT_STATUSES } from "./billing";
+import { PLAN_CODES, TENANT_STATUSES } from "./billing.js";
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 

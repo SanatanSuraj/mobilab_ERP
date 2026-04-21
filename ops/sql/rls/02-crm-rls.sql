@@ -21,6 +21,10 @@ BEGIN
     'deal_line_items',
     'tickets',
     'ticket_comments',
+    'quotations',
+    'quotation_line_items',
+    'sales_orders',
+    'sales_order_line_items',
     'crm_number_sequences'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);

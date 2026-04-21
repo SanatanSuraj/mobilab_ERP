@@ -6,12 +6,24 @@
  *
  * Or from the subpath for smaller surface area:
  *   import { hasPermission } from "@mobilab/contracts/permissions";
+ *
+ * Note: explicit ".js" extensions on re-exports are required because downstream
+ * consumers (apps/api, packages/quotas, packages/vendor-admin) use
+ * `moduleResolution: "NodeNext"` which rejects bare relative imports, while
+ * `moduleResolution: "Bundler"` (used by contracts itself and apps/web) accepts
+ * both styles.
  */
 
-export * from "./roles";
-export * from "./permissions";
-export * from "./auth";
-export * from "./pagination";
-export * from "./crm";
-export * from "./billing";
-export * from "./vendor-admin";
+export * from "./roles.js";
+export * from "./permissions.js";
+export * from "./auth.js";
+export * from "./pagination.js";
+export * from "./crm.js";
+export * from "./inventory.js";
+export * from "./procurement.js";
+export * from "./production.js";
+export * from "./qc.js";
+export * from "./finance.js";
+export * from "./notifications.js";
+export * from "./billing.js";
+export * from "./vendor-admin.js";

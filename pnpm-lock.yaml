@@ -50,6 +50,9 @@ importers:
       '@mobilab/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@mobilab/money':
+        specifier: workspace:*
+        version: link:../../packages/money
       '@mobilab/observability':
         specifier: workspace:*
         version: link:../../packages/observability

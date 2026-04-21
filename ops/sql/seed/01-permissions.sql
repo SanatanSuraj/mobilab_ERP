@@ -58,13 +58,27 @@ INSERT INTO permissions (id, resource, action, description) VALUES
   ('sales_orders:approve_finance',    'sales_orders', 'approve_finance',    'Finance approval step'),
   ('sales_orders:convert_to_wo',      'sales_orders', 'convert_to_wo',      NULL),
 
+  -- products (production module master)
+  ('products:create',        'products', 'create',        NULL),
+  ('products:read',          'products', 'read',          NULL),
+  ('products:update',        'products', 'update',        NULL),
+  ('products:delete',        'products', 'delete',        'Soft-delete products'),
+
+  -- bom (bill of materials)
+  ('bom:read',               'bom', 'read',               NULL),
+  ('bom:edit',               'bom', 'edit',               'Draft and update BOM versions'),
+  ('bom:activate',           'bom', 'activate',           'Promote a BOM version to ACTIVE'),
+  ('bom:supersede',          'bom', 'supersede',          'Mark a BOM version SUPERSEDED or OBSOLETE'),
+
   -- work_orders
   ('work_orders:create',             'work_orders', 'create',             NULL),
   ('work_orders:read',               'work_orders', 'read',               NULL),
+  ('work_orders:update',             'work_orders', 'update',             NULL),
   ('work_orders:release',            'work_orders', 'release',            NULL),
   ('work_orders:close',              'work_orders', 'close',              NULL),
   ('work_orders:transition',         'work_orders', 'transition',         'Advance through 15-state lifecycle'),
   ('work_orders:assign_operator',    'work_orders', 'assign_operator',    NULL),
+  ('wip_stages:advance',             'wip_stages', 'advance',             'Advance a WIP stage (complete/QC/rework)'),
 
   -- bmr
   ('bmr:read',                'bmr', 'read',                NULL),
@@ -119,6 +133,12 @@ INSERT INTO permissions (id, resource, action, description) VALUES
   ('payments:create',      'payments', 'create',     NULL),
   ('payments:read',        'payments', 'read',       NULL),
   ('payments:reconcile',   'payments', 'reconcile',  NULL),
+
+  -- notifications
+  ('notifications:read',        'notifications', 'read',        'Read own notification feed'),
+  ('notifications:admin_read',  'notifications', 'admin_read',  'Read notifications across users (moderation)'),
+  ('notifications:dispatch',    'notifications', 'dispatch',    'Emit notifications to other users'),
+  ('notifications:templates:manage', 'notification_templates', 'manage', 'Manage notification templates'),
 
   -- reports
   ('reports:read',     'reports', 'read',    NULL),
