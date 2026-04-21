@@ -1,67 +1,90 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { ActivityFeed } from "@/components/shared/activity-feed";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  getUserById,
-  getProductById,
-  getActivitiesForEntity,
-  formatCurrency,
-  formatDate,
-  DealStage,
-} from "@/data/mock";
-import { useDeal } from "@/hooks/useCrm";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
+  useApiAccount,
+  useApiDeal,
+  useApiTransitionDealStage,
+} from "@/hooks/useCrmApi";
+import { formatCurrency, formatDate } from "@/data/mock";
+import type { DealStage } from "@mobilab/contracts";
+import {
+  AlertCircle,
   ArrowLeft,
   Building2,
-  User,
-  DollarSign,
   CalendarDays,
-  Percent,
-  Package,
-  Link2,
-  CheckCircle2,
-  AlertTriangle,
-  Factory,
-  FileText,
+  DollarSign,
   ExternalLink,
+  Percent,
+  User,
 } from "lucide-react";
 
-const stageLabels: Record<DealStage, string> = {
-  discovery: "Discovery",
-  proposal: "Proposal",
-  negotiation: "Negotiation",
-  closed_won: "Closed Won",
-  closed_lost: "Closed Lost",
+/**
+ * Deal detail — /crm/deals/:id, backed by useApiDeal + useApiTransitionDealStage.
+ *
+ * Migration deltas from the earlier mock page:
+ *   - Stage is UPPER_CASE (DealStage enum). All label/order maps switched.
+ *   - Stage changes go through POST /crm/deals/:id/transition with the
+ *     deal's `expectedVersion`. On 409 (stale version), the user sees a
+ *     toast and the detail is re-fetched so they can retry.
+ *   - `deal.value` is a decimal string (NUMERIC(18,2)), not a number.
+ *   - `deal.expectedClose` / `closedAt` / `lostReason` / `assignedTo` are
+ *     all nullable; render paths fall back to "—" / "Unassigned".
+ *   - Dropped tabs: Products & GST (not in contract — deal line items are
+ *     a quotation concern, not a deal concern) and Activity (no per-deal
+ *     activity endpoint yet).
+ *   - Dropped the fake Work Order banner — that was pure prototype UX. The
+ *     real cross-module link lives under Manufacturing once the pipeline
+ *     is wired.
+ *
+ * The Lost flow still uses a modal: CLOSED_LOST requires lostReason, so we
+ * can't just fire the transition off a Select change. Category is kept as
+ * UI-only metadata (appended to the reason text) because the backend only
+ * stores a free-form reason string.
+ */
+
+const STAGE_LABELS: Record<DealStage, string> = {
+  DISCOVERY: "Discovery",
+  PROPOSAL: "Proposal",
+  NEGOTIATION: "Negotiation",
+  CLOSED_WON: "Closed Won",
+  CLOSED_LOST: "Closed Lost",
 };
 
-const stageOrder: DealStage[] = ["discovery", "proposal", "negotiation", "closed_won"];
+// Pipeline order — CLOSED_LOST is the side branch, rendered separately in
+// the stage flow strip.
+const STAGE_ORDER: DealStage[] = [
+  "DISCOVERY",
+  "PROPOSAL",
+  "NEGOTIATION",
+  "CLOSED_WON",
+];
 
-type WOState = null | "CREATING" | "CREATED";
-
-type LostReasonCategory =
+type LostCategory =
   | "PRICE"
   | "COMPETITOR"
   | "TIMELINE"
@@ -69,7 +92,7 @@ type LostReasonCategory =
   | "NO_RESPONSE"
   | "OTHER";
 
-const LOST_REASON_CATEGORIES: Record<LostReasonCategory, string> = {
+const LOST_CATEGORY_LABELS: Record<LostCategory, string> = {
   PRICE: "Price too high",
   COMPETITOR: "Chose competitor",
   TIMELINE: "Timeline mismatch",
@@ -78,34 +101,36 @@ const LOST_REASON_CATEGORIES: Record<LostReasonCategory, string> = {
   OTHER: "Other",
 };
 
+function toNumber(v: string | null): number {
+  if (v === null || v === "") return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export default function DealDetailPage() {
   const params = useParams();
   const router = useRouter();
   const dealId = params.id as string;
 
-  const { data: deal, isLoading: dealLoading } = useDeal(dealId);
-  const [currentStage, setCurrentStage] = useState<DealStage>("discovery");
+  const dealQuery = useApiDeal(dealId);
+  const transitionMut = useApiTransitionDealStage(dealId);
 
-  // Sync local stage state when deal data arrives
-  const [stageSynced, setStageSynced] = useState(false);
-  if (deal && !stageSynced) {
-    setCurrentStage(deal.stage);
-    setStageSynced(true);
-  }
-  const [woState, setWoState] = useState<WOState>(null);
-  const [woResult, setWoResult] = useState<{
-    pid: string;
-    reservedItems: number;
-    shortfallItems: number;
-  } | null>(null);
+  // Side-fetch the linked account so we can show its name rather than a
+  // bare uuid. Only enabled when the deal has an accountId.
+  const accountQuery = useApiAccount(dealQuery.data?.accountId ?? undefined);
 
-  // Lost reason dialog state
   const [lostDialogOpen, setLostDialogOpen] = useState(false);
   const [lostReason, setLostReason] = useState("");
-  const [lostCategory, setLostCategory] = useState<LostReasonCategory | "">("");
-  const [pendingLostStage, setPendingLostStage] = useState(false);
+  const [lostCategory, setLostCategory] = useState<LostCategory | "">("");
 
-  if (dealLoading) {
+  // Pre-compute the stage strip every render — cheap, and keeps the flow
+  // logic colocated with the data it depends on.
+  const isTerminal = useMemo(() => {
+    const s = dealQuery.data?.stage;
+    return s === "CLOSED_WON" || s === "CLOSED_LOST";
+  }, [dealQuery.data?.stage]);
+
+  if (dealQuery.isLoading) {
     return (
       <div className="p-6 space-y-4 max-w-[1200px] mx-auto">
         <Skeleton className="h-8 w-32" />
@@ -118,70 +143,71 @@ export default function DealDetailPage() {
     );
   }
 
-  if (!deal) {
+  if (dealQuery.isError || !dealQuery.data) {
     return (
-      <div className="p-6">
-        <div className="text-center py-20">
-          <h2 className="text-xl font-semibold mb-2">Deal not found</h2>
-          <p className="text-muted-foreground mb-4">The deal you are looking for does not exist.</p>
-          <Button variant="outline" onClick={() => router.push("/crm/deals")}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Deals
-          </Button>
+      <div className="p-6 max-w-[1200px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3 mb-4">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">Deal not found</p>
+            <p className="text-red-700 mt-1">
+              {dealQuery.error instanceof Error
+                ? dealQuery.error.message
+                : "The deal you are looking for does not exist or you do not have access."}
+            </p>
+          </div>
         </div>
+        <Button variant="outline" onClick={() => router.push("/crm/deals")}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Deals
+        </Button>
       </div>
     );
   }
 
-  const user = getUserById(deal.assignedTo);
-  const dealActivities = getActivitiesForEntity("deal", deal.id);
-  const isTerminal = currentStage === "closed_won" || currentStage === "closed_lost";
+  const deal = dealQuery.data;
+  const accountName =
+    deal.accountId && accountQuery.data ? accountQuery.data.name : deal.company;
 
-  const timelineEvents = [
-    { label: "Deal created", date: deal.createdAt, stage: "discovery" as DealStage },
-    ...(currentStage === "proposal" || currentStage === "negotiation" || currentStage === "closed_won"
-      ? [{ label: "Moved to Proposal", date: deal.createdAt, stage: "proposal" as DealStage }]
-      : []),
-    ...(currentStage === "negotiation" || currentStage === "closed_won"
-      ? [{ label: "Moved to Negotiation", date: deal.createdAt, stage: "negotiation" as DealStage }]
-      : []),
-    ...(currentStage === "closed_won"
-      ? [{ label: "Deal closed (Won)", date: deal.expectedClose, stage: "closed_won" as DealStage }]
-      : []),
-    ...(currentStage === "closed_lost"
-      ? [{ label: "Deal closed (Lost)", date: deal.expectedClose, stage: "closed_lost" as DealStage }]
-      : []),
-  ];
-
-  function triggerWOCreation() {
-    setWoState("CREATING");
-    setTimeout(() => {
-      setWoState("CREATED");
-      setWoResult({ pid: "WO-2026-006", reservedItems: 4, shortfallItems: 1 });
-      toast.success("Work Order WO-2026-006 created automatically from this deal.");
-    }, 800);
+  function commitStage(nextStage: DealStage, reason?: string) {
+    transitionMut.mutate(
+      {
+        stage: nextStage,
+        expectedVersion: deal.version,
+        ...(reason ? { lostReason: reason } : {}),
+      },
+      {
+        onSuccess: () => {
+          toast.success(
+            `Stage changed to ${STAGE_LABELS[nextStage]}`
+          );
+        },
+        onError: (err) => {
+          // Backend returns 409 with a specific code on stale version —
+          // surface it so the user knows a re-fetch is happening.
+          const message =
+            err instanceof Error ? err.message : "Failed to change stage";
+          toast.error(message);
+          // Force a fresh read so the next attempt picks up the new version.
+          dealQuery.refetch();
+        },
+      }
+    );
   }
 
-  function handleStageChange(newStage: string | null) {
-    if (!newStage) return;
-    if (isTerminal) return;
+  function handleStageChange(nextStageRaw: string | null) {
+    if (!nextStageRaw) return;
+    if (isTerminal || transitionMut.isPending) return;
 
-    const ns = newStage as DealStage;
-    const prevLabel = stageLabels[currentStage];
-    const newLabel = stageLabels[ns];
+    const nextStage = nextStageRaw as DealStage;
+    if (nextStage === deal.stage) return;
 
-    if (ns === "closed_lost") {
-      setPendingLostStage(true);
+    if (nextStage === "CLOSED_LOST") {
+      // Open modal; confirmation path calls commitStage with reason.
       setLostDialogOpen(true);
       return;
     }
-
-    setCurrentStage(ns);
-    toast.success(`Stage changed from ${prevLabel} to ${newLabel}`);
-
-    if (ns === "closed_won") {
-      triggerWOCreation();
-    }
+    commitStage(nextStage);
   }
 
   function handleConfirmLost() {
@@ -189,18 +215,74 @@ export default function DealDetailPage() {
       toast.error("Please fill in both lost reason and category.");
       return;
     }
-    setCurrentStage("closed_lost");
+    // Backend only stores one reason string — fold category in as a prefix
+    // so the categorisation is preserved without schema changes.
+    const composed = `[${lostCategory}] ${lostReason.trim()}`;
+    commitStage("CLOSED_LOST", composed);
     setLostDialogOpen(false);
-    setPendingLostStage(false);
-    toast.info(`Deal marked as Lost. Reason: ${lostReason.slice(0, 60)}`);
+    setLostReason("");
+    setLostCategory("");
   }
+
+  // Timeline events derive from the current stage + timestamps on the row.
+  // We don't have per-stage audit yet, so intermediate events reuse
+  // createdAt as a placeholder anchor.
+  const timelineEvents: Array<{
+    label: string;
+    date: string | null;
+    stage: DealStage;
+  }> = [
+    { label: "Deal created", date: deal.createdAt, stage: "DISCOVERY" },
+    ...(deal.stage === "PROPOSAL" ||
+    deal.stage === "NEGOTIATION" ||
+    deal.stage === "CLOSED_WON"
+      ? [
+          {
+            label: "Moved to Proposal",
+            date: deal.updatedAt,
+            stage: "PROPOSAL" as DealStage,
+          },
+        ]
+      : []),
+    ...(deal.stage === "NEGOTIATION" || deal.stage === "CLOSED_WON"
+      ? [
+          {
+            label: "Moved to Negotiation",
+            date: deal.updatedAt,
+            stage: "NEGOTIATION" as DealStage,
+          },
+        ]
+      : []),
+    ...(deal.stage === "CLOSED_WON"
+      ? [
+          {
+            label: "Deal closed (Won)",
+            date: deal.closedAt ?? deal.updatedAt,
+            stage: "CLOSED_WON" as DealStage,
+          },
+        ]
+      : []),
+    ...(deal.stage === "CLOSED_LOST"
+      ? [
+          {
+            label: "Deal closed (Lost)",
+            date: deal.closedAt ?? deal.updatedAt,
+            stage: "CLOSED_LOST" as DealStage,
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
-      {/* Lost Reason Dialog */}
-      <Dialog open={lostDialogOpen} onOpenChange={(open) => {
-        if (!open) { setLostDialogOpen(false); setPendingLostStage(false); }
-      }}>
+      <Dialog
+        open={lostDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLostDialogOpen(false);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>Mark Deal as Lost</DialogTitle>
@@ -210,14 +292,23 @@ export default function DealDetailPage() {
               <Label>Lost Reason Category *</Label>
               <Select
                 value={lostCategory}
-                onValueChange={(v) => setLostCategory((v ?? "") as LostReasonCategory)}
+                onValueChange={(v) =>
+                  setLostCategory((v ?? "") as LostCategory)
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a reason category…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(Object.entries(LOST_REASON_CATEGORIES) as [LostReasonCategory, string][]).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  {(
+                    Object.entries(LOST_CATEGORY_LABELS) as [
+                      LostCategory,
+                      string,
+                    ][]
+                  ).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -233,73 +324,102 @@ export default function DealDetailPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setLostDialogOpen(false); setPendingLostStage(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => setLostDialogOpen(false)}
+              disabled={transitionMut.isPending}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleConfirmLost} disabled={!lostReason.trim() || !lostCategory}>
-              Confirm Lost
+            <Button
+              variant="destructive"
+              onClick={handleConfirmLost}
+              disabled={
+                !lostReason.trim() ||
+                !lostCategory ||
+                transitionMut.isPending
+              }
+            >
+              {transitionMut.isPending ? "Saving…" : "Confirm Lost"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <div className="mb-4">
-        <Button variant="ghost" size="sm" onClick={() => router.push("/crm/deals")}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => router.push("/crm/deals")}
+        >
           <ArrowLeft className="h-4 w-4 mr-1" />
           Back to Deals
         </Button>
       </div>
 
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{deal.title}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{deal.company}</p>
+      <div className="flex items-start justify-between mb-4 gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight truncate">
+              {deal.title}
+            </h1>
+            <span className="text-xs text-muted-foreground font-mono">
+              {deal.dealNumber}
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">{accountName}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <Select
-            value={currentStage}
+            value={deal.stage}
             onValueChange={handleStageChange}
-            disabled={isTerminal}
+            disabled={isTerminal || transitionMut.isPending}
           >
             <SelectTrigger className="w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(Object.keys(stageLabels) as DealStage[]).map((s) => (
+              {(Object.keys(STAGE_LABELS) as DealStage[]).map((s) => (
                 <SelectItem key={s} value={s}>
-                  {stageLabels[s]}
+                  {STAGE_LABELS[s]}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <StatusBadge status={currentStage} />
+          <StatusBadge status={deal.stage} />
         </div>
       </div>
 
-      {/* Stage flow */}
       <div className="flex items-center gap-1 mb-6 overflow-x-auto pb-1">
-        {stageOrder.map((s, idx) => {
-          const isActive = currentStage === s;
+        {STAGE_ORDER.map((s, idx) => {
+          const isActive = deal.stage === s;
           const isPast =
-            currentStage === "closed_won"
+            deal.stage === "CLOSED_WON"
               ? true
-              : stageOrder.indexOf(currentStage) > idx;
+              : STAGE_ORDER.indexOf(deal.stage as DealStage) > idx;
           return (
             <div key={s} className="flex items-center gap-1 shrink-0">
               <button
+                type="button"
                 className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
                   isActive
                     ? "bg-primary text-primary-foreground"
                     : isPast
-                    ? "bg-green-100 text-green-700 border border-green-200"
-                    : "bg-muted text-muted-foreground border border-border"
-                } ${isTerminal ? "cursor-default" : "cursor-pointer hover:opacity-80"}`}
-                onClick={() => !isTerminal && handleStageChange(s)}
-                disabled={isTerminal}
+                      ? "bg-green-100 text-green-700 border border-green-200"
+                      : "bg-muted text-muted-foreground border border-border"
+                } ${
+                  isTerminal || transitionMut.isPending
+                    ? "cursor-not-allowed opacity-70"
+                    : "cursor-pointer hover:opacity-80"
+                }`}
+                onClick={() =>
+                  !isTerminal && !transitionMut.isPending && handleStageChange(s)
+                }
+                disabled={isTerminal || transitionMut.isPending}
               >
-                {stageLabels[s]}
+                {STAGE_LABELS[s]}
               </button>
-              {idx < stageOrder.length - 1 && (
+              {idx < STAGE_ORDER.length - 1 && (
                 <span className="text-muted-foreground text-xs">→</span>
               )}
             </div>
@@ -307,56 +427,39 @@ export default function DealDetailPage() {
         })}
         <span className="text-muted-foreground text-xs mx-1">↘</span>
         <button
+          type="button"
           className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-            currentStage === "closed_lost"
+            deal.stage === "CLOSED_LOST"
               ? "bg-red-100 text-red-700 border border-red-200"
               : "bg-muted text-muted-foreground border border-border"
-          } ${isTerminal ? "cursor-default" : "cursor-pointer hover:opacity-80"}`}
-          onClick={() => !isTerminal && handleStageChange("closed_lost")}
-          disabled={isTerminal}
+          } ${
+            isTerminal || transitionMut.isPending
+              ? "cursor-not-allowed opacity-70"
+              : "cursor-pointer hover:opacity-80"
+          }`}
+          onClick={() =>
+            !isTerminal &&
+            !transitionMut.isPending &&
+            handleStageChange("CLOSED_LOST")
+          }
+          disabled={isTerminal || transitionMut.isPending}
         >
           Lost
         </button>
       </div>
 
-      {/* WO Creation Banner */}
-      {woState === "CREATING" && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-center gap-3 mb-4 animate-pulse">
-          <Factory className="h-4 w-4 text-amber-600 shrink-0" />
-          <p className="text-sm font-medium text-amber-800">Creating Work Order automatically…</p>
-        </div>
-      )}
-      {woState === "CREATED" && woResult && (
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4 flex items-start gap-3 mb-4">
-          <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-green-800">
-              Work Order {woResult.pid} created automatically
-            </p>
-            <p className="text-xs text-green-700 mt-1">
-              MRP complete: {woResult.reservedItems} components reserved
-              {woResult.shortfallItems > 0 && (
-                <span className="ml-2 inline-flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3 text-amber-600" />
-                  <span className="text-amber-700">{woResult.shortfallItems} item needs procurement</span>
-                </span>
-              )}
-            </p>
-          </div>
-          <Link href="/manufacturing/work-orders">
-            <Button size="sm" variant="outline" className="shrink-0">
-              View Work Order
-              <ExternalLink className="h-3 w-3 ml-1" />
-            </Button>
-          </Link>
+      {deal.stage === "CLOSED_LOST" && deal.lostReason && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4">
+          <p className="text-xs font-medium text-red-900 mb-1">Lost Reason</p>
+          <p className="text-sm text-red-800 whitespace-pre-wrap">
+            {deal.lostReason}
+          </p>
         </div>
       )}
 
       <Tabs defaultValue="overview" className="space-y-4">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="products">Products &amp; GST</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
         </TabsList>
 
@@ -371,16 +474,29 @@ export default function DealDetailPage() {
                   <div className="p-2 rounded-lg bg-muted">
                     <Building2 className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Company</p>
-                    <p className="text-sm font-medium">{deal.company}</p>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Account</p>
+                    {deal.accountId ? (
+                      <button
+                        type="button"
+                        className="text-sm font-medium text-primary hover:underline flex items-center gap-1"
+                        onClick={() =>
+                          router.push(`/crm/accounts/${deal.accountId}`)
+                        }
+                      >
+                        {accountName}
+                        <ExternalLink className="h-3 w-3" />
+                      </button>
+                    ) : (
+                      <p className="text-sm font-medium">{deal.company}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-muted">
                     <User className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Contact</p>
                     <p className="text-sm font-medium">{deal.contactName}</p>
                   </div>
@@ -391,7 +507,9 @@ export default function DealDetailPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Value</p>
-                    <p className="text-sm font-medium">{formatCurrency(deal.value)}</p>
+                    <p className="text-sm font-medium">
+                      {formatCurrency(toNumber(deal.value))}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -401,8 +519,13 @@ export default function DealDetailPage() {
                   <div>
                     <p className="text-xs text-muted-foreground">Probability</p>
                     <div className="flex items-center gap-2">
-                      <Progress value={deal.probability} className="h-2 w-24" />
-                      <span className="text-sm font-medium">{deal.probability}%</span>
+                      <Progress
+                        value={deal.probability}
+                        className="h-2 w-24"
+                      />
+                      <span className="text-sm font-medium">
+                        {deal.probability}%
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -419,8 +542,14 @@ export default function DealDetailPage() {
                     <CalendarDays className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Expected Close</p>
-                    <p className="text-sm font-medium">{formatDate(deal.expectedClose)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Expected Close
+                    </p>
+                    <p className="text-sm font-medium">
+                      {deal.expectedClose
+                        ? formatDate(deal.expectedClose)
+                        : "—"}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -429,7 +558,20 @@ export default function DealDetailPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Created</p>
-                    <p className="text-sm font-medium">{formatDate(deal.createdAt)}</p>
+                    <p className="text-sm font-medium">
+                      {formatDate(deal.createdAt)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-muted">
+                    <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Closed</p>
+                    <p className="text-sm font-medium">
+                      {deal.closedAt ? formatDate(deal.closedAt) : "—"}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -437,216 +579,17 @@ export default function DealDetailPage() {
                     <User className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Assigned To</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {user && (
-                        <Avatar className="h-6 w-6">
-                          <AvatarFallback className="text-[9px] bg-primary/10 text-primary">
-                            {user.avatar}
-                          </AvatarFallback>
-                        </Avatar>
-                      )}
-                      <span className="text-sm font-medium">{user?.name ?? "Unassigned"}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-muted">
-                    <Package className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Products</p>
-                    <p className="text-sm font-medium">{deal.products.length} item(s)</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Linked Records card */}
-            <Card className="md:col-span-2">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Linked Records</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {/* Work Order */}
-                  <div className="flex items-center justify-between p-3 rounded-lg border">
-                    <div className="flex items-center gap-3">
-                      <Factory className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Work Order</p>
-                        <p className="text-sm font-medium">
-                          {woResult?.pid ?? "Not yet created"}
-                        </p>
-                      </div>
-                    </div>
-                    <StatusBadge status={woState === "CREATED" ? "IN_PROGRESS" : "PENDING"} />
-                  </div>
-
-                  {/* Quotation */}
-                  <div className="flex items-center justify-between p-3 rounded-lg border">
-                    <div className="flex items-center gap-3">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Quotation</p>
-                        <p className="text-sm font-medium">v1 — SENT</p>
-                      </div>
-                    </div>
-                    <Link href="/crm/quotations">
-                      <Button size="sm" variant="ghost" className="h-7 text-xs">
-                        View <ExternalLink className="h-3 w-3 ml-1" />
-                      </Button>
-                    </Link>
-                  </div>
-
-                  {/* Order Confirmation */}
-                  <div className="flex items-center justify-between p-3 rounded-lg border">
-                    <div className="flex items-center gap-3">
-                      <Link2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Order Confirmation</p>
-                        <p className="text-sm font-medium">
-                          {currentStage !== "closed_won" ? "Pending" : "Ready to raise"}
-                        </p>
-                      </div>
-                    </div>
-                    {currentStage === "closed_won" && woState === "CREATED" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        onClick={() => toast.info("Order Confirmation flow: navigate to Sales Orders to raise OC.")}
-                      >
-                        Raise OC
-                      </Button>
-                    )}
+                    <p className="text-xs text-muted-foreground">Owner</p>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      {deal.assignedTo
+                        ? deal.assignedTo.slice(0, 8)
+                        : "Unassigned"}
+                    </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
-
-        <TabsContent value="products">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Products &amp; GST</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-lg border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableHead>Product</TableHead>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>HSN Code</TableHead>
-                      <TableHead>GST Rate</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Unit Price</TableHead>
-                      <TableHead className="text-right">Line Total</TableHead>
-                      <TableHead className="text-right">GST Amount</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {deal.products.map((item, idx) => {
-                      const product = getProductById(item.productId);
-                      const unitPrice = product?.price ?? 0;
-                      const lineTotal = unitPrice * item.quantity;
-                      const gstRate = 0.18;
-                      const gstAmount = lineTotal * gstRate;
-                      const isDevice = product?.category === "Devices";
-                      const hsnCode = isDevice ? "8471" : "3822";
-
-                      return (
-                        <TableRow key={idx}>
-                          <TableCell className="font-medium text-sm">
-                            {product?.name ?? item.productId}
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {product?.sku ?? "—"}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {hsnCode}
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            <Badge variant="outline" className="text-xs">18%</Badge>
-                          </TableCell>
-                          <TableCell className="text-right text-sm">{item.quantity}</TableCell>
-                          <TableCell className="text-right text-sm">
-                            {formatCurrency(unitPrice)}
-                          </TableCell>
-                          <TableCell className="text-right text-sm font-medium">
-                            {formatCurrency(lineTotal)}
-                          </TableCell>
-                          <TableCell className="text-right text-sm text-muted-foreground">
-                            {formatCurrency(gstAmount)}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-
-                    {/* Summary rows */}
-                    {(() => {
-                      const subtotal = deal.products.reduce((sum, item) => {
-                        const product = getProductById(item.productId);
-                        return sum + (product?.price ?? 0) * item.quantity;
-                      }, 0);
-                      const cgst = subtotal * 0.09;
-                      const sgst = subtotal * 0.09;
-                      const total = subtotal + cgst + sgst;
-                      return (
-                        <>
-                          <TableRow className="bg-muted/20">
-                            <TableCell colSpan={6} className="text-right text-sm text-muted-foreground">
-                              Subtotal
-                            </TableCell>
-                            <TableCell colSpan={2} className="text-right text-sm font-medium">
-                              {formatCurrency(subtotal)}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow className="bg-muted/20">
-                            <TableCell colSpan={6} className="text-right text-xs text-muted-foreground">
-                              CGST 9% (Intra-state)
-                            </TableCell>
-                            <TableCell colSpan={2} className="text-right text-xs text-muted-foreground">
-                              {formatCurrency(cgst)}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow className="bg-muted/20">
-                            <TableCell colSpan={6} className="text-right text-xs text-muted-foreground">
-                              SGST 9% (Intra-state)
-                            </TableCell>
-                            <TableCell colSpan={2} className="text-right text-xs text-muted-foreground">
-                              {formatCurrency(sgst)}
-                            </TableCell>
-                          </TableRow>
-                          <TableRow className="bg-muted/30">
-                            <TableCell colSpan={6} className="text-right font-semibold text-sm">
-                              Grand Total (incl. GST)
-                            </TableCell>
-                            <TableCell colSpan={2} className="text-right font-semibold text-sm">
-                              {formatCurrency(total)}
-                            </TableCell>
-                          </TableRow>
-                        </>
-                      );
-                    })()}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="activity">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Activity</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ActivityFeed activities={dealActivities} maxHeight="600px" />
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <TabsContent value="timeline">
@@ -658,7 +601,10 @@ export default function DealDetailPage() {
               <div className="relative pl-6 space-y-6">
                 <div className="absolute left-[11px] top-2 bottom-2 w-px bg-border" />
                 {timelineEvents.map((event, idx) => (
-                  <div key={idx} className="relative flex items-start gap-4">
+                  <div
+                    key={idx}
+                    className="relative flex items-start gap-4"
+                  >
                     <div className="absolute left-[-18px] top-1.5 w-3 h-3 rounded-full border-2 border-primary bg-background" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
@@ -666,7 +612,7 @@ export default function DealDetailPage() {
                         <StatusBadge status={event.stage} />
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {formatDate(event.date)}
+                        {event.date ? formatDate(event.date) : "—"}
                       </p>
                     </div>
                   </div>

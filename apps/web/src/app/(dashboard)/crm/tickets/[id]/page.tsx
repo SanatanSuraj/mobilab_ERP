@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PageHeader } from "@/components/shared/page-header";
+import Link from "next/link";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,37 +11,82 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
 import {
-  supportTickets,
-  getAccountById,
-  getContactById,
-  type SupportTicket,
-  type TicketComment,
-} from "@/data/crm-mock";
-import { getUserById, getProductById, formatDate } from "@/data/mock";
+  useApiAccount,
+  useApiAddTicketComment,
+  useApiContact,
+  useApiTicket,
+  useApiTicketComments,
+  useApiTransitionTicketStatus,
+} from "@/hooks/useCrmApi";
+import { formatDate } from "@/data/mock";
+import type { TicketStatus } from "@mobilab/contracts";
 import {
-  ArrowLeft,
-  Building2,
-  User,
-  Tag,
+  AlertCircle,
   AlertTriangle,
-  Shield,
+  ArrowLeft,
+  ArrowRight,
+  Building2,
+  CheckCircle2,
   Clock,
-  Send,
   Cpu,
   Package,
-  Calendar,
-  CheckCircle2,
-  ArrowRight,
+  Send,
+  Tag,
+  User,
 } from "lucide-react";
-import { toast } from "sonner";
-import Link from "next/link";
 
-const statusFlow = ["open", "in_progress", "waiting_customer", "resolved", "closed"] as const;
+/**
+ * Ticket detail — /crm/tickets/:id via useApiTicket + comments + status.
+ *
+ * Migration deltas from the mock page:
+ *   - Status / priority / category are UPPER_CASE (TicketStatus enum). The
+ *     linear status flow uses the contract enum order.
+ *   - Status changes go through POST /crm/tickets/:id/transition with
+ *     expectedVersion. 409 → toast + refetch.
+ *   - Comments are fetched lazily (useApiTicketComments) and added via the
+ *     POST /crm/tickets/:id/comments mutation. The mock's UI-only state is
+ *     gone; React Query owns the list.
+ *   - Comment visibility uses INTERNAL / CUSTOMER enum, not "type".
+ *   - `actorId` is a bare uuid now — the backend doesn't return user
+ *     metadata inline, so we show a uuid prefix until a users API lands.
+ *   - Dropped tabs / cards: Device Traceability (no real endpoint), product
+ *     lookup (contract has `productCode: string | null` but no products
+ *     catalog on the CRM side).
+ *   - Account/contact names are side-fetched via useApiAccount/useApiContact
+ *     for humane labels. Avoid joining server-side on the ticket read path.
+ */
 
-function getSlaDisplay(slaDeadline: string, status: string): { text: string; isBreached: boolean } {
-  if (status === "resolved" || status === "closed") {
+const STATUS_FLOW: TicketStatus[] = [
+  "OPEN",
+  "IN_PROGRESS",
+  "WAITING_CUSTOMER",
+  "RESOLVED",
+  "CLOSED",
+];
+
+function statusLabel(s: TicketStatus): string {
+  return s
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Human-readable SLA countdown. Returns "Resolved" for terminal statuses
+ * and "No SLA" when the backend hasn't set a deadline yet.
+ */
+function getSlaDisplay(
+  slaDeadline: string | null,
+  status: TicketStatus
+): { text: string; isBreached: boolean } {
+  if (status === "RESOLVED" || status === "CLOSED") {
     return { text: "Resolved", isBreached: false };
+  }
+  if (!slaDeadline) {
+    return { text: "No SLA", isBreached: false };
   }
   const now = new Date();
   const deadline = new Date(slaDeadline);
@@ -61,65 +106,123 @@ function getSlaDisplay(slaDeadline: string, status: string): { text: string; isB
 export default function TicketDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const ticket = supportTickets.find((t) => t.id === params.id);
-  const [currentStatus, setCurrentStatus] = useState(ticket?.status ?? "open");
-  const [comments, setComments] = useState<TicketComment[]>(ticket?.comments ?? []);
-  const [newComment, setNewComment] = useState("");
-  const [isInternal, setIsInternal] = useState(true);
+  const ticketId = params.id as string;
 
-  if (!ticket) {
+  const ticketQuery = useApiTicket(ticketId);
+  const commentsQuery = useApiTicketComments(ticketId);
+  const transitionMut = useApiTransitionTicketStatus(ticketId);
+  const addCommentMut = useApiAddTicketComment(ticketId);
+
+  // Side-fetches for humane labels.
+  const accountQuery = useApiAccount(
+    ticketQuery.data?.accountId ?? undefined
+  );
+  const contactQuery = useApiContact(
+    ticketQuery.data?.contactId ?? undefined
+  );
+
+  // INTERNAL by default — matches mock "internal note first" behaviour.
+  const [isInternal, setIsInternal] = useState(true);
+  const [newComment, setNewComment] = useState("");
+
+  if (ticketQuery.isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <p className="text-muted-foreground">Ticket not found</p>
-        <Button variant="outline" className="mt-4" onClick={() => router.back()}>
-          Go Back
+      <div className="p-6 max-w-[1400px] mx-auto space-y-4">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-10 w-80" />
+        <div className="grid grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-20" />
+          ))}
+        </div>
+        <Skeleton className="h-40" />
+      </div>
+    );
+  }
+
+  if (ticketQuery.isError || !ticketQuery.data) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3 mb-4">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">Ticket not found</p>
+            <p className="text-red-700 mt-1">
+              {ticketQuery.error instanceof Error
+                ? ticketQuery.error.message
+                : "The ticket you are looking for does not exist or you do not have access."}
+            </p>
+          </div>
+        </div>
+        <Button variant="outline" onClick={() => router.push("/crm/tickets")}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Tickets
         </Button>
       </div>
     );
   }
 
-  const account = getAccountById(ticket.accountId);
-  const contact = getContactById(ticket.contactId);
-  const product = ticket.productId ? getProductById(ticket.productId) : null;
-  const assignee = getUserById(ticket.assignedTo);
-  const sla = getSlaDisplay(ticket.slaDeadline, currentStatus);
+  const ticket = ticketQuery.data;
+  const comments = commentsQuery.data ?? [];
+  const sla = getSlaDisplay(ticket.slaDeadline, ticket.status);
 
-  const currentIdx = statusFlow.indexOf(currentStatus as (typeof statusFlow)[number]);
-  const nextStatusLabel =
-    currentIdx < statusFlow.length - 1
-      ? statusFlow[currentIdx + 1].replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  const currentIdx = STATUS_FLOW.indexOf(ticket.status);
+  const nextStatus =
+    currentIdx >= 0 && currentIdx < STATUS_FLOW.length - 1
+      ? STATUS_FLOW[currentIdx + 1]
       : null;
 
+  const accountName = ticket.accountId
+    ? accountQuery.data?.name ?? "Loading…"
+    : "—";
+  const contactName = ticket.contactId
+    ? contactQuery.data
+      ? `${contactQuery.data.firstName} ${contactQuery.data.lastName}`
+      : "Loading…"
+    : "—";
+
   const advanceStatus = () => {
-    if (currentIdx < statusFlow.length - 1) {
-      const next = statusFlow[currentIdx + 1];
-      setCurrentStatus(next);
-      toast.success(`Status updated to ${next.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}`);
-    }
+    if (!nextStatus) return;
+    transitionMut.mutate(
+      {
+        status: nextStatus,
+        expectedVersion: ticket.version,
+      },
+      {
+        onSuccess: () => {
+          toast.success(`Status updated to ${statusLabel(nextStatus)}`);
+        },
+        onError: (err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Failed to update status"
+          );
+          ticketQuery.refetch();
+        },
+      }
+    );
   };
 
   const addComment = () => {
-    if (!newComment.trim()) return;
-    const comment: TicketComment = {
-      id: `tc-new-${Date.now()}`,
-      type: isInternal ? "internal" : "customer",
-      user: isInternal ? "u1" : ticket.contactId,
-      content: newComment,
-      timestamp: new Date().toISOString(),
-    };
-    setComments([...comments, comment]);
-    setNewComment("");
-    toast.success("Comment added");
+    const content = newComment.trim();
+    if (!content) return;
+    addCommentMut.mutate(
+      {
+        content,
+        visibility: isInternal ? "INTERNAL" : "CUSTOMER",
+      },
+      {
+        onSuccess: () => {
+          setNewComment("");
+          toast.success("Comment added");
+        },
+        onError: (err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Failed to add comment"
+          );
+        },
+      }
+    );
   };
-
-  // Mock device traceability data
-  const deviceHistory = [
-    { stage: "Manufactured", date: "2025-11-01", detail: "Batch BT-231215" },
-    { stage: "QC Passed", date: "2025-11-05", detail: "All tests passed" },
-    { stage: "Dispatched", date: "2025-11-08", detail: `Shipped to ${account?.name}` },
-    { stage: "Delivered", date: "2025-11-10", detail: "Received and installed" },
-    { stage: "Ticket Created", date: formatDate(ticket.createdAt), detail: ticket.ticketNumber },
-  ];
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
@@ -131,7 +234,6 @@ export default function TicketDetailPage() {
         Back to Tickets
       </Link>
 
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-3 mb-1">
@@ -139,7 +241,7 @@ export default function TicketDetailPage() {
               {ticket.ticketNumber}
             </h1>
             <StatusBadge status={ticket.priority} />
-            <StatusBadge status={currentStatus} />
+            <StatusBadge status={ticket.status} />
           </div>
           <p className="text-sm text-muted-foreground">{ticket.subject}</p>
         </div>
@@ -150,7 +252,11 @@ export default function TicketDetailPage() {
               : "bg-green-50 text-green-700 border border-green-200"
           }`}
         >
-          <Clock className="h-3.5 w-3.5" />
+          {sla.isBreached ? (
+            <AlertTriangle className="h-3.5 w-3.5" />
+          ) : (
+            <Clock className="h-3.5 w-3.5" />
+          )}
           {sla.text}
         </div>
       </div>
@@ -159,12 +265,10 @@ export default function TicketDetailPage() {
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="comments">
-            Comments ({comments.length})
+            Comments{commentsQuery.data ? ` (${comments.length})` : ""}
           </TabsTrigger>
-          <TabsTrigger value="device">Device Traceability</TabsTrigger>
         </TabsList>
 
-        {/* DETAILS */}
         <TabsContent value="details" className="mt-4 space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <Card>
@@ -173,7 +277,19 @@ export default function TicketDetailPage() {
                   <Building2 className="h-3.5 w-3.5" />
                   <span className="text-xs font-medium">Account</span>
                 </div>
-                <p className="text-sm font-medium">{account?.name ?? "N/A"}</p>
+                {ticket.accountId ? (
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-primary hover:underline text-left"
+                    onClick={() =>
+                      router.push(`/crm/accounts/${ticket.accountId}`)
+                    }
+                  >
+                    {accountName}
+                  </button>
+                ) : (
+                  <p className="text-sm font-medium">—</p>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -182,11 +298,7 @@ export default function TicketDetailPage() {
                   <User className="h-3.5 w-3.5" />
                   <span className="text-xs font-medium">Contact</span>
                 </div>
-                <p className="text-sm font-medium">
-                  {contact
-                    ? `${contact.firstName} ${contact.lastName}`
-                    : "N/A"}
-                </p>
+                <p className="text-sm font-medium">{contactName}</p>
               </CardContent>
             </Card>
             <Card>
@@ -213,7 +325,11 @@ export default function TicketDetailPage() {
                   <User className="h-3.5 w-3.5" />
                   <span className="text-xs font-medium">Assigned To</span>
                 </div>
-                <p className="text-sm font-medium">{assignee?.name ?? "N/A"}</p>
+                <p className="text-sm font-medium text-muted-foreground">
+                  {ticket.assignedTo
+                    ? ticket.assignedTo.slice(0, 8)
+                    : "Unassigned"}
+                </p>
               </CardContent>
             </Card>
             {ticket.deviceSerial && (
@@ -229,27 +345,28 @@ export default function TicketDetailPage() {
                 </CardContent>
               </Card>
             )}
-            {product && (
+            {ticket.productCode && (
               <Card>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-2 text-muted-foreground mb-1">
                     <Package className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium">Product</span>
+                    <span className="text-xs font-medium">Product Code</span>
                   </div>
-                  <p className="text-sm font-medium">{product.name}</p>
+                  <p className="text-sm font-mono font-medium">
+                    {ticket.productCode}
+                  </p>
                 </CardContent>
               </Card>
             )}
           </div>
 
-          {/* Status Flow */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Status Flow</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-1 overflow-x-auto pb-2">
-                {statusFlow.map((stage, idx) => {
+                {STATUS_FLOW.map((stage, idx) => {
                   const isActive = currentIdx >= idx;
                   const isCurrent = currentIdx === idx;
                   return (
@@ -259,50 +376,56 @@ export default function TicketDetailPage() {
                           isCurrent
                             ? "bg-primary text-primary-foreground"
                             : isActive
-                            ? "bg-green-100 text-green-700"
-                            : "bg-muted text-muted-foreground"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-muted text-muted-foreground"
                         }`}
                       >
                         {isActive && <CheckCircle2 className="h-3 w-3" />}
-                        {stage.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                        {statusLabel(stage)}
                       </div>
-                      {idx < statusFlow.length - 1 && (
+                      {idx < STATUS_FLOW.length - 1 && (
                         <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       )}
                     </div>
                   );
                 })}
               </div>
-              {nextStatusLabel && (
+              {nextStatus && (
                 <div className="mt-4">
-                  <Button size="sm" onClick={advanceStatus}>
-                    Update to {nextStatusLabel}
+                  <Button
+                    size="sm"
+                    onClick={advanceStatus}
+                    disabled={transitionMut.isPending}
+                  >
+                    {transitionMut.isPending
+                      ? "Saving…"
+                      : `Update to ${statusLabel(nextStatus)}`}
                   </Button>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Description */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Description</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground leading-relaxed">
+              <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
                 {ticket.description}
               </p>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* COMMENTS */}
         <TabsContent value="comments" className="mt-4 space-y-4">
-          {/* Add Comment */}
           <Card>
             <CardContent className="p-4 space-y-3">
               <div className="flex items-center gap-3">
-                <Label htmlFor="internal-toggle" className="text-xs text-muted-foreground">
+                <Label
+                  htmlFor="internal-toggle"
+                  className="text-xs text-muted-foreground"
+                >
                   {isInternal ? "Internal Note" : "Customer Reply"}
                 </Label>
                 <Switch
@@ -321,11 +444,13 @@ export default function TicketDetailPage() {
                   value={newComment}
                   onChange={(e) => setNewComment(e.target.value)}
                   className="min-h-[60px] text-sm resize-none"
+                  disabled={addCommentMut.isPending}
                 />
                 <Button
                   size="icon"
                   className="shrink-0 self-end"
                   onClick={addComment}
+                  disabled={!newComment.trim() || addCommentMut.isPending}
                 >
                   <Send className="h-4 w-4" />
                 </Button>
@@ -333,145 +458,84 @@ export default function TicketDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Comments Timeline */}
-          <div className="space-y-3">
-            {comments.map((comment) => {
-              const isInternalComment = comment.type === "internal";
-              const commenter = isInternalComment
-                ? getUserById(comment.user)
-                : getContactById(comment.user);
-              const name = isInternalComment
-                ? (commenter as any)?.name ?? "Team"
-                : commenter
-                ? `${(commenter as any).firstName} ${(commenter as any).lastName}`
-                : "Customer";
-              const initials = isInternalComment
-                ? (commenter as any)?.avatar ?? "T"
-                : name
-                    .split(" ")
-                    .map((n: string) => n[0])
-                    .join("")
-                    .slice(0, 2);
+          {commentsQuery.isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          ) : commentsQuery.isError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-red-700">
+                {commentsQuery.error instanceof Error
+                  ? commentsQuery.error.message
+                  : "Failed to load comments"}
+              </p>
+            </div>
+          ) : comments.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No comments yet. Add the first one above.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {comments.map((comment) => {
+                const isInternalComment = comment.visibility === "INTERNAL";
+                // No user catalog yet — show uuid prefix as a placeholder
+                // so entries are still distinguishable across authors.
+                const name = comment.actorId
+                  ? comment.actorId.slice(0, 8)
+                  : "System";
+                const initials = name.slice(0, 2).toUpperCase();
 
-              return (
-                <div
-                  key={comment.id}
-                  className={`flex gap-3 p-3 rounded-lg border ${
-                    isInternalComment
-                      ? "border-blue-200 bg-blue-50/30"
-                      : "border-gray-200 bg-white"
-                  }`}
-                >
-                  <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarFallback
-                      className={`text-[10px] ${
-                        isInternalComment
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{name}</span>
-                        <span
-                          className={`text-[10px] px-1.5 py-0.5 rounded ${
-                            isInternalComment
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-gray-100 text-gray-600"
-                          }`}
-                        >
-                          {isInternalComment ? "Internal" : "Customer"}
+                return (
+                  <div
+                    key={comment.id}
+                    className={`flex gap-3 p-3 rounded-lg border ${
+                      isInternalComment
+                        ? "border-blue-200 bg-blue-50/30"
+                        : "border-gray-200 bg-white"
+                    }`}
+                  >
+                    <Avatar className="h-8 w-8 shrink-0">
+                      <AvatarFallback
+                        className={`text-[10px] font-mono ${
+                          isInternalComment
+                            ? "bg-blue-100 text-blue-700"
+                            : "bg-gray-100 text-gray-700"
+                        }`}
+                      >
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium font-mono">
+                            {name}
+                          </span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              isInternalComment
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-gray-100 text-gray-600"
+                            }`}
+                          >
+                            {isInternalComment ? "Internal" : "Customer"}
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(comment.createdAt)}
                         </span>
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        {formatDate(comment.timestamp)}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-                      {comment.content}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </TabsContent>
-
-        {/* DEVICE TRACEABILITY */}
-        <TabsContent value="device" className="mt-4 space-y-4">
-          {/* Device Info Card */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Device Information</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">Serial Number</p>
-                  <p className="text-sm font-mono font-medium">
-                    {ticket.deviceSerial ?? "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Product</p>
-                  <p className="text-sm font-medium">
-                    {product?.name ?? "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Batch</p>
-                  <p className="text-sm font-mono font-medium">BT-231215</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">
-                    Warranty Status
-                  </p>
-                  <StatusBadge status="warranty" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Purchase Date</p>
-                  <p className="text-sm font-medium">10 Nov 2025</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Customer</p>
-                  <p className="text-sm font-medium">{account?.name ?? "N/A"}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Device History */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Device History</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="relative">
-                {deviceHistory.map((step, idx) => (
-                  <div key={idx} className="flex gap-3 pb-4 last:pb-0">
-                    <div className="flex flex-col items-center">
-                      <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <CheckCircle2 className="h-4 w-4 text-primary" />
-                      </div>
-                      {idx < deviceHistory.length - 1 && (
-                        <div className="w-0.5 flex-1 bg-border mt-1" />
-                      )}
-                    </div>
-                    <div className="pt-1">
-                      <p className="text-sm font-medium">{step.stage}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {step.date} &middot; {step.detail}
+                      <p className="text-sm text-muted-foreground mt-1 leading-relaxed whitespace-pre-wrap">
+                        {comment.content}
                       </p>
                     </div>
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                );
+              })}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

@@ -25,6 +25,7 @@ import {
 
 import {
   apiAddLeadActivity,
+  apiAddTicketComment,
   apiConvertLead,
   apiCreateLead,
   apiDeleteLead,
@@ -41,6 +42,8 @@ import {
   apiListTicketComments,
   apiListTickets,
   apiMarkLeadLost,
+  apiTransitionDealStage,
+  apiTransitionTicketStatus,
   apiUpdateLead,
   type AccountListQuery,
   type ContactListQuery,
@@ -52,11 +55,17 @@ import {
 
 import type {
   AddLeadActivity,
+  AddTicketComment,
   ConvertLead,
   CreateLead,
+  Deal,
   Lead,
   LeadActivity,
   MarkLeadLost,
+  Ticket,
+  TicketComment,
+  TransitionDealStage,
+  TransitionTicketStatus,
   UpdateLead,
 } from "@mobilab/contracts";
 
@@ -317,5 +326,54 @@ export function useApiTicketComments(id: string | undefined) {
     queryFn: () => apiListTicketComments(id!),
     enabled: Boolean(id),
     staleTime: 10_000,
+  });
+}
+
+// ─── Deals: writes ─────────────────────────────────────────────────────────
+//
+// Only the stage transition is wired so far — the detail page's primary
+// mutation is stage flow. Inline edits (title/value/probability) will land
+// with the edit-panel work; they need UpdateDeal + expectedVersion plumbing
+// that isn't used anywhere yet.
+
+/**
+ * Transition a deal to a new stage. `expectedVersion` is mandatory — the
+ * backend 409s if the deal has moved since the caller read it. We refresh
+ * the cached detail with the returned row (which has version+1) and
+ * invalidate every deals list so stage-filtered views resync.
+ */
+export function useApiTransitionDealStage(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Deal, Error, TransitionDealStage>({
+    mutationFn: (body) => apiTransitionDealStage(id, body),
+    onSuccess: (deal) => {
+      qc.setQueryData(crmApiKeys.deals.detail(id), deal);
+      qc.invalidateQueries({ queryKey: crmApiKeys.deals.all });
+    },
+  });
+}
+
+// ─── Tickets: writes ───────────────────────────────────────────────────────
+
+export function useApiTransitionTicketStatus(id: string) {
+  const qc = useQueryClient();
+  return useMutation<Ticket, Error, TransitionTicketStatus>({
+    mutationFn: (body) => apiTransitionTicketStatus(id, body),
+    onSuccess: (ticket) => {
+      qc.setQueryData(crmApiKeys.tickets.detail(id), ticket);
+      qc.invalidateQueries({ queryKey: crmApiKeys.tickets.all });
+    },
+  });
+}
+
+export function useApiAddTicketComment(id: string) {
+  const qc = useQueryClient();
+  return useMutation<TicketComment, Error, AddTicketComment>({
+    mutationFn: (body) => apiAddTicketComment(id, body),
+    onSuccess: () => {
+      // Comment-list is the only cache affected; ticket detail doesn't
+      // embed comment counts, so we skip invalidating it.
+      qc.invalidateQueries({ queryKey: crmApiKeys.tickets.comments(id) });
+    },
   });
 }

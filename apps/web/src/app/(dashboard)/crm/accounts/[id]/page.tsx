@@ -2,33 +2,33 @@
 
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { PageHeader } from "@/components/shared/page-header";
-import { ActivityFeed } from "@/components/shared/activity-feed";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  accounts,
-  contacts,
-  getContactsForAccount,
-  supportTickets,
-  getCrmActivitiesForEntity,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   getHealthScoreColor,
   getHealthScoreLabel,
-  getContactById,
-  type CrmActivity,
 } from "@/data/crm-mock";
+import { formatCurrency, formatDate } from "@/data/mock";
 import {
-  deals,
-  getUserById,
-  formatCurrency,
-  formatDate,
-  type Activity,
-} from "@/data/mock";
+  useApiAccount,
+  useApiContacts,
+  useApiDeals,
+  useApiTickets,
+} from "@/hooks/useCrmApi";
 import {
+  AlertCircle,
   ArrowLeft,
   Building2,
   Phone,
@@ -37,23 +37,31 @@ import {
   FileText,
   Users,
   DollarSign,
-  Activity as ActivityIcon,
   Heart,
   Star,
 } from "lucide-react";
 
-function crmToActivity(crm: CrmActivity): Activity {
-  return {
-    id: crm.id,
-    entityType: crm.entityType as Activity["entityType"],
-    entityId: crm.entityId,
-    type: crm.type === "whatsapp" || crm.type === "email" || crm.type === "call" || crm.type === "meeting"
-      ? "comment"
-      : crm.type as Activity["type"],
-    user: crm.user,
-    content: crm.content,
-    timestamp: crm.timestamp,
-  };
+/**
+ * Account detail — real /crm/accounts/:id via useApiAccount, plus three
+ * side-queries scoped by accountId for the Contacts / Deals / Tickets tabs.
+ *
+ * What dropped vs the mock prototype:
+ *   - Activity tab. There's no per-account activity endpoint in the real
+ *     API yet; adding a fake one would regress the "real data everywhere"
+ *     invariant. Bring it back when the backend grows an activity log.
+ *   - Owner name resolution. Same reason as the list pages — no users
+ *     API — so we show the uuid prefix until one lands.
+ *
+ * Contract shape deltas handled the same way as the list pages: decimal
+ * strings parsed for display-only aggregates, nullable fields fall back
+ * to "—", and the accountId filter replaces the mock's weak `company ===
+ * account.name` fuzzy join for the Deals tab.
+ */
+
+function toNumber(v: string | null | undefined): number {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
 export default function AccountDetailPage() {
@@ -61,31 +69,62 @@ export default function AccountDetailPage() {
   const router = useRouter();
   const accountId = params.id as string;
 
-  const account = accounts.find((a) => a.id === accountId);
+  const accountQuery = useApiAccount(accountId);
+  const contactsQuery = useApiContacts({ accountId, limit: 100 });
+  const dealsQuery = useApiDeals({ accountId, limit: 100 });
+  const ticketsQuery = useApiTickets({ accountId, limit: 100 });
 
-  if (!account) {
+  // Main-record loading: block on the account itself. Tab data loads
+  // independently — a table-level skeleton inside each tab is cleaner than
+  // holding the whole page hostage to the slowest query.
+  if (accountQuery.isLoading) {
     return (
-      <div className="p-6">
-        <div className="text-center py-20">
-          <h2 className="text-xl font-semibold mb-2">Account not found</h2>
-          <p className="text-muted-foreground mb-4">
-            The account you are looking for does not exist.
-          </p>
-          <Button variant="outline" onClick={() => router.push("/crm/accounts")}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Accounts
-          </Button>
-        </div>
+      <div className="p-6 max-w-[1400px] mx-auto space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-12 w-64" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
 
-  const owner = getUserById(account.ownerId);
-  const accountContacts = getContactsForAccount(account.id);
-  const accountDeals = deals.filter((d) => d.company === account.name);
-  const accountTickets = supportTickets.filter((t) => t.accountId === account.id);
-  const crmActivities = getCrmActivitiesForEntity("account", account.id);
-  const feedActivities = crmActivities.map(crmToActivity);
+  if (accountQuery.isError || !accountQuery.data) {
+    // 404 from the API surfaces as isError with a 404 problem; we can't
+    // distinguish "not found" from "forbidden" (RLS hides both) without
+    // parsing the problem. Show the same not-found UX either way — the
+    // user's recourse is identical.
+    const message =
+      accountQuery.error instanceof Error
+        ? accountQuery.error.message
+        : "Account not found";
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 mb-6 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">Account unavailable</p>
+            <p className="text-red-700 mt-1">{message}</p>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => router.push("/crm/accounts")}
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Accounts
+        </Button>
+      </div>
+    );
+  }
+
+  const account = accountQuery.data;
+  const contacts = contactsQuery.data?.data ?? [];
+  const deals = dealsQuery.data?.data ?? [];
+  const tickets = ticketsQuery.data?.data ?? [];
+
+  const locationParts = [account.address, account.city, account.state].filter(
+    Boolean
+  );
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto">
@@ -106,21 +145,29 @@ export default function AccountDetailPage() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight">{account.name}</h1>
+              <h1 className="text-2xl font-bold tracking-tight">
+                {account.name}
+              </h1>
               {account.isKeyAccount && (
-                <Badge className="bg-amber-50 text-amber-700 border-amber-200" variant="outline">
+                <Badge
+                  className="bg-amber-50 text-amber-700 border-amber-200"
+                  variant="outline"
+                >
                   <Star className="h-3 w-3 mr-1" />
                   Key Account
                 </Badge>
               )}
             </div>
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-sm text-muted-foreground">{account.industry}</span>
+              <span className="text-sm text-muted-foreground">
+                {account.industry ?? "—"}
+              </span>
               <Badge
                 variant="outline"
                 className={`text-xs font-medium ${getHealthScoreColor(account.healthScore)}`}
               >
-                {account.healthScore} &middot; {getHealthScoreLabel(account.healthScore)}
+                {account.healthScore} &middot;{" "}
+                {getHealthScoreLabel(account.healthScore)}
               </Badge>
             </div>
           </div>
@@ -133,7 +180,6 @@ export default function AccountDetailPage() {
           <TabsTrigger value="contacts">Contacts</TabsTrigger>
           <TabsTrigger value="deals">Deals</TabsTrigger>
           <TabsTrigger value="tickets">Tickets</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -141,7 +187,9 @@ export default function AccountDetailPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <Card className="lg:col-span-2">
               <CardHeader>
-                <CardTitle className="text-base">Account Information</CardTitle>
+                <CardTitle className="text-base">
+                  Account Information
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -150,7 +198,9 @@ export default function AccountDetailPage() {
                     <div>
                       <p className="text-xs text-muted-foreground">Address</p>
                       <p className="text-sm font-medium">
-                        {account.address}, {account.city}, {account.state}
+                        {locationParts.length
+                          ? locationParts.join(", ")
+                          : "—"}
                       </p>
                     </div>
                   </div>
@@ -158,35 +208,53 @@ export default function AccountDetailPage() {
                     <Phone className="h-4 w-4 text-muted-foreground mt-0.5" />
                     <div>
                       <p className="text-xs text-muted-foreground">Phone</p>
-                      <p className="text-sm font-medium">{account.phone}</p>
+                      <p className="text-sm font-medium">
+                        {account.phone ?? "—"}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <Globe className="h-4 w-4 text-muted-foreground mt-0.5" />
                     <div>
                       <p className="text-xs text-muted-foreground">Website</p>
-                      <p className="text-sm font-medium">{account.website}</p>
+                      <p className="text-sm font-medium">
+                        {account.website ?? "—"}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
                     <div>
                       <p className="text-xs text-muted-foreground">GSTIN</p>
-                      <p className="text-sm font-medium font-mono">{account.gstin}</p>
+                      <p className="text-sm font-medium font-mono">
+                        {account.gstin ?? "—"}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <Users className="h-4 w-4 text-muted-foreground mt-0.5" />
                     <div>
-                      <p className="text-xs text-muted-foreground">Employees</p>
-                      <p className="text-sm font-medium">{account.employeeCount.toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Employees
+                      </p>
+                      <p className="text-sm font-medium">
+                        {account.employeeCount === null
+                          ? "—"
+                          : account.employeeCount.toLocaleString()}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <Users className="h-4 w-4 text-muted-foreground mt-0.5" />
                     <div>
-                      <p className="text-xs text-muted-foreground">Account Owner</p>
-                      <p className="text-sm font-medium">{owner?.name ?? "Unassigned"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Account Owner
+                      </p>
+                      <p className="text-sm font-medium">
+                        {account.ownerId
+                          ? account.ownerId.slice(0, 8)
+                          : "Unassigned"}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -202,8 +270,14 @@ export default function AccountDetailPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold">{formatCurrency(account.annualRevenue)}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Annual revenue</p>
+                  <p className="text-2xl font-bold">
+                    {account.annualRevenue === null
+                      ? "—"
+                      : formatCurrency(toNumber(account.annualRevenue))}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Annual revenue
+                  </p>
                 </CardContent>
               </Card>
 
@@ -216,7 +290,9 @@ export default function AccountDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-3 mb-2">
-                    <span className="text-2xl font-bold">{account.healthScore}</span>
+                    <span className="text-2xl font-bold">
+                      {account.healthScore}
+                    </span>
                     <Badge
                       variant="outline"
                       className={`text-xs ${getHealthScoreColor(account.healthScore)}`}
@@ -247,59 +323,77 @@ export default function AccountDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                Contacts ({accountContacts.length})
+                Contacts ({contacts.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="rounded-lg border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead>Name</TableHead>
-                      <TableHead>Designation</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Phone</TableHead>
-                      <TableHead>Role</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {accountContacts.map((c) => (
-                      <TableRow key={c.id}>
-                        <TableCell>
-                          <span className="text-sm font-medium">
-                            {c.firstName} {c.lastName}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-muted-foreground">{c.designation}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-muted-foreground">{c.email}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-muted-foreground">{c.phone}</span>
-                        </TableCell>
-                        <TableCell>
-                          {c.isPrimary ? (
-                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
-                              Primary
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">&mdash;</span>
-                          )}
-                        </TableCell>
+              {contactsQuery.isLoading ? (
+                <Skeleton className="h-32 w-full" />
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead>Name</TableHead>
+                        <TableHead>Designation</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Phone</TableHead>
+                        <TableHead>Role</TableHead>
                       </TableRow>
-                    ))}
-                    {accountContacts.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                          No contacts found
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {contacts.map((c) => (
+                        <TableRow key={c.id}>
+                          <TableCell>
+                            <span className="text-sm font-medium">
+                              {c.firstName} {c.lastName}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground">
+                              {c.designation ?? "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground">
+                              {c.email ?? "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground">
+                              {c.phone ?? "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            {c.isPrimary ? (
+                              <Badge
+                                variant="outline"
+                                className="bg-blue-50 text-blue-700 border-blue-200 text-xs"
+                              >
+                                Primary
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                &mdash;
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {contacts.length === 0 && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={5}
+                            className="text-center py-8 text-muted-foreground"
+                          >
+                            No contacts found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -309,52 +403,63 @@ export default function AccountDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                Deals ({accountDeals.length})
+                Deals ({deals.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="rounded-lg border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead>Title</TableHead>
-                      <TableHead>Stage</TableHead>
-                      <TableHead className="text-right">Value</TableHead>
-                      <TableHead className="text-right">Probability</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {accountDeals.map((d) => (
-                      <TableRow key={d.id}>
-                        <TableCell>
-                          <Link
-                            href={`/crm/deals/${d.id}`}
-                            className="text-sm font-medium text-primary hover:underline"
+              {dealsQuery.isLoading ? (
+                <Skeleton className="h-32 w-full" />
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead>Title</TableHead>
+                        <TableHead>Stage</TableHead>
+                        <TableHead className="text-right">Value</TableHead>
+                        <TableHead className="text-right">
+                          Probability
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {deals.map((d) => (
+                        <TableRow key={d.id}>
+                          <TableCell>
+                            <Link
+                              href={`/crm/deals/${d.id}`}
+                              className="text-sm font-medium text-primary hover:underline"
+                            >
+                              {d.title}
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={d.stage} />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className="text-sm font-medium">
+                              {formatCurrency(toNumber(d.value))}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className="text-sm">{d.probability}%</span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {deals.length === 0 && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-center py-8 text-muted-foreground"
                           >
-                            {d.title}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={d.stage} />
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className="text-sm font-medium">{formatCurrency(d.value)}</span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className="text-sm">{d.probability}%</span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {accountDeals.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                          No deals found
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                            No deals found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -364,65 +469,67 @@ export default function AccountDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                Support Tickets ({accountTickets.length})
+                Support Tickets ({tickets.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="rounded-lg border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead>Ticket #</TableHead>
-                      <TableHead>Subject</TableHead>
-                      <TableHead>Priority</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>SLA Deadline</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {accountTickets.map((t) => (
-                      <TableRow key={t.id}>
-                        <TableCell>
-                          <span className="text-sm font-medium font-mono">{t.ticketNumber}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm">{t.subject}</span>
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={t.priority} />
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={t.status} />
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-muted-foreground">
-                            {formatDate(t.slaDeadline)}
-                          </span>
-                        </TableCell>
+              {ticketsQuery.isLoading ? (
+                <Skeleton className="h-32 w-full" />
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead>Ticket #</TableHead>
+                        <TableHead>Subject</TableHead>
+                        <TableHead>Priority</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>SLA Deadline</TableHead>
                       </TableRow>
-                    ))}
-                    {accountTickets.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                          No tickets found
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Activity Tab */}
-        <TabsContent value="activity">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Activity Feed</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ActivityFeed activities={feedActivities} />
+                    </TableHeader>
+                    <TableBody>
+                      {tickets.map((t) => (
+                        <TableRow key={t.id}>
+                          <TableCell>
+                            <Link
+                              href={`/crm/tickets/${t.id}`}
+                              className="text-sm font-medium font-mono text-primary hover:underline"
+                            >
+                              {t.ticketNumber}
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm">{t.subject}</span>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={t.priority} />
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={t.status} />
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground">
+                              {t.slaDeadline
+                                ? formatDate(t.slaDeadline)
+                                : "—"}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {tickets.length === 0 && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={5}
+                            className="text-center py-8 text-muted-foreground"
+                          >
+                            No tickets found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
