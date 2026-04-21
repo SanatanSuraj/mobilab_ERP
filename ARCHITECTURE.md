@@ -27,10 +27,11 @@
 12. [Phased Build Plan](#12-phased-build-plan)
 13. [Module Roadmap](#13-module-roadmap)
 14. [Anti-Patterns](#14-anti-patterns)
-15. [Appendix A — Decision Log](#appendix-a--decision-log)
-16. [Appendix B — Frontend Migration](#appendix-b--frontend-migration-from-prototype)
-17. [Appendix C — Python → Node Translation](#appendix-c--python--node-translation)
-18. [Appendix D — Prototype Consolidation](#appendix-d--prototype-consolidation)
+15. [Correctness Gate Catalogue (Full)](#15-correctness-gate-catalogue-full)
+16. [Appendix A — Decision Log](#appendix-a--decision-log)
+17. [Appendix B — Frontend Migration](#appendix-b--frontend-migration-from-prototype)
+18. [Appendix C — Python → Node Translation](#appendix-c--python--node-translation)
+19. [Appendix D — Prototype Consolidation](#appendix-d--prototype-consolidation)
 
 ---
 
@@ -105,6 +106,8 @@ Violating any of these breaks an architectural guarantee. Reviewers **must** rej
 | 13 | Password hashing uses **`argon2id`** or **`@node-rs/bcrypt`**. Never `bcryptjs` (pure JS, 3–5× slower). | §9.1 |
 | 14 | Tenant isolation is enforced at **BOTH layers**: RLS policies in PG AND `orgId` on every Drizzle query. DB = safety net; application = first line. Never rely on one. | §9.2 |
 | 15 | Redis key invalidation uses **`SCAN`**, never `KEYS`. `KEYS` blocks Redis for seconds on large keyspaces. | §8.4 |
+| 16 | **Gate tests import the same module production uses.** Pattern: extract testable helpers (`assertDirectPgUrl`, `assertBullRedisNoeviction`, `createOutboxDrain`) into packages/apps with real export maps. Tests that reimplement an invariant in a stub prove nothing. | §15 |
+| 17 | **Every invariant that can be checked at boot MUST be checked at boot.** Listener refuses to start if `DATABASE_DIRECT_URL` routes through PgBouncer (§6.3). Worker and listener refuse to start if `redis-bull` `maxmemory-policy ≠ noeviction` (§8.3). No silent misconfiguration in prod. | §11.3 |
 
 ---
 
@@ -172,6 +175,22 @@ Violating any of these breaks an architectural guarantee. Reviewers **must** rej
                  pino JSON logs → Promtail → Loki
                  /metrics → Prometheus → Grafana → Alertmanager
 ```
+
+### 3.0a Tenancy Model — Multi-Tenant, Shared DB, RLS-Isolated
+
+Mobilab is a **multi-tenant SaaS on a shared Postgres database**, with per-tenant isolation enforced by Row-Level Security. This is a deliberate architectural choice — not the only option on the menu, and not free.
+
+| Model | Description | Why we DIDN'T pick it |
+|-------|-------------|----------------------|
+| Single-tenant | One deploy per customer | Ops nightmare at > 5 tenants; no cross-tenant vendor admin |
+| Multi-tenant, separate DBs | One Postgres instance/database per tenant | Schema drift, heavy ops, expensive replicas-per-tenant |
+| **Multi-tenant, shared DB, RLS** ✓ | One DB; every business table has `org_id UUID NOT NULL` + RLS policy | Isolation is a policy, not a physical boundary → the policy has to be bulletproof |
+
+**Consequences (each enforced somewhere in this doc):**
+- Every business table has `org_id UUID NOT NULL REFERENCES organizations(id)` and an RLS policy gated on `current_setting('app.current_org_id', true)::UUID` (§9.2).
+- The app connects as a **`NOBYPASSRLS`** Postgres role (`mobilab_app`) so even a forgotten `withOrg()` call returns zero rows rather than cross-tenant data (§9.2).
+- Cross-tenant access is a single, explicit, audited path: the `mobilab_vendor` `BYPASSRLS` role, used by the vendor-admin app for support operations. See §9.2 Vendor Escape Hatch.
+- Users can belong to multiple orgs via `memberships` — login may return a `multi-tenant` status requiring explicit tenant selection (§9.1).
 
 ### 3.1 Process Types
 
@@ -328,9 +347,11 @@ module.exports = {
 | `qc` | inspection_templates, qc_inspections, defects, qc_certs, capa, calibration | `qc_inward.passed`, `qc_final.passed` | `inward.created`, `wip_stage.qc_gate` |
 | `finance` | sales_invoices, customer_ledger, vendor_ledger, eway_bills, payments | `invoice.sent`, `ewb.generated` | `challan.confirmed`, `grn.created` |
 | `notifications` | notification_templates, notification_log | (terminal consumer) | (all events trigger notifications) |
-| `auth` | users, roles, permissions, sessions, revoked_tokens | (sync only) | (sync only) |
-| `outbox` | outbox_events, workflow_transitions | (infrastructure) | (infrastructure) |
-| `audit` | audit_log (partitioned monthly) | (infrastructure) | (infrastructure) |
+| `auth` (public, historical name) | users, user_identities, roles, permissions, role_permissions, user_roles, **memberships** (multi-tenant), refresh_tokens, revoked_tokens | (sync only) | (sync only) |
+| `public` (entitlements) | organizations, plans, plan_features, subscriptions, usage_records | (sync only — feature flag / quota reads) | — |
+| `vendor` | vendor.admins, vendor.action_log, vendor.refresh_tokens | (audit-only) | (infrastructure — cross-tenant admin ops) |
+| `outbox` | outbox.events, workflow_transitions | (infrastructure) | (infrastructure) |
+| `audit` | audit.log (partitioned monthly) | (infrastructure) | (infrastructure) |
 
 ### 5.2 Drizzle Client with Session Variables (RLS-safe)
 
@@ -584,6 +605,8 @@ async function main() {
 
 main().catch((err) => { log.fatal({ err }, 'listener crashed'); process.exit(1); });
 ```
+
+**Drain factory (shared by LISTEN and the 30s safety poll).** The "pick pending outbox rows → enqueue → mark dispatched" logic is extracted into `apps/listen-notify/src/drain.ts` as `createOutboxDrain({ pool, queue, batchSize })`. Both the LISTEN callback and the 30s poller call the same function. The gate-22 test (§15) imports this factory directly with a stub `QueueLike` so it exercises the real dispatch code instead of a facsimile. `QueueLike` is a local structural interface exposing only `.add()` so `apps/listen-notify` doesn't need `bullmq` as a direct dependency.
 
 ### 6.4 Outbox Processor (Atomic Claim)
 
@@ -882,11 +905,32 @@ export async function invalidateByPattern(pattern: string): Promise<number> {
 ### 9.1 Authentication Stack
 
 - **`jose`** for JWT (full JOSE spec; better ergonomics than `jsonwebtoken`).
-- **Access token**: 60 min, RS256.
-- **Refresh token**: 7 days, HttpOnly + Secure + SameSite=Strict cookie, rotated on every use.
+- **Access token**: 60 min, RS256 in prod, HS256 in dev.
+- **Refresh token**: 7 days, HttpOnly + Secure + SameSite=Strict cookie, **rotated on every use** (gate 23 proves old refresh rejected after one rotation).
 - **Password hashing**: `argon2id` (`memory=64MB`, `time=3`, `parallelism=4`). Never `bcryptjs`.
-- **JWT claims are identity-only** (`sub`, `org_id`, `jti`). Permissions resolved at runtime with Redis-CACHE + PG fallback.
+- **JWT claims are identity-only** (`sub`, `org`, `idn`, `roles`, `jti`, `aud`). Permissions resolved at runtime with Redis-CACHE + PG fallback.
 - **Token revocation**: `jti` → `revoked:{jti}` in Redis-CACHE with TTL=token_remaining, AND to `auth.revoked_tokens` table (Redis fallback).
+
+#### 9.1.1 Multi-Tenant Membership
+
+A single user (`user_identities.email`) can be a member of multiple orgs via `memberships(user_id, org_id, created_at)`. `login({ email, password, surface })` returns one of:
+
+- `authenticated` — single active membership → access + refresh issued immediately.
+- `multi-tenant` — user has ≥ 2 active memberships → client must call a tenant-select endpoint with the chosen `org_id`.
+- `tenant-inactive` — the targeted org is suspended/deleted; see §9.2 Tenant Lifecycle.
+
+The login flow must read `memberships` joined to `organizations` **without being bound to a single tenant's RLS context** (there is no `app.current_org_id` set during login). This is solved with SECURITY DEFINER functions, §9.1.2.
+
+#### 9.1.2 SECURITY DEFINER Auth Helpers
+
+Authentication needs a few DB lookups that must cross tenant boundaries: loading a user's memberships by email, loading a refresh-token row by hash. These live as `SECURITY DEFINER` functions owned by a bootstrap role that has `BYPASSRLS`:
+
+- `auth_load_active_memberships(email TEXT)` — returns `(user_id, org_id, org_status, role)` rows.
+- `auth_load_refresh_token(token_hash TEXT)` — returns the `refresh_tokens` row regardless of org, so rotation can match a token across any tenant.
+
+Both functions are the **only** sanctioned cross-tenant auth reads. `apps/api` connects as `mobilab_app` (`NOBYPASSRLS`) — it invokes these functions without being privileged itself. The invocation is narrow (identity-by-email, token-by-hash) and fully logged. SQL lives in `ops/sql/rls/03-auth-cross-tenant.sql`.
+
+**Why not just bypass RLS in the auth service's connection?** Because `mobilab_app` runs both auth and business queries; giving it `BYPASSRLS` would defeat Gate 1 globally. SECURITY DEFINER functions scope the privilege to the exact two queries that need it.
 
 ### 9.2 Tenant Isolation — Defense in Depth
 
@@ -904,6 +948,40 @@ CREATE POLICY deals_org_isolation_write ON crm.deals
   FOR INSERT WITH CHECK (org_id = current_setting('app.current_org_id', true)::UUID);
 -- Repeat for every business table in ops/sql/rls/*.sql
 ```
+
+#### 9.2.1 Postgres Role Split (NOBYPASSRLS app + BYPASSRLS vendor)
+
+Two application-level Postgres roles, created at bootstrap:
+
+| Role | Attribute | Used By | Purpose |
+|------|-----------|---------|---------|
+| `mobilab_app` | **NOBYPASSRLS** | `apps/api`, `apps/worker`, `apps/listen-notify` | All tenant-scoped reads/writes. RLS binds. If `withOrg()` is forgotten, queries return 0 rows. |
+| `mobilab_vendor` | **BYPASSRLS** | `packages/vendor-admin` only | Cross-tenant support operations (list all tenants, impersonate, audit search). Every use logged to `vendor.action_log`. |
+
+Gate 11 (`gate-11-nobypassrls`) asserts `mobilab_app` has `NOBYPASSRLS` — a Postgres `ALTER ROLE … BYPASSRLS` would be caught in CI, not in prod.
+Gate 19 (`gate-19-vendor-bypassrls`) asserts `mobilab_vendor` actually CAN read rows across orgs while `mobilab_app` cannot.
+The bootstrap role (`mobilab`, `SUPERUSER`) is used only by migrations and is never exposed to app code.
+
+#### 9.2.2 Vendor Escape Hatch (Cross-Tenant Admin)
+
+`packages/vendor-admin` is the ONLY sanctioned cross-tenant code path. It serves the Mobilab-internal vendor admin UI (`apps/web/src/app/vendor-admin/**`) for support staff who need to see tenants holistically (list all orgs, inspect per-tenant state, suspend a tenant, impersonate a user for support).
+
+- Connects via `VENDOR_DATABASE_URL` as `mobilab_vendor` — a separate pool, not shared with the tenant-scoped app pool.
+- Separate auth surface (`vendor.admins` table, `vendor.refresh_tokens`, dedicated JWT audience `mobilab-vendor`).
+- Every mutation writes a row to `vendor.action_log` (actor, target org, action, payload, timestamp) — append-only.
+- Gate 18 (`gate-18-vendor-audit-log`) asserts every vendor-admin mutation produces exactly one audit row.
+
+#### 9.2.3 Tenant Lifecycle States
+
+An `organizations.status` column with `TenantStatusService.assertActive(orgId)` invoked by the auth middleware on every request. States:
+
+| Status | Meaning | Auth behavior |
+|--------|---------|---------------|
+| `active` | Normal | Allow |
+| `suspended` | Billing failure, policy breach, or ops pause | Reject: login returns `tenant-inactive`; existing access tokens fail next auth check with 403. |
+| `deleted` | Soft-deleted; rows retained for audit | Same as `suspended`; data retained but read-only and only via `mobilab_vendor`. |
+
+Gate 15 (`gate-15-tenant-status-guard`) asserts a suspended org's users cannot auth. State transitions are vendor-admin-only.
 
 ### 9.3 HTTP Security
 
@@ -1066,6 +1144,43 @@ CREATE RULE audit_log_no_update AS ON UPDATE TO audit.audit_log DO INSTEAD NOTHI
 CREATE RULE audit_log_no_delete AS ON DELETE TO audit.audit_log DO INSTEAD NOTHING;
 ```
 
+### 9.6 Subscription & Entitlements (Feature Flags + Quotas)
+
+Every org has exactly one active subscription. The subscription determines which feature flags are available and which numeric quotas apply. `packages/quotas` is the single read path.
+
+#### 9.6.1 Data Model (public schema)
+
+- `plans` — catalogue rows: `id`, `code` (`starter`, `pro`, `enterprise`), `name`, `price_cents`.
+- `plan_features` — flag/quota rows keyed by `(plan_id, feature_code)`. A row is either a boolean flag (e.g. `module.crm = true`) or a numeric quota (e.g. `crm.leads.max_per_month = 500`).
+- `subscriptions` — `(org_id, plan_id, status, starts_at, ends_at)`. Exactly one active row per org.
+- `usage_records` — rolling counters (`org_id, feature_code, period_start, count`). Written by services at mutation time; read by `QuotaService`.
+
+Dev seeds: `ops/sql/seed/05-plans-catalog.sql` (plans + features), `ops/sql/seed/06-dev-subscription.sql` (dev org on `pro`).
+
+#### 9.6.2 Service Shape (`packages/quotas`)
+
+- `FeatureFlagService.isEnabled(orgId, featureCode) → Promise<boolean>`
+- `QuotaService.assertUnder(orgId, featureCode) → Promise<void>` — throws `quota_exceeded` (402) if `usage_records.count >= plan_features.value`.
+- `PlanResolverService.plansForOrg(orgId)` — used by vendor-admin to surface current plan in support UI.
+
+All three read via `mobilab_app` with RLS bound. Cache TTL 60s in Redis-CACHE. Cache key `ff:{orgId}:{featureCode}`.
+
+#### 9.6.3 Enforcement Pattern (Fastify)
+
+Every CRM / domain route that is plan-gated has **two** `preHandler` steps in addition to auth:
+
+```ts
+{
+  preHandler: [
+    authGuard,
+    requireFeature('module.crm'),            // 402 if off
+    requirePermission('leads:write'),         // 403 if role lacks it
+  ]
+}
+```
+
+`requireFeature` short-circuits before the permission check, so a customer on the `starter` plan gets a clear "upgrade required" signal and we don't leak which permissions the route needs. Gate 16 (`gate-16-feature-flags`) asserts the 402 path; Gate 17 (`gate-17-quota-enforcement`) asserts quotas throw before the mutation runs.
+
 ---
 
 ## 10. Observability
@@ -1077,6 +1192,17 @@ CREATE RULE audit_log_no_delete AS ON DELETE TO audit.audit_log DO INSTEAD NOTHI
 - **Prometheus** scrapes `/metrics`; BullMQ metrics, PG pool utilization, HTTP histograms, custom business counters (`deadLetterCount`, `stockDriftCount`).
 - **Grafana** dashboards: Business Ops, System Health, Event System, DB Performance.
 - **Alertmanager** routes: PagerDuty (CRITICAL), Slack (HIGH), Email (MEDIUM).
+
+#### 10.1.1 `initTracing()` Test-Injection Contract
+
+`packages/observability/src/tracing.ts` exposes two optional hooks on `InitTracingOptions` for tests:
+
+- `traceExporter?: SpanExporter` — swap the OTLP exporter for an `InMemorySpanExporter` so assertions can read spans without Jaeger.
+- `spanProcessor?: SpanProcessor` — replaces the default `BatchSpanProcessor(OTLPExporter)` entirely. Tests pass `SimpleSpanProcessor(exporter)` to get synchronous export (Batch's 5s flush window exceeds test budgets).
+
+**Vitest + auto-instrumentation gotcha (gate 24):** Vitest loads modules through vite's transformer, which **bypasses Node's `require-in-the-middle` hook**. That means `import pg from "pg"` inside a test file never triggers the OpenTelemetry PgInstrumentation patch and no pg spans are produced. Workaround: after `initTracing()` runs, load pg and `node:http` via `createRequire(import.meta.url)` so the real CJS require fires through Node's native loader. This is only a test concern — production apps import at module top and auto-instrumentation patches them normally because their entry point calls `initTracing()` before any other `import` is resolved.
+
+A secondary concern: NodeSDK bundles its own `sdk-trace-base` one minor version behind `@mobilab/observability`'s direct dep, so `SpanProcessor` from the two copies have separate private-member identities. We `as unknown as` the cast at the one assignment site (safe — there's one real class at runtime).
 
 ### 10.2 Health Check (Must Actually Detect Failure)
 
@@ -1195,6 +1321,20 @@ services:
 9. `next-web`
 10. NGINX routes traffic
 
+#### 11.3.1 Boot-Time Invariant Asserts (Rule §2.17)
+
+Each process refuses to start if a critical invariant is violated. This is **not** a readiness probe — these checks run once, synchronously, before the process announces itself ready. A failure is a fatal exit.
+
+| Process | Assert | Module | Failure Behavior |
+|---------|--------|--------|------------------|
+| `listen-notify` | `DATABASE_DIRECT_URL` does not route through PgBouncer (port != PGBOUNCER_PORT, hostname doesn't match banned substring list) | `packages/db/src/direct-url.ts` → `assertDirectPgUrl()` → throws `PgBouncerUrlError` | Fatal exit, k8s doesn't restart until env is fixed |
+| `listen-notify` (probe) | Redis-BULL `maxmemory-policy == noeviction` | `packages/queue/src/noeviction.ts` → `assertBullRedisNoeviction()` → throws `BullEvictionPolicyError` | Fatal exit |
+| `worker-*` | Redis-BULL `maxmemory-policy == noeviction` | Same as above | Fatal exit |
+| `worker-scheduler` | Bootstrap policy check (plus noeviction probe) | `packages/queue` → `runBootstrapPolicy()` | Fatal exit |
+| `api` | Tenant status bootstrap (status table exists, `TenantStatusService` can read it) | `packages/tenants` | Fatal exit |
+
+Gate tests that enforce these (gate-20 PgBouncer URL guard, gate-21 noeviction, gate-22 outbox e2e) import the real assert functions directly — Rule §2.16 ("gate tests import the same module production uses").
+
 ### 11.4 Failure & Resilience Matrix
 
 | Failure | Detection | Auto Response | Manual Step |
@@ -1263,6 +1403,8 @@ services:
 | **Gate 6 — Auth flow** | Login → access+refresh → access expires → refresh rotates → old refresh rejected. JWT revocation sets Redis key and PG row; both checked on next request. |
 | **Gate 7 — OTel traces connect** | A single HTTP request appears as one trace with child spans for pg query and Redis get. Verified against Jaeger in CI. |
 
+**Reinforcement gates (20–24).** During Phase 1 hardening, each of gates 3–7 gained a paired "reinforcement" gate that exercises the REAL production code path (Rule §2.16) rather than a facsimile: gate 20 imports `assertDirectPgUrl`, gate 21 imports `assertBullRedisNoeviction`, gate 22 imports `createOutboxDrain`, gate 23 exercises `AuthService.refresh()` directly, gate 24 uses `InMemorySpanExporter` via `initTracing`'s `spanProcessor` hook. The consolidated list is in §15.
+
 #### 1.3 Explicitly Deferred
 
 - Any business entity (leads, deals, WOs). Only `auth.users` exists.
@@ -1323,9 +1465,20 @@ packages/contracts/src/
 | Gate | What it proves |
 |------|---------------|
 | **Gate 8 — Cross-tenant isolation** | For EVERY module, integration test confirms user from org A cannot read/update/delete a row in org B, at both API (404) and RLS layer (0 rows). |
-| **Gate 9 — Schema drift check** | CI builds both frontend and backend from `@erp/contracts`; if the zod schemas don't satisfy both, CI fails. |
+| **Gate 9 — Schema drift check** | CI builds both frontend and backend from `@mobilab/contracts`; if the zod schemas don't satisfy both, CI fails. *(Not yet implemented — see §15 gap list.)* |
 | **Gate 10 — Pagination limits** | Fuzz test sends `page=99999, limit=5000`; API returns `limit=100` and does not OOM. |
-| **Gate 11 — Audit trail** | Every successful mutation in every module appears as one row in `audit.audit_log` with before/after state; daily hash-chain verification job passes. |
+| **Gate 11 — Audit trail / NOBYPASSRLS** | Historic v1.1 intent was audit-trail hash chain; the implemented gate-11 instead asserts `mobilab_app` has `NOBYPASSRLS`. Audit-trail coverage is tracked as an open gap (§15). |
+
+**Additional Phase 2 gates that shipped (11–19).** Multi-tenancy hardening produced extra gates beyond the original four. §15 has the full catalogue, but in summary:
+- Gate 11 — `mobilab_app` is `NOBYPASSRLS`.
+- Gate 12 — every org-scoped table has an RLS policy.
+- Gate 13 — RLS `WITH CHECK` prevents cross-tenant inserts.
+- Gate 14 — tenant lifecycle schema present.
+- Gate 15 — suspended tenants' users can't auth.
+- Gate 16 — feature flags return 402 when disabled.
+- Gate 17 — quota exceeded throws before mutation.
+- Gate 18 — every vendor-admin mutation writes an audit row.
+- Gate 19 — `mobilab_vendor` actually can read cross-tenant rows while `mobilab_app` cannot.
 
 #### 2.5 Explicitly Deferred
 
@@ -2024,6 +2177,63 @@ Patterns explicitly rejected. Cite this section in PR reviews.
 | Prepared statements on PgBouncer | Prepares lost across transactions | Disable in driver config |
 | JWT carries `permissions[]` | Stale up to token TTL after role change | Identity-only JWT; perms resolved at runtime |
 | One Fastify monolith + workers in-process | CPU-bound jobs block event loop | Separate worker processes per queue |
+| Gate tests that reimplement the invariant | Passing test ≠ passing production; invariant drifts silently | Extract to a module (`assertDirectPgUrl`, `createOutboxDrain`) and import it from both (Rule §2.16) |
+
+---
+
+## 15. Correctness Gate Catalogue (Full)
+
+Every gate test in `tests/gates/`. Run: `pnpm --filter @mobilab/gates test`. Files serial, vitest, against docker-compose dev stack.
+
+### 15.1 Phase 1 — Foundation (1–7)
+
+| # | Proves | Target |
+|---|--------|--------|
+| 1 | Money files reject `Number`/`parseFloat` (lint) | `packages/money` eslint rule |
+| 2 | NUMERIC round-trips as exact string | `packages/db` type parser |
+| 3 | Idempotency key dedupes repeat POSTs | api idempotency middleware |
+| 4 | Outbox INSERT fires `NOTIFY erp_outbox` | `ops/sql/triggers/01-outbox-notify.sql` |
+| 5 | Org A session cannot SELECT org B rows | `ops/sql/rls/*.sql` |
+| 6 | Role without permission → 403 | api guard + `@mobilab/contracts` |
+| 7 | Dev bootstrap (roles, perms, seed) idempotent | `ops/sql/seed/*` |
+
+### 15.2 Phase 2 — Tenancy + Entitlements (8–19)
+
+| # | Proves | Target |
+|---|--------|--------|
+| 8 | CRM cross-tenant isolation at DB layer | `ops/sql/rls/02-crm-rls.sql` |
+| 9 | *(schema drift CI — not yet implemented, see §15.4)* | — |
+| 10 | `page=99999 limit=5000` → capped at 100, no OOM | pagination helper in `@mobilab/contracts` |
+| 11 | `mobilab_app` is `NOBYPASSRLS` | `ops/sql/seed/99-app-role.sql` |
+| 12 | Every org-scoped table has an RLS policy | `ops/sql/rls/*` + migration convention |
+| 13 | RLS `WITH CHECK` prevents cross-tenant INSERT | `ops/sql/rls/*` |
+| 14 | `organizations.status` schema present | `ops/sql/init/01-schemas.sql` |
+| 15 | Suspended tenant's users cannot auth | `TenantStatusService` |
+| 16 | `requireFeature` → 402 when flag off | `packages/quotas` / `FeatureFlagService` |
+| 17 | `QuotaService.assertUnder` throws pre-mutation | `packages/quotas` / `QuotaService` |
+| 18 | Every vendor-admin mutation → 1 `vendor.action_log` row | `packages/vendor-admin` |
+| 19 | `mobilab_vendor` reads cross-org; `mobilab_app` cannot | `ops/sql/seed/98-vendor-role.sql` |
+
+### 15.3 Phase 1 Reinforcement (20–24)
+
+Each imports the exact module production uses — no facsimiles.
+
+| # | Reinforces | Target |
+|---|-----------|--------|
+| 20 | Gate 5 (URL guard) | `packages/db/src/direct-url.ts` → `assertDirectPgUrl` |
+| 21 | Gate 4 (noeviction) | `packages/queue/src/noeviction.ts` → `assertBullRedisNoeviction` |
+| 22 | Gate 3 (outbox LISTEN + 30s poll + idempotent drain) | `apps/listen-notify/src/drain.ts` → `createOutboxDrain` |
+| 23 | Gate 6 (refresh rotation, reuse rejected, logout idempotent) | `apps/api/src/modules/auth/service.ts` → `AuthService` |
+| 24 | Gate 7 (HTTP→pg trace tree, manual parent + pg child) | `packages/observability/src/tracing.ts` → `initTracing` |
+
+### 15.4 Open Gaps
+
+| Gap | Risk | Fix |
+|-----|------|-----|
+| Schema drift CI (Gate 9) | FE form accepts values BE rejects (or vice versa) | CI step: build FE + BE from `@mobilab/contracts`, fail on TS error |
+| Audit-trail per-mutation (historic Gate 11 intent) | Silent gaps in `audit.log` | Integration test counting `audit.log` rows around each CRUD |
+| CRM web pages (accounts, contacts, deals, tickets) still mock-backed | Users see stale data in prod | Wire to `useCrmApi` hooks per leads pattern |
+| Deal/Ticket state-machine transitions | Invalid transitions reach unreachable states | Per-entity transition matrix mirroring leads smoke test |
 
 ---
 
@@ -2041,6 +2251,14 @@ Track material architectural decisions here. One row per decision.
 | 2026-04 | `jose` over `jsonwebtoken` | jsonwebtoken, node-jose | jose has better TS types + full JOSE spec + async by default. |
 | 2026-04 | argon2id over bcrypt | bcrypt, scrypt, bcryptjs | Modern password hashing standard; memory-hard; resistance to GPU attacks. |
 | 2026-04 | Identity-only JWT | JWT with permissions | Role changes need fast propagation; stale perms = security issue. |
+| 2026-04-21 | **Multi-tenant, shared DB, RLS-isolated** | Single-tenant deploys; multi-tenant w/ DB-per-tenant | Shared DB: one ops surface, one replica set. RLS + `NOBYPASSRLS` app role = correctness. Vendor `BYPASSRLS` covers cross-tenant support. Separate DBs would kill schema-drift control and force per-tenant migrations. |
+| 2026-04-21 | **Two Postgres roles** (`mobilab_app` NOBYPASSRLS + `mobilab_vendor` BYPASSRLS) | Single role with conditional privilege; SET ROLE per-request | RLS binds to the *connecting role*, not the transaction. Only way to get hard isolation AND a supported cross-tenant path is two roles → two URLs → two pools. Gate 11 + Gate 19 enforce. |
+| 2026-04-21 | **SECURITY DEFINER helpers for auth cross-tenant reads** | Grant `mobilab_app` BYPASSRLS; separate auth microservice | Auth needs two cross-tenant lookups (memberships-by-email, refresh-by-hash) — neither would justify weakening `mobilab_app`. SECURITY DEFINER scopes the privilege to exactly those two functions; app role stays `NOBYPASSRLS`. Defined in `ops/sql/rls/03-auth-cross-tenant.sql`. |
+| 2026-04-21 | **Memberships table** (users can hold M:N orgs) | One user row per (email, org); external IdP for cross-org identity | Staff, consultants, and Mobilab support legitimately span tenants. Duplicate-user-per-org creates identity drift (password reset confusion, audit attribution). Login returns `multi-tenant` when count > 1 — explicit tenant pick. |
+| 2026-04-21 | **Plans + features + usage_records in app DB (public schema)** | Dedicated billing service; separate entitlements DB | Feature flag / quota read sits on the hot path of every guarded route. Must be one pg query with RLS bound and cacheable. External service adds latency, availability risk, and drift vs org rows. Billing integration remains future work but the read shape stays stable. |
+| 2026-04-21 | **`requireFeature` before `requirePermission`** | Permission check first; single combined check | A starter-plan user hitting a pro-only route must see "upgrade required" (402), not "access denied" (403). Ordering also avoids leaking which permissions the route needs before plan gate is cleared. |
+| 2026-04-21 | **Gate tests import production code** (Rule §2.16) | Gate tests reimplement the invariant inline | A test that reinvents the invariant only proves the reinvention is correct. Extracting `assertDirectPgUrl`, `assertBullRedisNoeviction`, `createOutboxDrain` into importable modules means production and gate share one implementation. Refactor-driven: every Phase 1 reinforcement gate (20–24) is against a real module. |
+| 2026-04-21 | **`createRequire` for pg / http in gate-24** | Reconfigure vitest pool/deps; migrate to `node --test` | Vitest's vite-based loader bypasses Node's require-in-the-middle hook, so OTel auto-instrumentation never patches statically-imported modules. `createRequire` forces native CJS load through the patched path. Workaround is surgical (one gate) instead of global (vitest config change across the suite). |
 
 ---
 
@@ -2201,13 +2419,30 @@ Before Phase 2 production module work begins:
 | Field | Value |
 |-------|-------|
 | Document ID | ERP-ARCH-MOBILAB-2026-001 |
-| Version | 1.1 |
-| Supersedes | All prior Node-stack architecture recommendations |
+| Version | 1.2 |
+| Supersedes | v1.1 (2026-04-20) |
 | Translates From | `ERP-ARCH-MIDSCALE-2025-005` (Python reference) + `ERP-ARCH-UNIFIED-2026-001` (unified doc) |
-| Next Review | Before Phase 2 start (end of Week 2) |
+| Next Review | End of Phase 2 CRM rollout (all web pages on real API) |
 | Change Control | Material changes require the same PR approval process as ledger schema changes |
 
 ### Changelog
+
+**v1.2 — Multi-Tenancy, Vendor Admin, Entitlements, Gate Expansion (2026-04-21)**
+
+Patch capturing architectural additions that shipped during Phase 1 completion + Phase 1 hardening. No rule reversed; surface area of enforced invariants widened.
+
+- §2 — Added rules 16 (gate tests import production code — no facsimiles) and 17 (every bootable invariant must be boot-time asserted).
+- §3.0a *(new)* — Tenancy Model section: explicitly names the architecture as Multi-Tenant Shared DB with RLS; contrasts against single-tenant and separate-DB alternatives.
+- §5.1 — Schema map updated: added `vendor` schema, listed memberships/user_identities under auth, added plans/subscriptions/usage_records (entitlements).
+- §6.3 — Noted `createOutboxDrain` factory extraction with `QueueLike` structural type (shared by LISTEN path + 30s poll, imported by gate 22).
+- §9.1 — Expanded. Added §9.1.1 Multi-Tenant Membership (login returns `authenticated | multi-tenant | tenant-inactive`) and §9.1.2 SECURITY DEFINER Auth Helpers (`auth_load_active_memberships`, `auth_load_refresh_token`).
+- §9.2 — Expanded. Added §9.2.1 Postgres Role Split (`mobilab_app` NOBYPASSRLS vs `mobilab_vendor` BYPASSRLS), §9.2.2 Vendor Escape Hatch (cross-tenant admin path with action log), §9.2.3 Tenant Lifecycle States (active/suspended/deleted + `TenantStatusService`).
+- §9.6 *(new)* — Subscription & Entitlements: plans, plan_features, subscriptions, usage_records; `packages/quotas` services; Fastify `requireFeature` + `requirePermission` preHandler pattern.
+- §10.1.1 *(new)* — `initTracing()` test-injection contract + Vitest/ESM `createRequire` workaround for auto-instrumentation under vite's transformer.
+- §11.3.1 *(new)* — Explicit boot-time invariant asserts table (PgBouncer URL guard, noeviction probe, bootstrap policy).
+- §12.1.2 / §12.2.4 — Phase 1 and Phase 2 gate tables annotated with reinforcement gates and additional shipped gates. Gate 9 (schema drift) and historical gate 11 (audit hash chain) called out as open gaps.
+- §14 — Added anti-pattern: gate tests that reimplement the invariant.
+- §15 *(new)* — Full Correctness Gate Catalogue. All 23 implemented gates enumerated with production-code linkage + open-gap list.
 
 **v1.1 — Frontend Alignment Pass (2026-04-20)**
 
