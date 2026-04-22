@@ -32,9 +32,17 @@ import type { NextRequest } from "next/server";
  *                      markup can render (its redirect effect triggers on
  *                      mount).
  *   /auth/login      — real-API login. Primary sign-in page.
- *   /vendor-admin/login — vendor-admin (cross-tenant) sign-in page.
+ *   /vendor-admin    — entire cross-tenant vendor console. It uses its
+ *                      OWN token store (sessionStorage, keyed
+ *                      `instigenie-vendor-*`) and its own in-app layout
+ *                      guard that bounces unauthed users to
+ *                      /vendor-admin/login. It has no reason to require
+ *                      the tenant-side `instigenie-session` cookie, and
+ *                      demanding it here means a pure-vendor user who
+ *                      never logged in on the tenant side gets kicked to
+ *                      /auth/login the moment they click a tenant row.
  */
-const PUBLIC_PATHS = ["/login", "/auth/login", "/vendor-admin/login"];
+const PUBLIC_PATHS = ["/login", "/auth/login", "/vendor-admin"];
 
 /**
  * Where we send unauthenticated users. Must match an entry in PUBLIC_PATHS.

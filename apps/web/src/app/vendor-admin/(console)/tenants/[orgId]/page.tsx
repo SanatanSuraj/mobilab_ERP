@@ -638,7 +638,7 @@ function AuditEntryRow({ entry }: { entry: VendorActionLogEntry }) {
         variant="outline"
         className="text-[11px] font-normal shrink-0"
       >
-        {entry.action}
+        {ACTION_LABELS[entry.action] ?? entry.action}
       </Badge>
       <div className="flex-1 min-w-0">
         {summary && <div className="text-slate-700">{summary}</div>}
@@ -650,6 +650,16 @@ function AuditEntryRow({ entry }: { entry: VendorActionLogEntry }) {
     </div>
   );
 }
+
+// Friendlier action names. Falls back to the raw action string for anything
+// not in the map so new action types don't silently go unlabelled.
+const ACTION_LABELS: Record<string, string> = {
+  "tenant.list": "Browsed tenants",
+  "tenant.view_audit": "Viewed audit log",
+  "tenant.suspend": "Suspended",
+  "tenant.reinstate": "Reinstated",
+  "tenant.change_plan": "Changed plan",
+};
 
 function summarizeDetails(
   action: string,
