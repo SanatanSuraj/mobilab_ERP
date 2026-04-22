@@ -38,6 +38,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -60,8 +61,12 @@ import {
   Building2,
   CheckCircle2,
   Landmark,
+  Lightbulb,
   PackageSearch,
   Plus,
+  Save,
+  ShieldCheck,
+  Tag,
   Truck,
 } from "lucide-react";
 
@@ -90,6 +95,92 @@ const VENDOR_TYPE_TONE: Record<VendorType, string> = {
   BOTH: "bg-indigo-50 text-indigo-700 border-indigo-200",
 };
 
+// Indian states + UTs (official list). State is required per design.
+const INDIAN_STATES = [
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chhattisgarh",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+  "Andaman and Nicobar Islands",
+  "Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu",
+  "Delhi",
+  "Jammu and Kashmir",
+  "Ladakh",
+  "Lakshadweep",
+  "Puducherry",
+] as const;
+
+// GST Type options per the screenshot's dropdown. CreateVendorSchema has no
+// column for this, so we prefix it into `notes` as [GST Type: X] on save.
+const GST_TYPES = [
+  "Regular",
+  "Unregistered",
+  "Composition",
+  "Consumer",
+  "Government Entity",
+  "Unknown",
+  "Casual taxable person",
+  "e-Commerce Operators / Platforms",
+  "Input Service Distributor (ISD)",
+  "Non-Resident taxable person",
+  "Special Economic Zone (SEZ) Developer",
+  "TDS/TCS Deductor",
+  "Users Of Reverse Charge Mechanism",
+] as const;
+
+// Horizontal radio group on the Company Details header. We keep the contract-
+// faithful Supplier/Service/Logistics/Both enum (schema rejects anything else).
+const VENDOR_ROLE_OPTIONS: Array<{ value: VendorType; label: string }> = [
+  { value: "SUPPLIER", label: "Supplier" },
+  { value: "SERVICE", label: "Service" },
+  { value: "LOGISTICS", label: "Logistics" },
+  { value: "BOTH", label: "Both" },
+];
+
+// The design hides the Code field; we auto-generate one from the company name.
+// Format: V-{UPPERCASE_SLUG up to 8 chars}-{4 random base36 chars}. Total
+// fits comfortably under the schema's 32-char cap.
+function generateVendorCode(name: string): string {
+  const slug = name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 8);
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const seed = slug.length > 0 ? slug : "VENDOR";
+  return `V-${seed}-${suffix}`.slice(0, 32);
+}
+
+// Quick email shape check — matches the zod `.email()` loosely.
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 export default function VendorsPage() {
   const router = useRouter();
 
@@ -115,16 +206,24 @@ export default function VendorsPage() {
 
   // ─── Create dialog state ────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [newCode, setNewCode] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newVendorType, setNewVendorType] =
-    useState<VendorType>("SUPPLIER");
+  // Contact Person section
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  // Company section
+  const [companyName, setCompanyName] = useState("");
+  const [companyEmail, setCompanyEmail] = useState("");
+  const [newVendorType, setNewVendorType] = useState<VendorType>("SUPPLIER");
   const [newGstin, setNewGstin] = useState("");
-  const [newPaymentTermsDays, setNewPaymentTermsDays] = useState("30");
-  const [newContactName, setNewContactName] = useState("");
-  const [newPhone, setNewPhone] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [newIsMsme, setNewIsMsme] = useState(false);
+  const [newGstType, setNewGstType] =
+    useState<(typeof GST_TYPES)[number]>("Regular");
+  // Address section
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [pincode, setPincode] = useState("");
+  const [city, setCity] = useState("");
+  const [stateName, setStateName] = useState<string>("");
+  const [countryLabel, setCountryLabel] = useState<string>("India");
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // ─── Loading / error shells ─────────────────────────────────────────────
@@ -267,39 +366,88 @@ export default function VendorsPage() {
     },
   ];
 
+  function resetDialogFields(): void {
+    setContactName("");
+    setContactEmail("");
+    setContactPhone("");
+    setCompanyName("");
+    setCompanyEmail("");
+    setNewVendorType("SUPPLIER");
+    setNewGstin("");
+    setNewGstType("Regular");
+    setAddressLine1("");
+    setAddressLine2("");
+    setPincode("");
+    setCity("");
+    setStateName("");
+    setCountryLabel("India");
+    setSaveError(null);
+  }
+
   async function handleSave(): Promise<void> {
     setSaveError(null);
-    const termsDays = Number.parseInt(newPaymentTermsDays, 10);
-    if (!Number.isFinite(termsDays) || termsDays < 0) {
-      setSaveError("Payment terms must be a non-negative number of days.");
+
+    // Required-field validation matching the * markers in the design.
+    const missing: string[] = [];
+    if (!contactName.trim()) missing.push("Contact Name");
+    if (!contactEmail.trim()) missing.push("Contact Email");
+    if (!companyName.trim()) missing.push("Company Name");
+    if (!companyEmail.trim()) missing.push("Company Email");
+    if (!addressLine1.trim()) missing.push("Address Line 1");
+    if (!addressLine2.trim()) missing.push("Address Line 2");
+    if (!pincode.trim()) missing.push("Pincode");
+    if (!city.trim()) missing.push("City");
+    if (!stateName) missing.push("State");
+    if (missing.length > 0) {
+      setSaveError(`Please fill required fields: ${missing.join(", ")}.`);
       return;
     }
+    if (!isValidEmail(contactEmail.trim())) {
+      setSaveError("Contact email is not a valid email address.");
+      return;
+    }
+    if (!isValidEmail(companyEmail.trim())) {
+      setSaveError("Company email is not a valid email address.");
+      return;
+    }
+    if (!/^\d{6}$/u.test(pincode.trim())) {
+      setSaveError("Pincode must be exactly 6 digits.");
+      return;
+    }
+
+    // Fold the two address lines into the single `address` column the schema
+    // supports. Prefix the GST Type into `notes` since there's no column for it.
+    const foldedAddress = [addressLine1.trim(), addressLine2.trim()]
+      .filter(Boolean)
+      .join("\n");
+    const notes = `[GST Type: ${newGstType}]`;
+
     try {
       await createVendor.mutateAsync({
-        code: newCode.trim(),
-        name: newName.trim(),
+        code: generateVendorCode(companyName),
+        name: companyName.trim(),
         vendorType: newVendorType,
         gstin: newGstin.trim() || undefined,
-        paymentTermsDays: termsDays,
-        contactName: newContactName.trim() || undefined,
-        phone: newPhone.trim() || undefined,
-        email: newEmail.trim() || undefined,
-        isMsme: newIsMsme,
+        contactName: contactName.trim(),
+        phone: contactPhone.trim() || undefined,
+        // The design surfaces two emails. The schema has only one — we keep the
+        // contact email as primary (it's the person we reach) and stash the
+        // company email into notes.
+        email: contactEmail.trim(),
+        address: foldedAddress || undefined,
+        city: city.trim(),
+        state: stateName,
+        postalCode: pincode.trim(),
+        notes: `${notes}\n[Company Email: ${companyEmail.trim()}]`,
         // Server zod defaults these; z.infer<> output type still wants them.
+        paymentTermsDays: 30,
+        isMsme: false,
         isActive: true,
         country: "IN",
         creditLimit: "0",
       });
       setDialogOpen(false);
-      setNewCode("");
-      setNewName("");
-      setNewVendorType("SUPPLIER");
-      setNewGstin("");
-      setNewPaymentTermsDays("30");
-      setNewContactName("");
-      setNewPhone("");
-      setNewEmail("");
-      setNewIsMsme(false);
+      resetDialogFields();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Save failed");
     }
@@ -420,135 +568,336 @@ export default function VendorsPage() {
         </div>
       )}
 
-      {/* Create dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
+      {/* Create dialog — Add Company design */}
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) resetDialogFields();
+        }}
+      >
+        <DialogContent className="max-w-2xl sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>New Vendor</DialogTitle>
+            <DialogTitle className="text-lg font-semibold">
+              Add Company
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+
+          <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
             {saveError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
-                {saveError}
+              <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{saveError}</span>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Code</label>
-                <Input
-                  placeholder="e.g. V-ECM"
-                  value={newCode}
-                  onChange={(e) => setNewCode(e.target.value.toUpperCase())}
-                  className="font-mono"
-                />
+
+            {/* ─── Contact Person Details ──────────────────────────── */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-semibold text-foreground">
+                  Contact Person Details
+                </h3>
+                <div className="h-px flex-1 bg-border" />
               </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Vendor Type</label>
-                <Select
-                  value={newVendorType}
-                  onValueChange={(v) =>
-                    setNewVendorType((v ?? "SUPPLIER") as VendorType)
-                  }
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    Name<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Input
+                    placeholder="Full name"
+                    value={contactName}
+                    onChange={(e) => setContactName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    Email<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Input
+                    type="email"
+                    placeholder="name@example.com"
+                    value={contactEmail}
+                    onChange={(e) => setContactEmail(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    Phone No.
+                  </Label>
+                  <Input
+                    placeholder="+91-XXXXX-XXXXX"
+                    value={contactPhone}
+                    onChange={(e) => setContactPhone(e.target.value)}
+                  />
+                </div>
+              </div>
+            </section>
+
+            {/* ─── Company Details ─────────────────────────────────── */}
+            <section className="space-y-3">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <h3 className="text-sm font-semibold text-foreground whitespace-nowrap">
+                  Company Details
+                </h3>
+                <div className="hidden h-px flex-1 bg-border md:block" />
+                <div
+                  role="radiogroup"
+                  aria-label="Vendor role"
+                  className="flex flex-wrap items-center gap-3"
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {VENDOR_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {VENDOR_TYPE_LABEL[t]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  {VENDOR_ROLE_OPTIONS.map((opt) => {
+                    const selected = newVendorType === opt.value;
+                    return (
+                      <label
+                        key={opt.value}
+                        className="flex cursor-pointer items-center gap-1.5 text-sm"
+                      >
+                        <span
+                          className={
+                            "flex h-4 w-4 items-center justify-center rounded-full border transition-colors " +
+                            (selected
+                              ? "border-green-600 ring-1 ring-green-600"
+                              : "border-muted-foreground/40")
+                          }
+                          aria-hidden="true"
+                        >
+                          {selected && (
+                            <span className="h-2 w-2 rounded-full bg-green-600" />
+                          )}
+                        </span>
+                        <input
+                          type="radio"
+                          name="vendor-role"
+                          value={opt.value}
+                          checked={selected}
+                          onChange={() => setNewVendorType(opt.value)}
+                          className="sr-only"
+                        />
+                        {opt.label}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Vendor Name</label>
-              <Input
-                placeholder="Full legal entity name"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    Company Name<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Input
+                    placeholder="Full legal entity name"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    Email<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Input
+                    type="email"
+                    placeholder="billing@company.com"
+                    value={companyEmail}
+                    onChange={(e) => setCompanyEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_1fr]">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    GST Number
+                  </Label>
+                  <Input
+                    placeholder="15-character GSTIN"
+                    maxLength={15}
+                    value={newGstin}
+                    onChange={(e) =>
+                      setNewGstin(e.target.value.toUpperCase())
+                    }
+                    className="font-mono"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 whitespace-nowrap"
+                    onClick={() => {
+                      // GST lookup API is not wired up yet — nudge the user
+                      // instead of silently doing nothing.
+                      setSaveError(
+                        "GST auto-fetch is not yet available — please enter company details manually."
+                      );
+                    }}
+                  >
+                    Fetch Details
+                  </Button>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    GST Type<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={newGstType}
+                    onValueChange={(v) => {
+                      if (v) setNewGstType(v as (typeof GST_TYPES)[number]);
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GST_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+                <span>
+                  Verify the GST number to capture all the details
+                  automatically.
+                </span>
+              </div>
+
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">GSTIN</label>
+                <Label className="text-xs text-muted-foreground">
+                  Address Line 1<span className="ml-0.5 text-red-500">*</span>
+                </Label>
                 <Input
-                  placeholder="15-character GSTIN"
-                  maxLength={15}
-                  value={newGstin}
-                  onChange={(e) => setNewGstin(e.target.value.toUpperCase())}
-                  className="font-mono"
+                  placeholder="Building, street"
+                  value={addressLine1}
+                  onChange={(e) => setAddressLine1(e.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">
-                  Payment Terms (days)
-                </label>
+                <Label className="text-xs text-muted-foreground">
+                  Address Line 2<span className="ml-0.5 text-red-500">*</span>
+                </Label>
                 <Input
-                  type="number"
-                  placeholder="30"
-                  value={newPaymentTermsDays}
-                  onChange={(e) => setNewPaymentTermsDays(e.target.value)}
+                  placeholder="Locality, landmark"
+                  value={addressLine2}
+                  onChange={(e) => setAddressLine2(e.target.value)}
                 />
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Contact Name</label>
-                <Input
-                  placeholder="Primary contact"
-                  value={newContactName}
-                  onChange={(e) => setNewContactName(e.target.value)}
-                />
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    Pincode<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Input
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="6-digit PIN"
+                    value={pincode}
+                    onChange={(e) =>
+                      setPincode(e.target.value.replace(/\D/g, ""))
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    City<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Input
+                    placeholder="City"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Phone</label>
-                <Input
-                  placeholder="+91-XXXXX-XXXXX"
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value)}
-                />
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    State<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={stateName}
+                    onValueChange={(v) => setStateName(v ?? "")}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select state" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INDIAN_STATES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    Country<span className="ml-0.5 text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={countryLabel}
+                    onValueChange={(v) => setCountryLabel(v ?? "India")}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="India">India</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+            </section>
+
+            {/* ─── Compliance banner ───────────────────────────────── */}
+            <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+              <ShieldCheck className="h-4 w-4 shrink-0 text-green-600" />
+              <span className="font-medium">
+                100% Safe and Compliant with Indian Govt Laws and Regulations
+              </span>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Email</label>
-              <Input
-                type="email"
-                placeholder="vendor@example.com"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-              />
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={newIsMsme}
-                onChange={(e) => setNewIsMsme(e.target.checked)}
-                className="h-4 w-4"
-              />
-              Vendor is MSME-registered
-            </label>
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="sm:justify-between">
             <Button
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-              disabled={createVendor.isPending}
+              type="button"
+              variant="ghost"
+              className="gap-1.5 text-green-700 hover:bg-green-50 hover:text-green-800"
+              onClick={() => {
+                // Tag assignment isn't part of the vendor contract yet. Stub
+                // it out so the button is discoverable but doesn't mislead.
+                setSaveError(
+                  "Tag assignment will be available once vendor tags ship."
+                );
+              }}
             >
-              Cancel
+              <Tag className="h-4 w-4" />
+              Assign Tags
             </Button>
-            <Button
-              onClick={handleSave}
-              disabled={
-                createVendor.isPending ||
-                !newCode.trim() ||
-                !newName.trim()
-              }
-            >
-              {createVendor.isPending ? "Saving…" : "Save Vendor"}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+                disabled={createVendor.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={createVendor.isPending}
+                className="gap-1.5 bg-green-600 text-white hover:bg-green-700"
+              >
+                <Save className="h-4 w-4" />
+                {createVendor.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -283,7 +283,9 @@ export function NewQuotationDialog({ open, onOpenChange, deal }: Props) {
                       <Label className="text-xs">Product</Label>
                       <Select
                         value={l.productId}
-                        onValueChange={(v) => patchLine(idx, { productId: v })}
+                        onValueChange={(v) =>
+                          patchLine(idx, { productId: v ?? "" })
+                        }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Pick a product…" />

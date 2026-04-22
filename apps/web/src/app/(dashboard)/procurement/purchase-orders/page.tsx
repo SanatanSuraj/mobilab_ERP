@@ -26,15 +26,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -43,13 +35,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import {
-  useApiCreatePurchaseOrder,
   useApiPurchaseOrders,
   useApiVendors,
 } from "@/hooks/useProcurementApi";
-import { useApiWarehouses } from "@/hooks/useInventoryApi";
 import {
   PO_STATUSES,
   type PoStatus,
@@ -64,6 +53,7 @@ import {
   PackageOpen,
   Plus,
   ShoppingBag,
+  Wrench,
 } from "lucide-react";
 
 function formatMoney(raw: string | null | undefined): string {
@@ -118,20 +108,8 @@ export default function PurchaseOrdersPage() {
 
   const posQuery = useApiPurchaseOrders(query);
   const vendorsQuery = useApiVendors({ limit: 200, isActive: true });
-  const warehousesQuery = useApiWarehouses({ limit: 100, isActive: true });
-  const createPo = useApiCreatePurchaseOrder();
-
-  // ─── Create dialog state ────────────────────────────────────────────────
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [formVendorId, setFormVendorId] = useState("");
-  const [formWarehouseId, setFormWarehouseId] = useState("");
-  const [formExpectedDate, setFormExpectedDate] = useState("");
-  const [formPaymentTermsDays, setFormPaymentTermsDays] = useState("30");
-  const [formNotes, setFormNotes] = useState("");
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   const vendors = vendorsQuery.data?.data ?? [];
-  const warehouses = warehousesQuery.data?.data ?? [];
 
   // Loading / error shells
   if (posQuery.isLoading) {
@@ -259,40 +237,6 @@ export default function PurchaseOrdersPage() {
     },
   ];
 
-  async function handleSave(): Promise<void> {
-    setSaveError(null);
-    if (!formVendorId) {
-      setSaveError("Pick a vendor.");
-      return;
-    }
-    const termsDays = Number.parseInt(formPaymentTermsDays, 10);
-    if (!Number.isFinite(termsDays) || termsDays < 0) {
-      setSaveError("Payment terms must be a non-negative number of days.");
-      return;
-    }
-    try {
-      const created = await createPo.mutateAsync({
-        vendorId: formVendorId,
-        deliveryWarehouseId: formWarehouseId || undefined,
-        expectedDate: formExpectedDate || undefined,
-        paymentTermsDays: termsDays,
-        notes: formNotes.trim() || undefined,
-        // Zod defaults these server-side; z.infer<> output still wants them.
-        currency: "INR",
-        lines: [],
-      });
-      setDialogOpen(false);
-      setFormVendorId("");
-      setFormWarehouseId("");
-      setFormExpectedDate("");
-      setFormPaymentTermsDays("30");
-      setFormNotes("");
-      router.push(`/procurement/purchase-orders/${created.id}`);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Save failed");
-    }
-  }
-
   return (
     <div className="p-6 max-w-[1400px] mx-auto">
       <PageHeader
@@ -381,7 +325,20 @@ export default function PurchaseOrdersPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button onClick={() => setDialogOpen(true)} className="gap-1.5">
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push("/procurement/purchase-orders/new?kind=service")
+              }
+              className="gap-1.5"
+            >
+              <Wrench className="h-4 w-4" />
+              Service Order
+            </Button>
+            <Button
+              onClick={() => router.push("/procurement/purchase-orders/new")}
+              className="gap-1.5"
+            >
               <Plus className="h-4 w-4" />
               New PO
             </Button>
@@ -398,103 +355,6 @@ export default function PurchaseOrdersPage() {
         </div>
       )}
 
-      {/* Create dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>New Purchase Order</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            {saveError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
-                {saveError}
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <Label>Vendor</Label>
-              <Select
-                value={formVendorId}
-                onValueChange={(v) => setFormVendorId(v ?? "")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select vendor..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {vendors.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.code} — {v.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Delivery Warehouse</Label>
-              <Select
-                value={formWarehouseId}
-                onValueChange={(v) => setFormWarehouseId(v ?? "")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Optional — select warehouse..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouses.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>
-                      {w.code} — {w.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Expected Date</Label>
-                <Input
-                  type="date"
-                  value={formExpectedDate}
-                  onChange={(e) => setFormExpectedDate(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Payment Terms (days)</Label>
-                <Input
-                  type="number"
-                  value={formPaymentTermsDays}
-                  onChange={(e) => setFormPaymentTermsDays(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Notes</Label>
-              <Textarea
-                rows={2}
-                value={formNotes}
-                onChange={(e) => setFormNotes(e.target.value)}
-                placeholder="Optional PO notes..."
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Add line items from the PO detail page after creating the
-              header.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-              disabled={createPo.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={createPo.isPending || !formVendorId}
-            >
-              {createPo.isPending ? "Saving…" : "Create Draft"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
