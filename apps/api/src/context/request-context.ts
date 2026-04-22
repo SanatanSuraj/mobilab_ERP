@@ -7,7 +7,7 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { Role, Permission, Audience } from "@mobilab/contracts";
+import type { Role, Permission, Audience } from "@instigenie/contracts";
 
 export interface RequestUser {
   id: string;

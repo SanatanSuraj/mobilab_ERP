@@ -18,7 +18,7 @@ export function createBullConnection(url: string): Redis {
     maxRetriesPerRequest: null,
     enableReadyCheck: true,
     // Blocking commands (BRPOPLPUSH) need no timeout so the worker can wait.
-    connectionName: "mobilab-bull",
+    connectionName: "instigenie-bull",
     // Keep the process alive as long as a connection is open.
     keepAlive: 30_000,
   });

@@ -26,7 +26,7 @@ import {
   useApiSalesOrder,
   useApiTransitionSalesOrderStatus,
 } from "@/hooks/useCrmApi";
-import type { SalesOrder, SalesOrderStatus } from "@mobilab/contracts";
+import type { SalesOrder, SalesOrderStatus } from "@instigenie/contracts";
 import {
   ArrowLeft,
   Building2,

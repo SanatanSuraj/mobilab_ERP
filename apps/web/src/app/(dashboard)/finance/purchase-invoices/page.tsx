@@ -48,7 +48,7 @@ import {
   type InvoiceStatus,
   type PurchaseInvoice,
   type PurchaseInvoiceMatchStatus,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   AlertTriangle,

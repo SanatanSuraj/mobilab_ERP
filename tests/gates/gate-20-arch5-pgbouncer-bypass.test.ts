@@ -5,7 +5,7 @@
  *        PgBouncer (connection string check)."
  *
  * We enforce this at boot time in apps/listen-notify via
- * `assertDirectPgUrl(url)` from @mobilab/db. This test covers the
+ * `assertDirectPgUrl(url)` from @instigenie/db. This test covers the
  * helper directly and via the apps/listen-notify env loader to prove:
  *
  *   - A PgBouncer-port URL throws PgBouncerUrlError.
@@ -16,28 +16,28 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { assertDirectPgUrl, PgBouncerUrlError } from "@mobilab/db";
+import { assertDirectPgUrl, PgBouncerUrlError } from "@instigenie/db";
 import { DATABASE_URL } from "./_helpers.js";
 
 describe("gate-20 (arch-5): listener bypasses PgBouncer", () => {
   it("throws on the conventional PgBouncer port (6432)", () => {
     expect(() =>
       assertDirectPgUrl(
-        "postgres://mobilab_app:pw@localhost:6432/mobilab"
+        "postgres://instigenie_app:pw@localhost:6432/instigenie"
       )
     ).toThrow(PgBouncerUrlError);
   });
 
   it("throws when the hostname contains 'pgbouncer'", () => {
     expect(() =>
-      assertDirectPgUrl("postgres://mobilab_app:pw@pgbouncer:5432/mobilab")
+      assertDirectPgUrl("postgres://instigenie_app:pw@pgbouncer:5432/instigenie")
     ).toThrow(/pgbouncer/i);
   });
 
   it("allows the dev direct-PG URL (port 5434 in docker-compose)", () => {
     expect(() =>
       assertDirectPgUrl(
-        "postgres://mobilab_app:pw@localhost:5434/mobilab"
+        "postgres://instigenie_app:pw@localhost:5434/instigenie"
       )
     ).not.toThrow();
   });
@@ -53,7 +53,7 @@ describe("gate-20 (arch-5): listener bypasses PgBouncer", () => {
   it("honors PGBOUNCER_PORT override (rejects remapped pooler port)", () => {
     expect(() =>
       assertDirectPgUrl(
-        "postgres://mobilab_app:pw@localhost:7777/mobilab",
+        "postgres://instigenie_app:pw@localhost:7777/instigenie",
         { pgBouncerPort: 7777 }
       )
     ).toThrow(PgBouncerUrlError);
@@ -68,7 +68,7 @@ describe("gate-20 (arch-5): listener bypasses PgBouncer", () => {
   it("redacts credentials in its error message", () => {
     try {
       assertDirectPgUrl(
-        "postgres://user:supersecret@pgbouncer:5432/mobilab"
+        "postgres://user:supersecret@pgbouncer:5432/instigenie"
       );
     } catch (err) {
       expect(String(err)).not.toContain("supersecret");

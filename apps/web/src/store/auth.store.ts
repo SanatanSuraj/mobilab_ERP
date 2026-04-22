@@ -63,7 +63,7 @@ export type AuthUser = {
 
 // ─── Mock Data ───────────────────────────────────────────────────────────────
 
-/** Mobilab staff personas — one per role for dev/demo mode. */
+/** Instigenie staff personas — one per role for dev/demo mode. */
 export const MOCK_USERS_BY_ROLE: Record<UserRole, AuthUser> = {
   SUPER_ADMIN:        { id: "u0",  name: "Admin User",      email: "admin@mobilab.in",    avatar: "AU" },
   MANAGEMENT:         { id: "u1",  name: "Chetan (HOD)",    email: "chetan@mobilab.in",   avatar: "CH" },
@@ -249,7 +249,7 @@ export const useAuthStore = create<AuthStore>()(
     }),
 
     {
-      name: "mobilab-auth",
+      name: "instigenie-auth",
       storage: createJSONStorage(() =>
         // sessionStorage clears on tab close — good default for prototypes.
         // Swap to a secure httpOnly cookie strategy before production.

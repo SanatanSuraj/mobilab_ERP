@@ -16,7 +16,7 @@
  */
 
 import type { PoolClient, Pool } from "pg";
-import { ValidationError } from "@mobilab/errors";
+import { ValidationError } from "@instigenie/errors";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { m, MoneyTypeError } from "@mobilab/money";
+import { m, MoneyTypeError } from "@instigenie/money";
 
 describe("gate-1: Number ban on m()", () => {
   it("throws MoneyTypeError when called with a number", () => {

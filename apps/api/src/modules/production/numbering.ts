@@ -3,14 +3,14 @@
  *
  * Mirrors procurement/numbering.ts. Currently only emits WO PIDs in the
  * format `PID-YYYY-NNNN`; a new kind can be added by extending the
- * ProductionNumberKind enum in @mobilab/contracts and the PREFIX map below.
+ * ProductionNumberKind enum in @instigenie/contracts and the PREFIX map below.
  *
  * Writes to `production_number_sequences`. Uses `INSERT ... ON CONFLICT`
  * to atomically bump last_seq and return the new value.
  */
 
 import type { PoolClient } from "pg";
-import type { ProductionNumberKind } from "@mobilab/contracts";
+import type { ProductionNumberKind } from "@instigenie/contracts";
 
 const PREFIX: Record<ProductionNumberKind, string> = {
   WO: "PID",

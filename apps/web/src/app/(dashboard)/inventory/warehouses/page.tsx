@@ -57,7 +57,7 @@ import {
   type StockSummaryRow,
   type Warehouse,
   type WarehouseKind,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { AlertCircle, Building2, MapPin, Plus } from "lucide-react";
 
 function parseQty(q: string | null | undefined): number {

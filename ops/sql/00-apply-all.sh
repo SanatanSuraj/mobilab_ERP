@@ -18,8 +18,8 @@
 set -euo pipefail
 
 # Prefer psql-with-password, same env as the primary init sequence.
-: "${POSTGRES_USER:=mobilab}"
-: "${POSTGRES_DB:=mobilab}"
+: "${POSTGRES_USER:=instigenie}"
+: "${POSTGRES_DB:=instigenie}"
 
 apply_dir() {
   dir="$1"

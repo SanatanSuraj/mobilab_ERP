@@ -53,7 +53,7 @@ import type {
   NotificationTemplate,
   NotificationUnreadCount,
   UpdateNotificationTemplate,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
 //

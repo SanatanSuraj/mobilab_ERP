@@ -17,14 +17,14 @@
 import type pg from "pg";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { NotFoundError } from "@mobilab/errors";
+import { NotFoundError } from "@instigenie/errors";
 import {
   paginated,
   type CustomerLedgerEntry,
   type CustomerLedgerListQuerySchema,
   type VendorLedgerEntry,
   type VendorLedgerListQuerySchema,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { customerLedgerRepo } from "./customer-ledger.repository.js";

@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getHealthScoreColor, getHealthScoreLabel } from "@/data/crm-mock";
 import { formatCurrency } from "@/data/mock";
 import { useApiAccounts } from "@/hooks/useCrmApi";
-import type { Account } from "@mobilab/contracts";
+import type { Account } from "@instigenie/contracts";
 import { Building2, Star, DollarSign, Activity, AlertCircle } from "lucide-react";
 
 /**

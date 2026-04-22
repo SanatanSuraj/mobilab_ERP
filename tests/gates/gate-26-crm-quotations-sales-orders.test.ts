@@ -41,22 +41,22 @@ import {
   beforeEach,
 } from "vitest";
 import pg from "pg";
-import { QuotationsService } from "@mobilab/api/crm/quotations";
-import { SalesOrdersService } from "@mobilab/api/crm/sales-orders";
+import { QuotationsService } from "@instigenie/api/crm/quotations";
+import { SalesOrdersService } from "@instigenie/api/crm/sales-orders";
 import {
   AUDIENCE,
   type CreateQuotation,
   type CreateSalesOrder,
   type Permission,
   type Role,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   ConflictError,
   NotFoundError,
   StateTransitionError,
   ValidationError,
-} from "@mobilab/errors";
-import { withOrg } from "@mobilab/db";
+} from "@instigenie/errors";
+import { withOrg } from "@instigenie/db";
 import { makeTestPool, waitForPg, DEV_ORG_ID } from "./_helpers.js";
 
 // Seed dev Sales Manager (has quotations:approve in the default role map).
@@ -69,7 +69,7 @@ const DEV_USER_ID = "00000000-0000-0000-0000-00000000b004";
  * URL, or any other fastify state. We shape the stub as a structural
  * RequestUser carrier and pass it in as Parameters<…>[0] of whichever
  * method we're calling. That lets us avoid a `fastify` dep on the gates
- * package (which is only an @mobilab/api dep transitively).
+ * package (which is only an @instigenie/api dep transitively).
  */
 type ServiceReq = Parameters<QuotationsService["create"]>[0];
 

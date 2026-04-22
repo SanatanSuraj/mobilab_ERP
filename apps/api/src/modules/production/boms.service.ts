@@ -24,10 +24,10 @@ import type {
   CreateBomVersion,
   UpdateBomLine,
   UpdateBomVersion,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { z } from "zod";
-import { ConflictError, NotFoundError } from "@mobilab/errors";
-import { paginated } from "@mobilab/contracts";
+import { ConflictError, NotFoundError } from "@instigenie/errors";
+import { paginated } from "@instigenie/contracts";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { bomsRepo } from "./boms.repository.js";

@@ -27,7 +27,7 @@ import {
   useApiQuotation,
   useApiTransitionQuotationStatus,
 } from "@/hooks/useCrmApi";
-import type { Quotation, QuotationStatus } from "@mobilab/contracts";
+import type { Quotation, QuotationStatus } from "@instigenie/contracts";
 import {
   ArrowLeft,
   Building2,

@@ -28,7 +28,7 @@ import {
   NotificationListQuerySchema,
   NotificationTemplateListQuerySchema,
   UpdateNotificationTemplateSchema,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { createAuthGuard, requirePermission } from "../auth/guard.js";
 import type { AuthGuardOptions } from "../auth/guard.js";
 import type { NotificationTemplatesService } from "./templates.service.js";

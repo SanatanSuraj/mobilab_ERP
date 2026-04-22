@@ -16,7 +16,7 @@ import type {
   PurchaseOrder,
   UpdatePoLine,
   UpdatePurchaseOrder,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 // ── Header ───────────────────────────────────────────────────────────────────

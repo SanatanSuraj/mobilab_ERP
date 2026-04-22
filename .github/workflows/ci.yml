@@ -52,13 +52,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: mobilab
-          POSTGRES_USER: mobilab
-          POSTGRES_PASSWORD: mobilab_dev
+          POSTGRES_DB: instigenie
+          POSTGRES_USER: instigenie
+          POSTGRES_PASSWORD: instigenie_dev
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U mobilab -d mobilab"
+          --health-cmd "pg_isready -U instigenie -d instigenie"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
@@ -85,15 +85,15 @@ jobs:
 
     env:
       # Two URLs:
-      #   ADMIN_DATABASE_URL — SUPERUSER `mobilab`, used to apply init/RLS
+      #   ADMIN_DATABASE_URL — SUPERUSER `instigenie`, used to apply init/RLS
       #                        SQL (needs CREATE EXTENSION, CREATE ROLE).
-      #   DATABASE_URL       — `mobilab_app` non-superuser, used by the
+      #   DATABASE_URL       — `instigenie_app` non-superuser, used by the
       #                        gates so RLS actually binds. Created by
       #                        ops/sql/seed/99-app-role.sql on bootstrap.
       # CI runs Postgres on standard ports — docker-compose.dev.yml uses
       # remapped ports (5434/6381/6382) to avoid collisions on the host.
-      ADMIN_DATABASE_URL: postgres://mobilab:mobilab_dev@localhost:5432/mobilab
-      DATABASE_URL: postgres://mobilab_app:mobilab_dev@localhost:5432/mobilab
+      ADMIN_DATABASE_URL: postgres://instigenie:instigenie_dev@localhost:5432/instigenie
+      DATABASE_URL: postgres://instigenie_app:instigenie_dev@localhost:5432/instigenie
       REDIS_BULL_URL: redis://localhost:6379
       REDIS_CACHE_URL: redis://localhost:6380
       NODE_ENV: test

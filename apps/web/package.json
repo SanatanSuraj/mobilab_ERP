@@ -1,5 +1,5 @@
 {
-  "name": "@mobilab/web",
+  "name": "@instigenie/web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",
-    "@mobilab/contracts": "workspace:*",
+    "@instigenie/contracts": "workspace:*",
     "@tanstack/react-query": "^5.99.0",
     "@tanstack/react-query-devtools": "^5.99.0",
     "class-variance-authority": "^0.7.1",
@@ -31,7 +31,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@mobilab/config": "workspace:*",
+    "@instigenie/config": "workspace:*",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22",
     "@types/react": "^19",

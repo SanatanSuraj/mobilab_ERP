@@ -1,7 +1,7 @@
 /**
  * VendorAdminService — the business logic behind /vendor-admin/tenants/*.
  *
- * All queries run against the BYPASSRLS `mobilab_vendor` pool, so they see
+ * All queries run against the BYPASSRLS `instigenie_vendor` pool, so they see
  * every tenant. Each mutation opens a transaction, performs the SQL, and
  * records to vendor.action_log INSIDE the same transaction — if the audit
  * insert fails for any reason, the mutation rolls back too.
@@ -17,13 +17,13 @@
  */
 
 import type pg from "pg";
-import { NotFoundError, ValidationError } from "@mobilab/errors";
+import { NotFoundError, ValidationError } from "@instigenie/errors";
 import type {
   PlanCode,
   VendorActionType,
   VendorAuditListQuery,
   VendorTenantListQuery,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { recordVendorAction } from "./audit.js";
 
 export interface VendorAdminContext {
@@ -33,7 +33,7 @@ export interface VendorAdminContext {
 }
 
 export interface VendorAdminServiceDeps {
-  /** BYPASSRLS mobilab_vendor pool. */
+  /** BYPASSRLS instigenie_vendor pool. */
   pool: pg.Pool;
   /**
    * Optional. If provided, the service calls `invalidate(orgId)` after a

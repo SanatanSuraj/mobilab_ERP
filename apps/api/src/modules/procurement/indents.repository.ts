@@ -17,7 +17,7 @@ import type {
   IndentStatus,
   UpdateIndent,
   UpdateIndentLine,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 // ── Header ───────────────────────────────────────────────────────────────────

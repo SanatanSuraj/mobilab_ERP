@@ -1,5 +1,5 @@
 {
-  "name": "@mobilab/contracts",
+  "name": "@instigenie/contracts",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -91,7 +91,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@mobilab/config": "workspace:*",
+    "@instigenie/config": "workspace:*",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"
   }

@@ -1,5 +1,5 @@
 /**
- * Unit tests for @mobilab/money.
+ * Unit tests for @instigenie/money.
  *
  * Relates to Phase 1 Gate 2 — Decimal integrity.
  * The full integration version of the gate is in tests/gates/gate-2-decimal.test.ts
@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { m, moneyFromPg, moneyToPg, MoneyTypeError, ZERO, ONE, Decimal } from "./index.js";
 
-describe("@mobilab/money", () => {
+describe("@instigenie/money", () => {
   describe("m() construction", () => {
     it("accepts string", () => {
       expect(m("100.50").toFixed()).toBe("100.5");

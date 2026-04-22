@@ -8,9 +8,9 @@
  * tenant, BYPASSRLS ignores policies).
  *
  * This gate locks that assumption down:
- *   1. The role we connect as (current_user) really is `mobilab_app`.
+ *   1. The role we connect as (current_user) really is `instigenie_app`.
  *   2. That role has rolsuper=false AND rolbypassrls=false.
- *   3. The bootstrap role `mobilab` still has its expected powers
+ *   3. The bootstrap role `instigenie` still has its expected powers
  *      (superuser for migrations), so we notice if someone swaps them.
  *
  * If this gate ever fails, treat it as P0 — the tenant boundary is not
@@ -33,8 +33,8 @@ describe("gate-11: app role has NOBYPASSRLS and NOSUPERUSER", () => {
     await pool.end();
   });
 
-  it("the connection is running as mobilab_app (not the bootstrap superuser)", async () => {
-    // If a future dev points DATABASE_URL at the bootstrap `mobilab` user
+  it("the connection is running as instigenie_app (not the bootstrap superuser)", async () => {
+    // If a future dev points DATABASE_URL at the bootstrap `instigenie` user
     // "just to get tests green", every RLS gate silently passes because
     // superusers bypass all policies. Fail loudly here instead.
     const { rows } = await pool.query<{ cu: string }>(
@@ -42,11 +42,11 @@ describe("gate-11: app role has NOBYPASSRLS and NOSUPERUSER", () => {
     );
     expect(
       rows[0]!.cu,
-      "gates must run as mobilab_app — superuser bypasses RLS"
-    ).toBe("mobilab_app");
+      "gates must run as instigenie_app — superuser bypasses RLS"
+    ).toBe("instigenie_app");
   });
 
-  it("mobilab_app has NOSUPERUSER and NOBYPASSRLS", async () => {
+  it("instigenie_app has NOSUPERUSER and NOBYPASSRLS", async () => {
     const { rows } = await pool.query<{
       rolname: string;
       rolsuper: boolean;
@@ -55,22 +55,22 @@ describe("gate-11: app role has NOBYPASSRLS and NOSUPERUSER", () => {
     }>(
       `SELECT rolname, rolsuper, rolbypassrls, rolcanlogin
          FROM pg_roles
-        WHERE rolname = 'mobilab_app'`
+        WHERE rolname = 'instigenie_app'`
     );
-    expect(rows.length, "mobilab_app role must exist").toBe(1);
+    expect(rows.length, "instigenie_app role must exist").toBe(1);
     const r = rows[0]!;
-    expect(r.rolcanlogin, "mobilab_app must be able to log in").toBe(true);
+    expect(r.rolcanlogin, "instigenie_app must be able to log in").toBe(true);
     expect(
       r.rolsuper,
-      "mobilab_app must NOT be a superuser (superusers bypass RLS)"
+      "instigenie_app must NOT be a superuser (superusers bypass RLS)"
     ).toBe(false);
     expect(
       r.rolbypassrls,
-      "mobilab_app must NOT have BYPASSRLS — tenant isolation relies on this"
+      "instigenie_app must NOT have BYPASSRLS — tenant isolation relies on this"
     ).toBe(false);
   });
 
-  it("bootstrap role `mobilab` is still the migration superuser", async () => {
+  it("bootstrap role `instigenie` is still the migration superuser", async () => {
     // We deliberately keep the bootstrap role superuser so migrations can
     // ALTER schema, create extensions, etc. If someone ever demotes it,
     // migrations will fail mysteriously — catch that swap here.
@@ -80,22 +80,22 @@ describe("gate-11: app role has NOBYPASSRLS and NOSUPERUSER", () => {
     }>(
       `SELECT rolname, rolsuper
          FROM pg_roles
-        WHERE rolname = 'mobilab'`
+        WHERE rolname = 'instigenie'`
     );
-    expect(rows.length, "bootstrap role `mobilab` must exist").toBe(1);
+    expect(rows.length, "bootstrap role `instigenie` must exist").toBe(1);
     expect(
       rows[0]!.rolsuper,
-      "`mobilab` must stay SUPERUSER — it runs migrations"
+      "`instigenie` must stay SUPERUSER — it runs migrations"
     ).toBe(true);
   });
 
-  it("only mobilab_vendor (plus pg_* built-ins) carries BYPASSRLS", async () => {
+  it("only instigenie_vendor (plus pg_* built-ins) carries BYPASSRLS", async () => {
     // If anyone adds a new role with BYPASSRLS, we want to know. Postgres
     // ships with a few pg_* built-ins that legitimately carry it; the
-    // Sprint-3 `mobilab_vendor` role is the one non-built-in that is
+    // Sprint-3 `instigenie_vendor` role is the one non-built-in that is
     // supposed to have it (see ops/sql/seed/98-vendor-role.sql for why).
     // Anything ELSE is a red flag.
-    const EXPECTED_BYPASSRLS_NON_BUILTIN = ["mobilab_vendor"];
+    const EXPECTED_BYPASSRLS_NON_BUILTIN = ["instigenie_vendor"];
     const { rows } = await pool.query<{ rolname: string }>(
       `SELECT rolname
          FROM pg_roles

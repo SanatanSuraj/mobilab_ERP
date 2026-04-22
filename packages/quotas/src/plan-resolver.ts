@@ -22,8 +22,8 @@
  */
 
 import type pg from "pg";
-import { withOrg } from "@mobilab/db";
-import type { PlanCode, SubscriptionStatus } from "@mobilab/contracts";
+import { withOrg } from "@instigenie/db";
+import type { PlanCode, SubscriptionStatus } from "@instigenie/contracts";
 import type { FeatureEntry, FeatureSnapshot } from "./types.js";
 
 export interface PlanResolverDeps {

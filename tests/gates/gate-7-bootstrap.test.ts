@@ -12,7 +12,7 @@ import {
   installNumericTypeParser,
   isNumericParserInstalled,
   withOrg,
-} from "@mobilab/db";
+} from "@instigenie/db";
 import { DEV_ORG_ID, makeTestPool, waitForPg } from "./_helpers.js";
 
 describe("gate-7: bootstrap policy", () => {

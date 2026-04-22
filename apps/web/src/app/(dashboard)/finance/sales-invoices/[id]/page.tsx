@@ -61,7 +61,7 @@ import {
   useApiPostSalesInvoice,
   useApiSalesInvoice,
 } from "@/hooks/useFinanceApi";
-import type { InvoiceStatus } from "@mobilab/contracts";
+import type { InvoiceStatus } from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowLeft,

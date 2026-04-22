@@ -5,7 +5,7 @@
 -- The GUC is set by packages/db/src/with-org.ts inside a txn, so a
 -- request that forgets to call withOrg() sees zero rows (not an error).
 --
--- IMPORTANT: `mobilab` also OWNS these tables, and Postgres exempts table
+-- IMPORTANT: `instigenie` also OWNS these tables, and Postgres exempts table
 -- owners from RLS by default. We FORCE it so the app role (which happens
 -- to be the same account in dev) is never silently bypassed. In a more
 -- segregated environment the app runs as a separate, non-owner role and

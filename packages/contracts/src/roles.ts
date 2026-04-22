@@ -43,16 +43,16 @@ export function isInternalRole(r: Role): boolean {
  *   tenantPicker   — short-lived token from POST /auth/login when an
  *                    identity has 2+ active memberships; the client
  *                    exchanges it at POST /auth/select-tenant.
- *   vendor         — Mobilab employee admin console tokens. These sit
+ *   vendor         — Instigenie employee admin console tokens. These sit
  *                    ABOVE the tenant boundary and carry NO `org` claim;
  *                    they authorize /vendor-admin/* only. See Sprint 3 /
  *                    packages/contracts/src/vendor-admin.ts.
  */
 export const AUDIENCE = {
-  internal: "mobilab-internal",
-  portal: "mobilab-portal",
-  tenantPicker: "mobilab-tenant-picker",
-  vendor: "mobilab-vendor",
+  internal: "instigenie-internal",
+  portal: "instigenie-portal",
+  tenantPicker: "instigenie-tenant-picker",
+  vendor: "instigenie-vendor",
 } as const;
 
 /**

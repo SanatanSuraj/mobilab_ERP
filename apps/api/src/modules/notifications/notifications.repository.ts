@@ -13,7 +13,7 @@ import type {
   Notification,
   NotificationSeverity,
   NotificationUnreadCount,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface NotificationRow {

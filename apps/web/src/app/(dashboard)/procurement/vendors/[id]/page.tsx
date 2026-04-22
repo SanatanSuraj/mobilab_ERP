@@ -39,7 +39,7 @@ import {
   useApiPurchaseOrders,
   useApiVendor,
 } from "@/hooks/useProcurementApi";
-import type { PoStatus, VendorType } from "@mobilab/contracts";
+import type { PoStatus, VendorType } from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowLeft,

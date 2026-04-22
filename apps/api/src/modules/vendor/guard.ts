@@ -1,5 +1,5 @@
 /**
- * Vendor-admin guard. Verifies a Bearer token with aud = mobilab-vendor and
+ * Vendor-admin guard. Verifies a Bearer token with aud = instigenie-vendor and
  * attaches the vendor admin id/email/name to req.vendorAdmin.
  *
  * Kept separate from the tenant auth guard because:
@@ -15,7 +15,7 @@
  */
 
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { UnauthorizedError } from "@mobilab/errors";
+import { UnauthorizedError } from "@instigenie/errors";
 import type { TokenFactory } from "../auth/tokens.js";
 
 export interface VendorAdminContextOnRequest {

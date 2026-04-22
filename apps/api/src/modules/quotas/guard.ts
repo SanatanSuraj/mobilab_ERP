@@ -20,8 +20,8 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import { UnauthorizedError } from "@mobilab/errors";
-import type { FeatureFlagService } from "@mobilab/quotas";
+import { UnauthorizedError } from "@instigenie/errors";
+import type { FeatureFlagService } from "@instigenie/quotas";
 
 export function createRequireFeature(flags: FeatureFlagService) {
   return function requireFeature(key: string) {

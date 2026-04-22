@@ -6,7 +6,7 @@
  * Real auth validation happens inside each Server Action / Route Handler.
  *
  * Cookie strategy:
- *   mobilab-session   presence flag — set on login, cleared on logout.
+ *   instigenie-session   presence flag — set on login, cleared on logout.
  *                     /auth/login writes this AFTER a successful real-API
  *                     login so we can keep this optimistic cookie gate
  *                     and migrate to httpOnly JWT cookies later without
@@ -74,7 +74,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const session = request.cookies.get("mobilab-session");
+  const session = request.cookies.get("instigenie-session");
   const isAuthenticated = Boolean(session?.value);
 
   // Authenticated user hits any login page → send them home.

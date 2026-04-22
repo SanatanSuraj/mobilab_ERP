@@ -14,7 +14,7 @@
  */
 
 // Tracing first so pg + http get auto-instrumented.
-import { initTracing } from "@mobilab/observability/tracing";
+import { initTracing } from "@instigenie/observability/tracing";
 initTracing({ serviceName: "api" });
 
 import Fastify from "fastify";
@@ -29,15 +29,15 @@ import {
   registry,
   httpRequestsTotal,
   httpRequestDurationMs,
-} from "@mobilab/observability";
-import { installNumericTypeParser } from "@mobilab/db";
-import { AUDIENCE, validatePermissionMap } from "@mobilab/contracts";
-import { Cache } from "@mobilab/cache";
+} from "@instigenie/observability";
+import { installNumericTypeParser } from "@instigenie/db";
+import { AUDIENCE, validatePermissionMap } from "@instigenie/contracts";
+import { Cache } from "@instigenie/cache";
 import {
   FeatureFlagService,
   PlanResolverService,
   QuotaService,
-} from "@mobilab/quotas";
+} from "@instigenie/quotas";
 import { loadEnv } from "./env.js";
 import { registerProblemHandler } from "./errors/problem.js";
 import { TokenFactory } from "./modules/auth/tokens.js";
@@ -83,7 +83,7 @@ import { registerFinanceRoutes } from "./modules/finance/routes.js";
 import { NotificationTemplatesService } from "./modules/notifications/templates.service.js";
 import { NotificationsService } from "./modules/notifications/notifications.service.js";
 import { registerNotificationsRoutes } from "./modules/notifications/routes.js";
-import { VendorAuthService, VendorAdminService } from "@mobilab/vendor-admin";
+import { VendorAuthService, VendorAdminService } from "@instigenie/vendor-admin";
 import { registerVendorRoutes } from "./modules/vendor/routes.js";
 
 async function main(): Promise<void> {
@@ -99,17 +99,17 @@ async function main(): Promise<void> {
   const pool = new pg.Pool({
     connectionString: env.databaseUrl,
     max: 10,
-    application_name: "mobilab-api",
+    application_name: "instigenie-api",
   });
 
-  // Sprint 3 — the vendor-admin pool connects as `mobilab_vendor`
+  // Sprint 3 — the vendor-admin pool connects as `instigenie_vendor`
   // (BYPASSRLS). Tenant-side code MUST NOT use this pool; keeping the two
   // variables alongside each other in main() makes the distinction explicit
   // at the point where they're created. See ops/sql/seed/98-vendor-role.sql.
   const vendorPool = new pg.Pool({
     connectionString: env.vendorDatabaseUrl,
     max: 5,
-    application_name: "mobilab-api-vendor",
+    application_name: "instigenie-api-vendor",
   });
 
   const cache = new Cache({ url: env.cacheRedisUrl });

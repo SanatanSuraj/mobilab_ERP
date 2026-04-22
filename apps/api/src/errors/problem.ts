@@ -13,7 +13,7 @@ import type {
   FastifyReply,
   FastifyRequest,
 } from "fastify";
-import { isAppError } from "@mobilab/errors";
+import { isAppError } from "@instigenie/errors";
 import { ZodError } from "zod";
 
 export function registerProblemHandler(app: FastifyInstance): void {
@@ -83,7 +83,7 @@ function sendProblem(
     .code(p.status)
     .type("application/problem+json")
     .send({
-      type: `https://mobilab.dev/problems/${p.code}`,
+      type: `https://instigenie.dev/problems/${p.code}`,
       title: p.code,
       status: p.status,
       detail: p.message,

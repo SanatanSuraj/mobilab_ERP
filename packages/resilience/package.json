@@ -1,5 +1,5 @@
 {
-  "name": "@mobilab/resilience",
+  "name": "@instigenie/resilience",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,10 +15,10 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@mobilab/errors": "workspace:*"
+    "@instigenie/errors": "workspace:*"
   },
   "devDependencies": {
-    "@mobilab/config": "workspace:*",
+    "@instigenie/config": "workspace:*",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"
   }

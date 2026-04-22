@@ -31,18 +31,18 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { AuthService } from "@mobilab/api/auth/service";
-import { TokenFactory } from "@mobilab/api/auth/tokens";
-import { AUDIENCE } from "@mobilab/contracts";
+import { AuthService } from "@instigenie/api/auth/service";
+import { TokenFactory } from "@instigenie/api/auth/tokens";
+import { AUDIENCE } from "@instigenie/contracts";
 import { makeTestPool, waitForPg } from "./_helpers.js";
 
 const DEV_EMAIL = "sales@mobilab.local";
-const DEV_PASSWORD = "mobilab_dev_2026";
+const DEV_PASSWORD = "instigenie_dev_2026";
 const DEV_ORG_ID = "00000000-0000-0000-0000-00000000a001";
 const DEV_USER_ID = "00000000-0000-0000-0000-00000000b003";
 
 const JWT_SECRET = "dev-only-secret-do-not-use-in-production-xxxxxxxx";
-const JWT_ISSUER = "mobilab-api";
+const JWT_ISSUER = "instigenie-api";
 
 describe("gate-23 (arch-6): auth flow — login → refresh rotates → old refresh rejected", () => {
   let pool: pg.Pool;

@@ -1,5 +1,5 @@
 {
-  "name": "@mobilab/quotas",
+  "name": "@instigenie/quotas",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,14 +15,14 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@mobilab/cache": "workspace:*",
-    "@mobilab/contracts": "workspace:*",
-    "@mobilab/db": "workspace:*",
-    "@mobilab/errors": "workspace:*",
+    "@instigenie/cache": "workspace:*",
+    "@instigenie/contracts": "workspace:*",
+    "@instigenie/db": "workspace:*",
+    "@instigenie/errors": "workspace:*",
     "pg": "^8.13.1"
   },
   "devDependencies": {
-    "@mobilab/config": "workspace:*",
+    "@instigenie/config": "workspace:*",
     "@types/pg": "^8.11.10",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"

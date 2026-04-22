@@ -1,7 +1,7 @@
 export interface Env {
   databaseUrl: string;
   /**
-   * Connection string for the vendor-admin pool (mobilab_vendor BYPASSRLS
+   * Connection string for the vendor-admin pool (instigenie_vendor BYPASSRLS
    * role). Separate from databaseUrl on purpose — tenant-side traffic must
    * never resolve to a BYPASSRLS session, and a leaked tenant credential
    * must not grant the vendor role. Defaults to `databaseUrl` only in dev
@@ -40,7 +40,7 @@ export function loadEnv(): Env {
     cacheRedisUrl: required("REDIS_CACHE_URL"),
     bullRedisUrl: required("REDIS_BULL_URL"),
     jwtSecret,
-    jwtIssuer: process.env.JWT_ISSUER ?? "mobilab-api",
+    jwtIssuer: process.env.JWT_ISSUER ?? "instigenie-api",
     accessTokenTtlSec: Number(process.env.ACCESS_TOKEN_TTL_SEC ?? 900), // 15 min
     refreshTokenTtlSec: Number(process.env.REFRESH_TOKEN_TTL_SEC ?? 1_209_600), // 14 days
     port: Number(process.env.PORT ?? 4000),

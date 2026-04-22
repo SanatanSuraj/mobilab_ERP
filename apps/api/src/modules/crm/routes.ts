@@ -7,7 +7,7 @@
  *                                the client hears "upgrade" rather than
  *                                "ask for a role".
  *   3. requirePermission(p)    — one of the accounts/contacts/leads/deals/tickets
- *                                perms declared in @mobilab/contracts/permissions
+ *                                perms declared in @instigenie/contracts/permissions
  *
  * Request/response schemas are validated with zod at the boundary. Zod
  * failures bubble to the registerProblemHandler() as ValidationError.
@@ -50,7 +50,7 @@ import {
   UpdateQuotationSchema,
   UpdateSalesOrderSchema,
   UpdateTicketSchema,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { createAuthGuard, requirePermission } from "../auth/guard.js";
 import type { AuthGuardOptions } from "../auth/guard.js";
 import type { RequireFeature } from "../quotas/guard.js";

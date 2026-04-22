@@ -24,14 +24,14 @@
  */
 
 import type pg from "pg";
-import { withOrg } from "@mobilab/db";
+import { withOrg } from "@instigenie/db";
 import {
   TenantDeletedError,
   TenantSuspendedError,
   TrialExpiredError,
   NotFoundError,
-} from "@mobilab/errors";
-import type { TenantStatus } from "@mobilab/contracts";
+} from "@instigenie/errors";
+import type { TenantStatus } from "@instigenie/contracts";
 
 export interface TenantStatusServiceDeps {
   pool: pg.Pool;

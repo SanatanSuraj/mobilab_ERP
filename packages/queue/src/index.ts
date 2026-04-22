@@ -1,5 +1,5 @@
 /**
- * @mobilab/queue — BullMQ factory backed by redis-bull.
+ * @instigenie/queue — BullMQ factory backed by redis-bull.
  * ARCHITECTURE.md §8.
  */
 

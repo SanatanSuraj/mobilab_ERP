@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
-import { enqueueOutbox, withOrg } from "@mobilab/db";
+import { enqueueOutbox, withOrg } from "@instigenie/db";
 import {
   DATABASE_URL,
   makeTestPool,

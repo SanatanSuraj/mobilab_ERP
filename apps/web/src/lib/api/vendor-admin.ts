@@ -1,14 +1,14 @@
 /**
  * Typed fetch wrapper for the /vendor-admin/* surface exposed by apps/api.
  *
- * This is the SEPARATE client used by the Mobilab vendor-admin console
+ * This is the SEPARATE client used by the Instigenie vendor-admin console
  * (Sprint 3). Keep it apart from lib/api/auth.ts — the two surfaces use:
  *
- *   - different JWT audiences (mobilab-vendor vs mobilab-internal/portal)
+ *   - different JWT audiences (instigenie-vendor vs instigenie-internal/portal)
  *   - different token storage keys (no accidental cross-surface leakage)
  *   - different cookie/header rules (vendor never sends X-Org-Id)
  *
- * The contracts (shapes) are imported from @mobilab/contracts so the UI and
+ * The contracts (shapes) are imported from @instigenie/contracts so the UI and
  * Fastify routes agree on the wire.
  *
  * Silent refresh: on a 401 from any authed endpoint we try the refresh
@@ -29,18 +29,18 @@ import type {
   ChangePlanRequest,
   VendorTenantListQuery,
   VendorAuditListQuery,
-} from "@mobilab/contracts/vendor-admin";
-import type { Problem } from "@mobilab/contracts/auth";
+} from "@instigenie/contracts/vendor-admin";
+import type { Problem } from "@instigenie/contracts/auth";
 
 /** Where to reach the real API. Override with NEXT_PUBLIC_API_BASE_URL. */
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
-// Keep vendor keys distinct from the tenant-side "mobilab-access" / "mobilab-refresh"
+// Keep vendor keys distinct from the tenant-side "instigenie-access" / "instigenie-refresh"
 // so a user who is simultaneously a tenant admin AND a vendor admin on the
 // same browser can't pick up the wrong token by accident.
-export const VENDOR_ACCESS_KEY = "mobilab-vendor-access";
-export const VENDOR_REFRESH_KEY = "mobilab-vendor-refresh";
+export const VENDOR_ACCESS_KEY = "instigenie-vendor-access";
+export const VENDOR_REFRESH_KEY = "instigenie-vendor-refresh";
 
 export class ApiProblem extends Error {
   readonly problem: Problem;
@@ -196,7 +196,7 @@ export async function apiVendorGetTenant(
   const found = body.items.find((t) => t.id === orgId);
   if (!found) {
     throw new ApiProblem({
-      type: "https://mobilab.dev/errors/not_found",
+      type: "https://instigenie.dev/errors/not_found",
       title: "tenant_not_found",
       status: 404,
       code: "tenant_not_found",

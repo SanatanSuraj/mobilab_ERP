@@ -25,10 +25,10 @@ import type {
   LeadListQuerySchema,
   MarkLeadLost,
   UpdateLead,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { z } from "zod";
-import { NotFoundError, StateTransitionError } from "@mobilab/errors";
-import { paginated } from "@mobilab/contracts";
+import { NotFoundError, StateTransitionError } from "@instigenie/errors";
+import { paginated } from "@instigenie/contracts";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { leadsRepo } from "./leads.repository.js";

@@ -21,8 +21,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 
-import type { VendorActionLogEntry } from "@mobilab/contracts/vendor-admin";
-import { VENDOR_ACTION_TYPES } from "@mobilab/contracts/vendor-admin";
+import type { VendorActionLogEntry } from "@instigenie/contracts/vendor-admin";
+import { VENDOR_ACTION_TYPES } from "@instigenie/contracts/vendor-admin";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

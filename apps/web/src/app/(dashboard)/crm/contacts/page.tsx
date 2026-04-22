@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertCircle } from "lucide-react";
 import { useApiContacts, useApiAccounts } from "@/hooks/useCrmApi";
-import type { Contact } from "@mobilab/contracts";
+import type { Contact } from "@instigenie/contracts";
 
 /**
  * Contacts list — reads /crm/contacts via useApiContacts.

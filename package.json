@@ -1,8 +1,8 @@
 {
-  "name": "mobilab-erp",
+  "name": "instigenie-erp",
   "version": "0.1.0",
   "private": true,
-  "description": "Mobilab ERP — unified monorepo for CRM/Production/Inventory/QC/Procurement/Finance",
+  "description": "Instigenie ERP — unified monorepo for CRM/Production/Inventory/QC/Procurement/Finance",
   "packageManager": "pnpm@9.14.2",
   "engines": {
     "node": ">=22.0.0",
@@ -19,8 +19,8 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "test:gates": "pnpm --filter @mobilab/gates test",
-    "db:migrate": "pnpm --filter @mobilab/db migrate:up",
+    "test:gates": "pnpm --filter @instigenie/gates test",
+    "db:migrate": "pnpm --filter @instigenie/db migrate:up",
     "infra:up": "docker compose -f ops/compose/docker-compose.dev.yml up -d",
     "infra:down": "docker compose -f ops/compose/docker-compose.dev.yml down",
     "infra:logs": "docker compose -f ops/compose/docker-compose.dev.yml logs -f",

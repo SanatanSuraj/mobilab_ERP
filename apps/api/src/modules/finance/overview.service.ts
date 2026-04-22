@@ -19,9 +19,9 @@
 
 import type pg from "pg";
 import type { FastifyRequest } from "fastify";
-import type { FinanceOverview } from "@mobilab/contracts";
+import type { FinanceOverview } from "@instigenie/contracts";
 import { withRequest } from "../shared/with-request.js";
-import { m, moneyToPg, ZERO } from "@mobilab/money";
+import { m, moneyToPg, ZERO } from "@instigenie/money";
 
 interface ArApRow {
   outstanding: string | null;

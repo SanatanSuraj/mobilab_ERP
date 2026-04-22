@@ -16,9 +16,9 @@ import pg from "pg";
 import {
   isNumericParserInstalled,
   installNumericTypeParser,
-} from "@mobilab/db";
-import { PERMISSIONS, ROLES, ROLE_PERMISSIONS } from "@mobilab/contracts";
-import type { Logger } from "@mobilab/observability";
+} from "@instigenie/db";
+import { PERMISSIONS, ROLES, ROLE_PERMISSIONS } from "@instigenie/contracts";
+import type { Logger } from "@instigenie/observability";
 
 const TENANT_TABLES = [
   "users",

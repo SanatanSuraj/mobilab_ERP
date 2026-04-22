@@ -81,7 +81,7 @@ import type {
   WipStageTemplate,
   WorkOrder,
   WorkOrderWithStages,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
 //

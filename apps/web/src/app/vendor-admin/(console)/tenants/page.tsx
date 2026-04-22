@@ -26,9 +26,9 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 
-import type { PlanCode, TenantStatus } from "@mobilab/contracts/billing";
-import type { VendorTenantRow } from "@mobilab/contracts/vendor-admin";
-import { PLAN_CODES, TENANT_STATUSES } from "@mobilab/contracts/billing";
+import type { PlanCode, TenantStatus } from "@instigenie/contracts/billing";
+import type { VendorTenantRow } from "@instigenie/contracts/vendor-admin";
+import { PLAN_CODES, TENANT_STATUSES } from "@instigenie/contracts/billing";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

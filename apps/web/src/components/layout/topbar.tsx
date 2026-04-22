@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Bell, Search, Settings, LogOut, User, Check } from "lucide-react";
 import { useAuthStore } from "@/store/auth.store";
 
-const SESSION_COOKIE = "mobilab-session";
+const SESSION_COOKIE = "instigenie-session";
 
 function clearSessionCookie() {
   // Expire the cookie by setting max-age=0

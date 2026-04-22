@@ -29,7 +29,7 @@
 import type pg from "pg";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ConflictError, NotFoundError } from "@mobilab/errors";
+import { ConflictError, NotFoundError } from "@instigenie/errors";
 import {
   paginated,
   type CreatePayment,
@@ -37,8 +37,8 @@ import {
   type PaymentAppliedInvoice,
   type PaymentListQuerySchema,
   type VoidPayment,
-} from "@mobilab/contracts";
-import { m, moneyToPg, ZERO } from "@mobilab/money";
+} from "@instigenie/contracts";
+import { m, moneyToPg, ZERO } from "@instigenie/money";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { paymentsRepo } from "./payments.repository.js";

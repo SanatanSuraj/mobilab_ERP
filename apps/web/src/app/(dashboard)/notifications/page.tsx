@@ -43,7 +43,7 @@ import {
   NOTIFICATION_SEVERITIES,
   type Notification,
   type NotificationSeverity,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   AlertTriangle,

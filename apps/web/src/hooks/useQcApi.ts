@@ -75,7 +75,7 @@ import type {
   UpdateQcFinding,
   QcCert,
   IssueQcCert,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
 //

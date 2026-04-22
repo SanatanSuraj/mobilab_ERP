@@ -1,6 +1,6 @@
-# Mobilab ERP — Architecture & Build Plan
+# Instigenie ERP — Architecture & Build Plan
 
-**Document ID:** ERP-ARCH-MOBILAB-2026-001
+**Document ID:** ERP-ARCH-INSTIGENIE-2026-001
 **Version:** 1.1
 **Status:** Authoritative — this document is the single source of truth we build from.
 **Stack:** Next.js 16.2.x · React 19.2.x · Node 22 LTS · Fastify 5 · Drizzle · BullMQ 5 · PostgreSQL 16 · Redis 7 · MinIO
@@ -39,7 +39,7 @@
 
 ### 1.1 What We're Building
 
-A unified ERP platform for **Mobilab Diagnostic Instruments Pvt. Ltd.** covering:
+**Instigenie ERP** — a multi-tenant SaaS ERP platform. **Mobilab Diagnostic Instruments Pvt. Ltd.** is the reference (pilot) tenant that drives the initial feature set, but the platform is built to host many tenants with the same domain shape. Core modules:
 
 - **CRM** — leads, accounts, contacts, companies, deals, pipeline, quotations, orders, tickets, reports
 - **Production** — products, BOMs, ECN, work orders (15-state lifecycle), WIP stages, device IDs (incl. `RECALLED`), OEE, BMR (dual-signature), scrap (root-cause), downtime (categorised), assembly lines L1–L5, operator competency, shop-floor live view, MRP
@@ -50,7 +50,7 @@ A unified ERP platform for **Mobilab Diagnostic Instruments Pvt. Ltd.** covering
 - **Auth / RBAC / Admin UI** — users, 12 prototype roles, permission catalogue, operator capability layer, user provisioning
 - **Notifications** — templates, dispatch (in-app SSE, email, WhatsApp)
 - **Audit** — immutable compliance log, hash-chained, electronic-signature bound
-- **Customer Portal** — separate auth surface (JWT audience `mobilab-portal`), read-only order/ticket views, ticket creation
+- **Customer Portal** — separate auth surface (JWT audience `instigenie-portal`), read-only order/ticket views, ticket creation
 
 ### 1.1a Prototype Surfaces (Frontend → Backend Scope)
 
@@ -178,7 +178,7 @@ Violating any of these breaks an architectural guarantee. Reviewers **must** rej
 
 ### 3.0a Tenancy Model — Multi-Tenant, Shared DB, RLS-Isolated
 
-Mobilab is a **multi-tenant SaaS on a shared Postgres database**, with per-tenant isolation enforced by Row-Level Security. This is a deliberate architectural choice — not the only option on the menu, and not free.
+Instigenie ERP is a **multi-tenant SaaS on a shared Postgres database**, with per-tenant isolation enforced by Row-Level Security. This is a deliberate architectural choice — not the only option on the menu, and not free.
 
 | Model | Description | Why we DIDN'T pick it |
 |-------|-------------|----------------------|
@@ -188,8 +188,8 @@ Mobilab is a **multi-tenant SaaS on a shared Postgres database**, with per-tenan
 
 **Consequences (each enforced somewhere in this doc):**
 - Every business table has `org_id UUID NOT NULL REFERENCES organizations(id)` and an RLS policy gated on `current_setting('app.current_org_id', true)::UUID` (§9.2).
-- The app connects as a **`NOBYPASSRLS`** Postgres role (`mobilab_app`) so even a forgotten `withOrg()` call returns zero rows rather than cross-tenant data (§9.2).
-- Cross-tenant access is a single, explicit, audited path: the `mobilab_vendor` `BYPASSRLS` role, used by the vendor-admin app for support operations. See §9.2 Vendor Escape Hatch.
+- The app connects as a **`NOBYPASSRLS`** Postgres role (`instigenie_app`) so even a forgotten `withOrg()` call returns zero rows rather than cross-tenant data (§9.2).
+- Cross-tenant access is a single, explicit, audited path: the `instigenie_vendor` `BYPASSRLS` role, used by the vendor-admin app for support operations. See §9.2 Vendor Escape Hatch.
 - Users can belong to multiple orgs via `memberships` — login may return a `multi-tenant` status requiring explicit tenant selection (§9.1).
 
 ### 3.1 Process Types
@@ -212,7 +212,7 @@ The same `apps/api` process serves **two distinct auth audiences**. They share i
 
 | Aspect | Internal Dashboard | Customer Portal |
 |--------|-------------------|-----------------|
-| **JWT `aud` claim** | `mobilab-internal` | `mobilab-portal` |
+| **JWT `aud` claim** | `instigenie-internal` | `instigenie-portal` |
 | **Roles** | 11 staff roles (§9.4) | `CUSTOMER` only |
 | **Route matcher** (`apps/web/src/middleware.ts`) | Everything except `/portal/**` and `/login` redirects to `/login` if no token | `/portal/**` redirects to `/portal/login` if no token; `/portal/login` is public |
 | **Permitted API namespaces** | `/api/crm/*`, `/api/production/*`, `/api/inventory/*`, `/api/procurement/*`, `/api/qc/*`, `/api/finance/*`, `/api/admin/*`, `/api/notifications/*` | `/api/portal/*` **only** — attempts to reach other namespaces return 403 even with a valid portal JWT |
@@ -221,7 +221,7 @@ The same `apps/api` process serves **two distinct auth audiences**. They share i
 | **SSO** | Optional (Phase 4+) | Email+password only |
 | **Session TTL** | Access 60 min / refresh 7 days | Access 15 min / refresh 24 hr |
 
-**Enforcement:** `requireAudience('mobilab-internal' | 'mobilab-portal')` preHandler on every route. A JWT with the wrong `aud` for the route namespace is rejected before any handler runs.
+**Enforcement:** `requireAudience('instigenie-internal' | 'instigenie-portal')` preHandler on every route. A JWT with the wrong `aud` for the route namespace is rejected before any handler runs.
 
 ---
 
@@ -230,7 +230,7 @@ The same `apps/api` process serves **two distinct auth audiences**. They share i
 Single pnpm workspace. Turborepo for build orchestration and caching. All processes ship from one repo, one version.
 
 ```
-mobilab-erp/
+instigenie-erp/
 ├── apps/
 │   ├── web/                        # Next.js 15 (App Router, standalone output)
 │   │   ├── app/                    # route groups + RSC pages
@@ -928,9 +928,9 @@ Authentication needs a few DB lookups that must cross tenant boundaries: loading
 - `auth_load_active_memberships(email TEXT)` — returns `(user_id, org_id, org_status, role)` rows.
 - `auth_load_refresh_token(token_hash TEXT)` — returns the `refresh_tokens` row regardless of org, so rotation can match a token across any tenant.
 
-Both functions are the **only** sanctioned cross-tenant auth reads. `apps/api` connects as `mobilab_app` (`NOBYPASSRLS`) — it invokes these functions without being privileged itself. The invocation is narrow (identity-by-email, token-by-hash) and fully logged. SQL lives in `ops/sql/rls/03-auth-cross-tenant.sql`.
+Both functions are the **only** sanctioned cross-tenant auth reads. `apps/api` connects as `instigenie_app` (`NOBYPASSRLS`) — it invokes these functions without being privileged itself. The invocation is narrow (identity-by-email, token-by-hash) and fully logged. SQL lives in `ops/sql/rls/03-auth-cross-tenant.sql`.
 
-**Why not just bypass RLS in the auth service's connection?** Because `mobilab_app` runs both auth and business queries; giving it `BYPASSRLS` would defeat Gate 1 globally. SECURITY DEFINER functions scope the privilege to the exact two queries that need it.
+**Why not just bypass RLS in the auth service's connection?** Because `instigenie_app` runs both auth and business queries; giving it `BYPASSRLS` would defeat Gate 1 globally. SECURITY DEFINER functions scope the privilege to the exact two queries that need it.
 
 ### 9.2 Tenant Isolation — Defense in Depth
 
@@ -955,19 +955,19 @@ Two application-level Postgres roles, created at bootstrap:
 
 | Role | Attribute | Used By | Purpose |
 |------|-----------|---------|---------|
-| `mobilab_app` | **NOBYPASSRLS** | `apps/api`, `apps/worker`, `apps/listen-notify` | All tenant-scoped reads/writes. RLS binds. If `withOrg()` is forgotten, queries return 0 rows. |
-| `mobilab_vendor` | **BYPASSRLS** | `packages/vendor-admin` only | Cross-tenant support operations (list all tenants, impersonate, audit search). Every use logged to `vendor.action_log`. |
+| `instigenie_app` | **NOBYPASSRLS** | `apps/api`, `apps/worker`, `apps/listen-notify` | All tenant-scoped reads/writes. RLS binds. If `withOrg()` is forgotten, queries return 0 rows. |
+| `instigenie_vendor` | **BYPASSRLS** | `packages/vendor-admin` only | Cross-tenant support operations (list all tenants, impersonate, audit search). Every use logged to `vendor.action_log`. |
 
-Gate 11 (`gate-11-nobypassrls`) asserts `mobilab_app` has `NOBYPASSRLS` — a Postgres `ALTER ROLE … BYPASSRLS` would be caught in CI, not in prod.
-Gate 19 (`gate-19-vendor-bypassrls`) asserts `mobilab_vendor` actually CAN read rows across orgs while `mobilab_app` cannot.
-The bootstrap role (`mobilab`, `SUPERUSER`) is used only by migrations and is never exposed to app code.
+Gate 11 (`gate-11-nobypassrls`) asserts `instigenie_app` has `NOBYPASSRLS` — a Postgres `ALTER ROLE … BYPASSRLS` would be caught in CI, not in prod.
+Gate 19 (`gate-19-vendor-bypassrls`) asserts `instigenie_vendor` actually CAN read rows across orgs while `instigenie_app` cannot.
+The bootstrap role (`instigenie`, `SUPERUSER`) is used only by migrations and is never exposed to app code.
 
 #### 9.2.2 Vendor Escape Hatch (Cross-Tenant Admin)
 
-`packages/vendor-admin` is the ONLY sanctioned cross-tenant code path. It serves the Mobilab-internal vendor admin UI (`apps/web/src/app/vendor-admin/**`) for support staff who need to see tenants holistically (list all orgs, inspect per-tenant state, suspend a tenant, impersonate a user for support).
+`packages/vendor-admin` is the ONLY sanctioned cross-tenant code path. It serves the Instigenie-internal vendor admin UI (`apps/web/src/app/vendor-admin/**`) for support staff who need to see tenants holistically (list all orgs, inspect per-tenant state, suspend a tenant, impersonate a user for support).
 
-- Connects via `VENDOR_DATABASE_URL` as `mobilab_vendor` — a separate pool, not shared with the tenant-scoped app pool.
-- Separate auth surface (`vendor.admins` table, `vendor.refresh_tokens`, dedicated JWT audience `mobilab-vendor`).
+- Connects via `VENDOR_DATABASE_URL` as `instigenie_vendor` — a separate pool, not shared with the tenant-scoped app pool.
+- Separate auth surface (`vendor.admins` table, `vendor.refresh_tokens`, dedicated JWT audience `instigenie-vendor`).
 - Every mutation writes a row to `vendor.action_log` (actor, target org, action, payload, timestamp) — append-only.
 - Gate 18 (`gate-18-vendor-audit-log`) asserts every vendor-admin mutation produces exactly one audit row.
 
@@ -979,7 +979,7 @@ An `organizations.status` column with `TenantStatusService.assertActive(orgId)` 
 |--------|---------|---------------|
 | `active` | Normal | Allow |
 | `suspended` | Billing failure, policy breach, or ops pause | Reject: login returns `tenant-inactive`; existing access tokens fail next auth check with 403. |
-| `deleted` | Soft-deleted; rows retained for audit | Same as `suspended`; data retained but read-only and only via `mobilab_vendor`. |
+| `deleted` | Soft-deleted; rows retained for audit | Same as `suspended`; data retained but read-only and only via `instigenie_vendor`. |
 
 Gate 15 (`gate-15-tenant-status-guard`) asserts a suspended org's users cannot auth. State transitions are vendor-admin-only.
 
@@ -1020,18 +1020,18 @@ These role names are **locked** — the frontend's `useAuthStore`, `can()` calls
 
 | Role | JWT `aud` | Scope |
 |------|-----------|-------|
-| `SUPER_ADMIN` | `mobilab-internal` | Cross-tenant (Mobilab internal), admin UI access, role assignment |
-| `MANAGEMENT` | `mobilab-internal` | Senior management approvals (> ₹20L), deal win/loss, WO cancel, QC override, ECN approve |
-| `SALES_REP` | `mobilab-internal` | Own leads / deals / quotations, mark deal won/lost |
-| `SALES_MANAGER` | `mobilab-internal` | All sales team deals, approve discounts > 15% |
-| `FINANCE` | `mobilab-internal` | Invoice create/post, PO finance approval (₹5L–₹20L) |
-| `PRODUCTION` | `mobilab-internal` | Stage advance, WO create (no cancel) |
-| `PRODUCTION_MANAGER` | `mobilab-internal` | WO create/cancel, stage advance, BOM edit, BMR production-sign |
-| `RD` | `mobilab-internal` | BOM edit, ECN initiate |
-| `QC_INSPECTOR` | `mobilab-internal` | QC inspection submit, BMR QC-sign, calibration record |
-| `QC_MANAGER` | `mobilab-internal` | QC override, batch quarantine, device release electronic signature |
-| `STORES` | `mobilab-internal` | Stock adjust, warehouse operations |
-| `CUSTOMER` | `mobilab-portal` | Portal-only — view own orders / invoices, create tickets |
+| `SUPER_ADMIN` | `instigenie-internal` | Cross-tenant (Instigenie internal), admin UI access, role assignment |
+| `MANAGEMENT` | `instigenie-internal` | Senior management approvals (> ₹20L), deal win/loss, WO cancel, QC override, ECN approve |
+| `SALES_REP` | `instigenie-internal` | Own leads / deals / quotations, mark deal won/lost |
+| `SALES_MANAGER` | `instigenie-internal` | All sales team deals, approve discounts > 15% |
+| `FINANCE` | `instigenie-internal` | Invoice create/post, PO finance approval (₹5L–₹20L) |
+| `PRODUCTION` | `instigenie-internal` | Stage advance, WO create (no cancel) |
+| `PRODUCTION_MANAGER` | `instigenie-internal` | WO create/cancel, stage advance, BOM edit, BMR production-sign |
+| `RD` | `instigenie-internal` | BOM edit, ECN initiate |
+| `QC_INSPECTOR` | `instigenie-internal` | QC inspection submit, BMR QC-sign, calibration record |
+| `QC_MANAGER` | `instigenie-internal` | QC override, batch quarantine, device release electronic signature |
+| `STORES` | `instigenie-internal` | Stock adjust, warehouse operations |
+| `CUSTOMER` | `instigenie-portal` | Portal-only — view own orders / invoices, create tickets |
 
 #### 9.4.2 Permission String Format (Contract)
 
@@ -1163,7 +1163,7 @@ Dev seeds: `ops/sql/seed/05-plans-catalog.sql` (plans + features), `ops/sql/seed
 - `QuotaService.assertUnder(orgId, featureCode) → Promise<void>` — throws `quota_exceeded` (402) if `usage_records.count >= plan_features.value`.
 - `PlanResolverService.plansForOrg(orgId)` — used by vendor-admin to surface current plan in support UI.
 
-All three read via `mobilab_app` with RLS bound. Cache TTL 60s in Redis-CACHE. Cache key `ff:{orgId}:{featureCode}`.
+All three read via `instigenie_app` with RLS bound. Cache TTL 60s in Redis-CACHE. Cache key `ff:{orgId}:{featureCode}`.
 
 #### 9.6.3 Enforcement Pattern (Fastify)
 
@@ -1202,7 +1202,7 @@ Every CRM / domain route that is plan-gated has **two** `preHandler` steps in ad
 
 **Vitest + auto-instrumentation gotcha (gate 24):** Vitest loads modules through vite's transformer, which **bypasses Node's `require-in-the-middle` hook**. That means `import pg from "pg"` inside a test file never triggers the OpenTelemetry PgInstrumentation patch and no pg spans are produced. Workaround: after `initTracing()` runs, load pg and `node:http` via `createRequire(import.meta.url)` so the real CJS require fires through Node's native loader. This is only a test concern — production apps import at module top and auto-instrumentation patches them normally because their entry point calls `initTracing()` before any other `import` is resolved.
 
-A secondary concern: NodeSDK bundles its own `sdk-trace-base` one minor version behind `@mobilab/observability`'s direct dep, so `SpanProcessor` from the two copies have separate private-member identities. We `as unknown as` the cast at the one assignment site (safe — there's one real class at runtime).
+A secondary concern: NodeSDK bundles its own `sdk-trace-base` one minor version behind `@instigenie/observability`'s direct dep, so `SpanProcessor` from the two copies have separate private-member identities. We `as unknown as` the cast at the one assignment site (safe — there's one real class at runtime).
 
 ### 10.2 Health Check (Must Actually Detect Failure)
 
@@ -1253,12 +1253,12 @@ fastify.get('/health', async () => {
 ```yaml
 services:
   next-web:
-    image: mobilab-erp/next:${VERSION}
+    image: instigenie-erp/next:${VERSION}
     command: node apps/web/server.js
     deploy: { replicas: 3, resources: { limits: { cpus: '2', memory: 1G } } }
 
   api:
-    image: mobilab-erp/api:${VERSION}
+    image: instigenie-erp/api:${VERSION}
     command: node --require @erp/observability/otel apps/api/dist/server.js
     deploy:
       replicas: 8
@@ -1465,12 +1465,12 @@ packages/contracts/src/
 | Gate | What it proves |
 |------|---------------|
 | **Gate 8 — Cross-tenant isolation** | For EVERY module, integration test confirms user from org A cannot read/update/delete a row in org B, at both API (404) and RLS layer (0 rows). |
-| **Gate 9 — Schema drift check** | CI builds both frontend and backend from `@mobilab/contracts`; if the zod schemas don't satisfy both, CI fails. *(Not yet implemented — see §15 gap list.)* |
+| **Gate 9 — Schema drift check** | CI builds both frontend and backend from `@instigenie/contracts`; if the zod schemas don't satisfy both, CI fails. *(Not yet implemented — see §15 gap list.)* |
 | **Gate 10 — Pagination limits** | Fuzz test sends `page=99999, limit=5000`; API returns `limit=100` and does not OOM. |
-| **Gate 11 — Audit trail / NOBYPASSRLS** | Historic v1.1 intent was audit-trail hash chain; the implemented gate-11 instead asserts `mobilab_app` has `NOBYPASSRLS`. Audit-trail coverage is tracked as an open gap (§15). |
+| **Gate 11 — Audit trail / NOBYPASSRLS** | Historic v1.1 intent was audit-trail hash chain; the implemented gate-11 instead asserts `instigenie_app` has `NOBYPASSRLS`. Audit-trail coverage is tracked as an open gap (§15). |
 
 **Additional Phase 2 gates that shipped (11–19).** Multi-tenancy hardening produced extra gates beyond the original four. §15 has the full catalogue, but in summary:
-- Gate 11 — `mobilab_app` is `NOBYPASSRLS`.
+- Gate 11 — `instigenie_app` is `NOBYPASSRLS`.
 - Gate 12 — every org-scoped table has an RLS policy.
 - Gate 13 — RLS `WITH CHECK` prevents cross-tenant inserts.
 - Gate 14 — tenant lifecycle schema present.
@@ -1478,7 +1478,7 @@ packages/contracts/src/
 - Gate 16 — feature flags return 402 when disabled.
 - Gate 17 — quota exceeded throws before mutation.
 - Gate 18 — every vendor-admin mutation writes an audit row.
-- Gate 19 — `mobilab_vendor` actually can read cross-tenant rows while `mobilab_app` cannot.
+- Gate 19 — `instigenie_vendor` actually can read cross-tenant rows while `instigenie_app` cannot.
 
 #### 2.5 Explicitly Deferred
 
@@ -1611,7 +1611,7 @@ packages/contracts/src/
 
 ### 13.2 Production Module (Phase 2 + 3 + 4)
 
-Mobilab's production module is the most state-rich surface of the ERP. It models the Mobicase diagnostic suite (MBA analyser, MBM mixer, MBC cube, MCC final case, CFG centrifuge) across five assembly lines (L1–L5), two shifts, and operators with tiered competencies.
+The production module is the most state-rich surface of the ERP. For the Mobilab tenant (the pilot customer) it models the Mobicase diagnostic suite (MBA analyser, MBM mixer, MBC cube, MCC final case, CFG centrifuge) across five assembly lines (L1–L5), two shifts, and operators with tiered competencies — but the schema is generic and is driven by per-tenant product/BOM/line configuration.
 
 **Tables:**
 - Core: `products`, `bom_versions`, `bom_lines`, `ecn_logs`
@@ -2046,7 +2046,7 @@ The portal is served from the **same `apps/api`** process but with strict audien
 | `POST /portal/tickets/:id/reply` | `CUSTOMER` | Reply to own ticket |
 
 **Enforcement layers:**
-1. **Audience guard**: `requireAudience('mobilab-portal')` preHandler. JWT with `aud=mobilab-internal` → 403.
+1. **Audience guard**: `requireAudience('instigenie-portal')` preHandler. JWT with `aud=instigenie-internal` → 403.
 2. **RLS + owner filter**: portal queries run through `withPortalUser(userId, customerId, fn)` which sets both `app.current_org_id` and `app.current_customer_id`. RLS policies on `portal_vw_*` filter by customer_id.
 3. **Rate limit**: 60 rpm/user (§3.1a).
 4. **No write access outside `/portal/*`**: the shared API middleware rejects portal tokens on any non-`/portal` route.
@@ -2183,7 +2183,7 @@ Patterns explicitly rejected. Cite this section in PR reviews.
 
 ## 15. Correctness Gate Catalogue (Full)
 
-Every gate test in `tests/gates/`. Run: `pnpm --filter @mobilab/gates test`. Files serial, vitest, against docker-compose dev stack.
+Every gate test in `tests/gates/`. Run: `pnpm --filter @instigenie/gates test`. Files serial, vitest, against docker-compose dev stack.
 
 ### 15.1 Phase 1 — Foundation (1–7)
 
@@ -2194,7 +2194,7 @@ Every gate test in `tests/gates/`. Run: `pnpm --filter @mobilab/gates test`. Fil
 | 3 | Idempotency key dedupes repeat POSTs | api idempotency middleware |
 | 4 | Outbox INSERT fires `NOTIFY erp_outbox` | `ops/sql/triggers/01-outbox-notify.sql` |
 | 5 | Org A session cannot SELECT org B rows | `ops/sql/rls/*.sql` |
-| 6 | Role without permission → 403 | api guard + `@mobilab/contracts` |
+| 6 | Role without permission → 403 | api guard + `@instigenie/contracts` |
 | 7 | Dev bootstrap (roles, perms, seed) idempotent | `ops/sql/seed/*` |
 
 ### 15.2 Phase 2 — Tenancy + Entitlements (8–19)
@@ -2203,8 +2203,8 @@ Every gate test in `tests/gates/`. Run: `pnpm --filter @mobilab/gates test`. Fil
 |---|--------|--------|
 | 8 | CRM cross-tenant isolation at DB layer | `ops/sql/rls/02-crm-rls.sql` |
 | 9 | *(schema drift CI — not yet implemented, see §15.4)* | — |
-| 10 | `page=99999 limit=5000` → capped at 100, no OOM | pagination helper in `@mobilab/contracts` |
-| 11 | `mobilab_app` is `NOBYPASSRLS` | `ops/sql/seed/99-app-role.sql` |
+| 10 | `page=99999 limit=5000` → capped at 100, no OOM | pagination helper in `@instigenie/contracts` |
+| 11 | `instigenie_app` is `NOBYPASSRLS` | `ops/sql/seed/99-app-role.sql` |
 | 12 | Every org-scoped table has an RLS policy | `ops/sql/rls/*` + migration convention |
 | 13 | RLS `WITH CHECK` prevents cross-tenant INSERT | `ops/sql/rls/*` |
 | 14 | `organizations.status` schema present | `ops/sql/init/01-schemas.sql` |
@@ -2212,7 +2212,7 @@ Every gate test in `tests/gates/`. Run: `pnpm --filter @mobilab/gates test`. Fil
 | 16 | `requireFeature` → 402 when flag off | `packages/quotas` / `FeatureFlagService` |
 | 17 | `QuotaService.assertUnder` throws pre-mutation | `packages/quotas` / `QuotaService` |
 | 18 | Every vendor-admin mutation → 1 `vendor.action_log` row | `packages/vendor-admin` |
-| 19 | `mobilab_vendor` reads cross-org; `mobilab_app` cannot | `ops/sql/seed/98-vendor-role.sql` |
+| 19 | `instigenie_vendor` reads cross-org; `instigenie_app` cannot | `ops/sql/seed/98-vendor-role.sql` |
 
 ### 15.3 Phase 1 Reinforcement (20–24)
 
@@ -2230,7 +2230,7 @@ Each imports the exact module production uses — no facsimiles.
 
 | Gap | Risk | Fix |
 |-----|------|-----|
-| Schema drift CI (Gate 9) | FE form accepts values BE rejects (or vice versa) | CI step: build FE + BE from `@mobilab/contracts`, fail on TS error |
+| Schema drift CI (Gate 9) | FE form accepts values BE rejects (or vice versa) | CI step: build FE + BE from `@instigenie/contracts`, fail on TS error |
 | Audit-trail per-mutation (historic Gate 11 intent) | Silent gaps in `audit.log` | Integration test counting `audit.log` rows around each CRUD |
 | CRM web pages (accounts, contacts, deals, tickets) still mock-backed | Users see stale data in prod | Wire to `useCrmApi` hooks per leads pattern |
 | Deal/Ticket state-machine transitions | Invalid transitions reach unreachable states | Per-entity transition matrix mirroring leads smoke test |
@@ -2252,9 +2252,9 @@ Track material architectural decisions here. One row per decision.
 | 2026-04 | argon2id over bcrypt | bcrypt, scrypt, bcryptjs | Modern password hashing standard; memory-hard; resistance to GPU attacks. |
 | 2026-04 | Identity-only JWT | JWT with permissions | Role changes need fast propagation; stale perms = security issue. |
 | 2026-04-21 | **Multi-tenant, shared DB, RLS-isolated** | Single-tenant deploys; multi-tenant w/ DB-per-tenant | Shared DB: one ops surface, one replica set. RLS + `NOBYPASSRLS` app role = correctness. Vendor `BYPASSRLS` covers cross-tenant support. Separate DBs would kill schema-drift control and force per-tenant migrations. |
-| 2026-04-21 | **Two Postgres roles** (`mobilab_app` NOBYPASSRLS + `mobilab_vendor` BYPASSRLS) | Single role with conditional privilege; SET ROLE per-request | RLS binds to the *connecting role*, not the transaction. Only way to get hard isolation AND a supported cross-tenant path is two roles → two URLs → two pools. Gate 11 + Gate 19 enforce. |
-| 2026-04-21 | **SECURITY DEFINER helpers for auth cross-tenant reads** | Grant `mobilab_app` BYPASSRLS; separate auth microservice | Auth needs two cross-tenant lookups (memberships-by-email, refresh-by-hash) — neither would justify weakening `mobilab_app`. SECURITY DEFINER scopes the privilege to exactly those two functions; app role stays `NOBYPASSRLS`. Defined in `ops/sql/rls/03-auth-cross-tenant.sql`. |
-| 2026-04-21 | **Memberships table** (users can hold M:N orgs) | One user row per (email, org); external IdP for cross-org identity | Staff, consultants, and Mobilab support legitimately span tenants. Duplicate-user-per-org creates identity drift (password reset confusion, audit attribution). Login returns `multi-tenant` when count > 1 — explicit tenant pick. |
+| 2026-04-21 | **Two Postgres roles** (`instigenie_app` NOBYPASSRLS + `instigenie_vendor` BYPASSRLS) | Single role with conditional privilege; SET ROLE per-request | RLS binds to the *connecting role*, not the transaction. Only way to get hard isolation AND a supported cross-tenant path is two roles → two URLs → two pools. Gate 11 + Gate 19 enforce. |
+| 2026-04-21 | **SECURITY DEFINER helpers for auth cross-tenant reads** | Grant `instigenie_app` BYPASSRLS; separate auth microservice | Auth needs two cross-tenant lookups (memberships-by-email, refresh-by-hash) — neither would justify weakening `instigenie_app`. SECURITY DEFINER scopes the privilege to exactly those two functions; app role stays `NOBYPASSRLS`. Defined in `ops/sql/rls/03-auth-cross-tenant.sql`. |
+| 2026-04-21 | **Memberships table** (users can hold M:N orgs) | One user row per (email, org); external IdP for cross-org identity | Staff, consultants, and Instigenie support legitimately span tenants. Duplicate-user-per-org creates identity drift (password reset confusion, audit attribution). Login returns `multi-tenant` when count > 1 — explicit tenant pick. |
 | 2026-04-21 | **Plans + features + usage_records in app DB (public schema)** | Dedicated billing service; separate entitlements DB | Feature flag / quota read sits on the hot path of every guarded route. Must be one pg query with RLS bound and cacheable. External service adds latency, availability risk, and drift vs org rows. Billing integration remains future work but the read shape stays stable. |
 | 2026-04-21 | **`requireFeature` before `requirePermission`** | Permission check first; single combined check | A starter-plan user hitting a pro-only route must see "upgrade required" (402), not "access denied" (403). Ordering also avoids leaking which permissions the route needs before plan gate is cleared. |
 | 2026-04-21 | **Gate tests import production code** (Rule §2.16) | Gate tests reimplement the invariant inline | A test that reinvents the invariant only proves the reinvention is correct. Extracting `assertDirectPgUrl`, `assertBullRedisNoeviction`, `createOutboxDrain` into importable modules means production and gate share one implementation. Refactor-driven: every Phase 1 reinforcement gate (20–24) is against a real module. |
@@ -2418,7 +2418,7 @@ Before Phase 2 production module work begins:
 
 | Field | Value |
 |-------|-------|
-| Document ID | ERP-ARCH-MOBILAB-2026-001 |
+| Document ID | ERP-ARCH-INSTIGENIE-2026-001 |
 | Version | 1.2 |
 | Supersedes | v1.1 (2026-04-20) |
 | Translates From | `ERP-ARCH-MIDSCALE-2025-005` (Python reference) + `ERP-ARCH-UNIFIED-2026-001` (unified doc) |
@@ -2436,7 +2436,7 @@ Patch capturing architectural additions that shipped during Phase 1 completion +
 - §5.1 — Schema map updated: added `vendor` schema, listed memberships/user_identities under auth, added plans/subscriptions/usage_records (entitlements).
 - §6.3 — Noted `createOutboxDrain` factory extraction with `QueueLike` structural type (shared by LISTEN path + 30s poll, imported by gate 22).
 - §9.1 — Expanded. Added §9.1.1 Multi-Tenant Membership (login returns `authenticated | multi-tenant | tenant-inactive`) and §9.1.2 SECURITY DEFINER Auth Helpers (`auth_load_active_memberships`, `auth_load_refresh_token`).
-- §9.2 — Expanded. Added §9.2.1 Postgres Role Split (`mobilab_app` NOBYPASSRLS vs `mobilab_vendor` BYPASSRLS), §9.2.2 Vendor Escape Hatch (cross-tenant admin path with action log), §9.2.3 Tenant Lifecycle States (active/suspended/deleted + `TenantStatusService`).
+- §9.2 — Expanded. Added §9.2.1 Postgres Role Split (`instigenie_app` NOBYPASSRLS vs `instigenie_vendor` BYPASSRLS), §9.2.2 Vendor Escape Hatch (cross-tenant admin path with action log), §9.2.3 Tenant Lifecycle States (active/suspended/deleted + `TenantStatusService`).
 - §9.6 *(new)* — Subscription & Entitlements: plans, plan_features, subscriptions, usage_records; `packages/quotas` services; Fastify `requireFeature` + `requirePermission` preHandler pattern.
 - §10.1.1 *(new)* — `initTracing()` test-injection contract + Vitest/ESM `createRequire` workaround for auto-instrumentation under vite's transformer.
 - §11.3.1 *(new)* — Explicit boot-time invariant asserts table (PgBouncer URL guard, noeviction probe, bootstrap policy).

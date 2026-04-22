@@ -17,7 +17,7 @@ import type {
   PaymentMode,
   PaymentStatus,
   PaymentType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface PaymentRow {

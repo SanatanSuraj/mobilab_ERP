@@ -7,21 +7,21 @@
  */
 
 import pg from "pg";
-import { installNumericTypeParser } from "@mobilab/db";
+import { installNumericTypeParser } from "@instigenie/db";
 
 // Gates must hit the DB as a non-superuser so RLS binds. The bootstrap role
-// `mobilab` is a SUPERUSER (Postgres exempts superusers from all RLS), so we
-// connect as `mobilab_app` — created in ops/sql/seed/99-app-role.sql with
+// `instigenie` is a SUPERUSER (Postgres exempts superusers from all RLS), so we
+// connect as `instigenie_app` — created in ops/sql/seed/99-app-role.sql with
 // NOBYPASSRLS.
 export const DATABASE_URL =
   process.env.DATABASE_URL ??
-  "postgres://mobilab_app:mobilab_dev@localhost:5434/mobilab";
+  "postgres://instigenie_app:instigenie_dev@localhost:5434/instigenie";
 
-// The BYPASSRLS mobilab_vendor role — created in ops/sql/seed/98-vendor-role.sql.
+// The BYPASSRLS instigenie_vendor role — created in ops/sql/seed/98-vendor-role.sql.
 // Used by Gate 19 to prove "vendor can see all tenants / tenant role cannot".
 export const VENDOR_DATABASE_URL =
   process.env.VENDOR_DATABASE_URL ??
-  "postgres://mobilab_vendor:mobilab_dev@localhost:5434/mobilab";
+  "postgres://instigenie_vendor:instigenie_dev@localhost:5434/instigenie";
 
 export const REDIS_BULL_URL =
   process.env.REDIS_BULL_URL ?? "redis://localhost:6381";
@@ -37,7 +37,7 @@ export function makeTestPool(): pg.Pool {
   return new pg.Pool({
     connectionString: DATABASE_URL,
     max: 4,
-    application_name: "mobilab-gates",
+    application_name: "instigenie-gates",
   });
 }
 
@@ -51,7 +51,7 @@ export function makeVendorTestPool(): pg.Pool {
   return new pg.Pool({
     connectionString: VENDOR_DATABASE_URL,
     max: 4,
-    application_name: "mobilab-gates-vendor",
+    application_name: "instigenie-gates-vendor",
   });
 }
 

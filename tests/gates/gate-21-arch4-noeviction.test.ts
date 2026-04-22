@@ -4,7 +4,7 @@
  * Spec: "Integration test flips redis-bull to `allkeys-lru`, starts worker,
  *        asserts it refuses to start."
  *
- * We prove this with `assertBullRedisNoeviction(redis)` from @mobilab/queue,
+ * We prove this with `assertBullRedisNoeviction(redis)` from @instigenie/queue,
  * which is the same helper wired into apps/worker and apps/listen-notify
  * boot paths. The test connects to the live dev redis-bull (port 6381,
  * see ops/compose/docker-compose.dev.yml), flips the policy, asserts the
@@ -20,7 +20,7 @@ import {
   assertBullRedisNoeviction,
   BullEvictionPolicyError,
   createBullConnection,
-} from "@mobilab/queue";
+} from "@instigenie/queue";
 import { REDIS_BULL_URL } from "./_helpers.js";
 
 describe("gate-21 (arch-4): BullMQ refuses non-noeviction redis", () => {

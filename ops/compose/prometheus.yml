@@ -3,19 +3,19 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: "mobilab-api"
+  - job_name: "instigenie-api"
     static_configs:
       # host.docker.internal resolves to the host from inside Docker Desktop
       # on macOS. On Linux, add extra_hosts: - "host.docker.internal:host-gateway"
       - targets: ["host.docker.internal:4000"]
     metrics_path: /metrics
 
-  - job_name: "mobilab-worker"
+  - job_name: "instigenie-worker"
     static_configs:
       - targets: ["host.docker.internal:4001"]
     metrics_path: /metrics
 
-  - job_name: "mobilab-listen-notify"
+  - job_name: "instigenie-listen-notify"
     static_configs:
       - targets: ["host.docker.internal:4002"]
     metrics_path: /metrics

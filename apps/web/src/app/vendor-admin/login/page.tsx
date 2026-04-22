@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * /vendor-admin/login — Mobilab staff sign-in for the vendor-admin console.
+ * /vendor-admin/login — Instigenie staff sign-in for the vendor-admin console.
  *
  * This is the Sprint 3 vendor surface. It does NOT use the tenant auth flow:
  *   - No surface picker (vendor admins don't belong to orgs)
@@ -79,7 +79,7 @@ function LoginForm() {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight">
-              Mobilab Vendor Console
+              Instigenie Vendor Console
             </h1>
             <p className="text-sm text-slate-400">
               Staff-only sign-in · tenant lifecycle & audit
@@ -97,7 +97,7 @@ function LoginForm() {
                 <Input
                   id="v-email"
                   type="email"
-                  placeholder="staff@mobilab.in"
+                  placeholder="staff@instigenie.in"
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -159,14 +159,14 @@ function LoginForm() {
             </form>
 
             <p className="text-[11px] text-slate-500 leading-snug pt-1">
-              Dev seeds (password <code>mobilab_dev_2026</code>):{" "}
-              <code>ops@mobilab.in</code>, <code>support@mobilab.in</code>
+              Dev seeds (password <code>instigenie_dev_2026</code>):{" "}
+              <code>ops@instigenie.in</code>, <code>support@instigenie.in</code>
             </p>
           </CardContent>
         </Card>
 
         <p className="text-center text-xs text-slate-600">
-          Mobilab Vendor Console · Sprint 3 · /vendor-admin/auth/login
+          Instigenie Vendor Console · Sprint 3 · /vendor-admin/auth/login
         </p>
       </div>
     </div>

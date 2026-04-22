@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useApiTickets, useApiAccounts } from "@/hooks/useCrmApi";
-import type { Ticket, TicketStatus } from "@mobilab/contracts";
+import type { Ticket, TicketStatus } from "@instigenie/contracts";
 import {
   Ticket as TicketIcon,
   AlertCircle,

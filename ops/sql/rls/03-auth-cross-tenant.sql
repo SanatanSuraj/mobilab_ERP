@@ -26,14 +26,14 @@
 --      tenant-scoped SELECT from users/organizations pays for a subquery
 --      even when the GUC is NULL.
 --   3. `SET LOCAL row_security = off` → requires role privilege that
---      `mobilab_app` (intentionally) doesn't have.
+--      `instigenie_app` (intentionally) doesn't have.
 --   4. Dedicated auth role with BYPASSRLS → violates gate-11, widens the
 --      blast radius of any future code that uses the wrong pool.
 --
 -- A SECURITY DEFINER function is the narrowest workable option. It runs as
--- the function owner (the migration role `mobilab`, a superuser) and so
+-- the function owner (the migration role `instigenie`, a superuser) and so
 -- bypasses RLS — but ONLY for this one query shape with one argument. The
--- app role `mobilab_app` is granted EXECUTE; it cannot call anything else
+-- app role `instigenie_app` is granted EXECUTE; it cannot call anything else
 -- that crosses tenants.
 --
 -- SAFETY ARGUMENT
@@ -92,11 +92,11 @@ $$;
 REVOKE ALL ON FUNCTION public.auth_load_active_memberships(uuid) FROM PUBLIC;
 
 -- The app role — the only tenant-side caller that should invoke this.
-GRANT EXECUTE ON FUNCTION public.auth_load_active_memberships(uuid) TO mobilab_app;
+GRANT EXECUTE ON FUNCTION public.auth_load_active_memberships(uuid) TO instigenie_app;
 
 -- Vendor pool (BYPASSRLS already) may also call it; harmless and useful
 -- for maintenance scripts that ride on that pool.
-GRANT EXECUTE ON FUNCTION public.auth_load_active_memberships(uuid) TO mobilab_vendor;
+GRANT EXECUTE ON FUNCTION public.auth_load_active_memberships(uuid) TO instigenie_vendor;
 
 COMMENT ON FUNCTION public.auth_load_active_memberships(uuid) IS
   'Cross-tenant ACTIVE-membership lookup for login. SECURITY DEFINER so it bypasses RLS; the AuthService calls this ONLY after verifying the identity password. See ops/sql/rls/03-auth-cross-tenant.sql.';
@@ -138,8 +138,8 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.auth_load_refresh_token(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.auth_load_refresh_token(text) TO mobilab_app;
-GRANT EXECUTE ON FUNCTION public.auth_load_refresh_token(text) TO mobilab_vendor;
+GRANT EXECUTE ON FUNCTION public.auth_load_refresh_token(text) TO instigenie_app;
+GRANT EXECUTE ON FUNCTION public.auth_load_refresh_token(text) TO instigenie_vendor;
 
 COMMENT ON FUNCTION public.auth_load_refresh_token(text) IS
   'Cross-tenant refresh-token lookup by token_hash. SECURITY DEFINER bypasses RLS; safe because token_hash is a 256-bit secret. Caller switches to withOrg(row.org_id) for any follow-up mutations.';

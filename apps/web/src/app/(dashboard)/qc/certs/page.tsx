@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useApiQcCerts } from "@/hooks/useQcApi";
-import type { QcCert } from "@mobilab/contracts";
+import type { QcCert } from "@instigenie/contracts";
 import { AlertCircle, FileCheck2 } from "lucide-react";
 
 function formatDate(iso: string | null | undefined): string {

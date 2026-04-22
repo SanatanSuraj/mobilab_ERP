@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
-import { moneyFromPg, moneyToPg } from "@mobilab/money";
+import { moneyFromPg, moneyToPg } from "@instigenie/money";
 import { makeTestPool, waitForPg } from "./_helpers.js";
 
 const CANARY = "0.100000000000000005";

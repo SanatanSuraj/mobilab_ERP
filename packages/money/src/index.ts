@@ -1,5 +1,5 @@
 /**
- * @mobilab/money — decimal.js pipeline for money, quantities, tax, ledger.
+ * @instigenie/money — decimal.js pipeline for money, quantities, tax, ledger.
  *
  * ARCHITECTURE.md Rule #1 (non-negotiable):
  *   - All money, quantity, tax, and ledger amounts use decimal.js.

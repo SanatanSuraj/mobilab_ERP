@@ -1,4 +1,4 @@
-# Mobilab ERP — dev stack.
+# Instigenie ERP — dev stack.
 #
 # Port remap (to coexist with existing services on the host):
 #   - Postgres         5434  (host 5432 is a native Postgres)
@@ -14,17 +14,17 @@
 # Stop:   pnpm infra:down
 # Reset:  pnpm infra:reset   (wipes volumes)
 
-name: mobilab-dev
+name: instigenie-dev
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: mobilab-postgres
+    container_name: instigenie-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: mobilab
-      POSTGRES_USER: mobilab
-      POSTGRES_PASSWORD: mobilab_dev
+      POSTGRES_DB: instigenie
+      POSTGRES_USER: instigenie
+      POSTGRES_PASSWORD: instigenie_dev
       # Speed up dev — this is intentionally unsafe for production.
       POSTGRES_HOST_AUTH_METHOD: md5
     ports:
@@ -51,27 +51,27 @@ services:
       -c log_statement=none
       -c log_min_duration_statement=200
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mobilab -d mobilab"]
+      test: ["CMD-SHELL", "pg_isready -U instigenie -d instigenie"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   pgbouncer:
     image: edoburu/pgbouncer:latest
-    container_name: mobilab-pgbouncer
+    container_name: instigenie-pgbouncer
     restart: unless-stopped
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: mobilab
-      DB_PASSWORD: mobilab_dev
-      DB_NAME: mobilab
+      DB_USER: instigenie
+      DB_PASSWORD: instigenie_dev
+      DB_NAME: instigenie
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 500
       DEFAULT_POOL_SIZE: 20
       SERVER_RESET_QUERY: DISCARD ALL
       AUTH_TYPE: md5
-      ADMIN_USERS: mobilab
+      ADMIN_USERS: instigenie
     ports:
       - "6432:5432"
     depends_on:
@@ -80,7 +80,7 @@ services:
 
   redis-bull:
     image: redis:7-alpine
-    container_name: mobilab-redis-bull
+    container_name: instigenie-redis-bull
     restart: unless-stopped
     # BullMQ benefits from AOF — crash-consistent job state.
     command: >
@@ -100,7 +100,7 @@ services:
 
   redis-cache:
     image: redis:7-alpine
-    container_name: mobilab-redis-cache
+    container_name: instigenie-redis-cache
     restart: unless-stopped
     # Cache: LRU eviction, no persistence required. Snapshotting off for speed.
     command: >
@@ -119,12 +119,12 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: mobilab-minio
+    container_name: instigenie-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: mobilab
-      MINIO_ROOT_PASSWORD: mobilab_dev_minio
+      MINIO_ROOT_USER: instigenie
+      MINIO_ROOT_PASSWORD: instigenie_dev_minio
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -138,7 +138,7 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
-    container_name: mobilab-otel
+    container_name: instigenie-otel
     restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
@@ -149,7 +149,7 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: mobilab-prometheus
+    container_name: instigenie-prometheus
     restart: unless-stopped
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -162,12 +162,12 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: mobilab-grafana
+    container_name: instigenie-grafana
     restart: unless-stopped
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_SECURITY_ADMIN_PASSWORD: mobilab_dev
+      GF_SECURITY_ADMIN_PASSWORD: instigenie_dev
     ports:
       - "3001:3000"
     volumes:

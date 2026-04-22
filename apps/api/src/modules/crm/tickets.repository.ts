@@ -18,7 +18,7 @@ import type {
   TicketPriority,
   TicketStatus,
   UpdateTicket,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface TicketRow {

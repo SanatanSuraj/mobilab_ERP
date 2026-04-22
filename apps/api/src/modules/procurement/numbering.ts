@@ -12,7 +12,7 @@
  */
 
 import type { PoolClient } from "pg";
-import type { ProcurementNumberKind } from "@mobilab/contracts";
+import type { ProcurementNumberKind } from "@instigenie/contracts";
 
 const PREFIX: Record<ProcurementNumberKind, string> = {
   INDENT: "IND",

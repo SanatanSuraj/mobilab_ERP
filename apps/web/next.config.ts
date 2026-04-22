@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // @mobilab/contracts is consumed as a precompiled workspace package:
+  // @instigenie/contracts is consumed as a precompiled workspace package:
   // its package.json "exports" map points at ./dist/*.js (with ./dist/*.d.ts
   // for types), so we do NOT need `transpilePackages` here. Turbopack is
   // strict about ESM ".js" specifiers inside source-only packages (rejects

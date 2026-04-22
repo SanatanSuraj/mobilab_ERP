@@ -25,9 +25,9 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { enqueueOutbox, withOrg } from "@mobilab/db";
-import { createOutboxDrain, type QueueLike } from "@mobilab/listen-notify/drain";
-import { createLogger } from "@mobilab/observability";
+import { enqueueOutbox, withOrg } from "@instigenie/db";
+import { createOutboxDrain, type QueueLike } from "@instigenie/listen-notify/drain";
+import { createLogger } from "@instigenie/observability";
 import {
   DATABASE_URL,
   makeTestPool,

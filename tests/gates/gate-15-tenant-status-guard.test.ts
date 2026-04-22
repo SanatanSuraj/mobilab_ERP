@@ -32,7 +32,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
-import { withOrg } from "@mobilab/db";
+import { withOrg } from "@instigenie/db";
 import { makeTestPool, waitForPg } from "./_helpers.js";
 
 type AssertOutcome =

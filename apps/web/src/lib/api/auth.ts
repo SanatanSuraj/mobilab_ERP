@@ -3,7 +3,7 @@
  *
  * Kept deliberately framework-free — plain fetch — so it works in Next.js
  * server and client components alike. The shapes are imported from
- * @mobilab/contracts so frontend and backend stay in lockstep.
+ * @instigenie/contracts so frontend and backend stay in lockstep.
  *
  * Login flow (Option 2 identity model):
  *   1. apiLogin() returns either an AuthenticatedResponse (single
@@ -21,7 +21,7 @@ import type {
   RefreshRequest,
   SelectTenantRequest,
   Problem,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 /** Where to reach the real API. Override with NEXT_PUBLIC_API_BASE_URL. */
 export const API_BASE_URL =

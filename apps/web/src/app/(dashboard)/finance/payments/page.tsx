@@ -51,7 +51,7 @@ import {
   type PaymentMode,
   type PaymentStatus,
   type PaymentType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   AlertTriangle,

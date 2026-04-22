@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { enqueueOutbox, withOrg } from "@mobilab/db";
+import { enqueueOutbox, withOrg } from "@instigenie/db";
 import { makeTestPool, waitForPg, DEV_ORG_ID } from "./_helpers.js";
 
 const AGG_ID = "00000000-0000-0000-0000-00000000f001";

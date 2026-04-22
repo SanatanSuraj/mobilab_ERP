@@ -9,7 +9,7 @@
  *                                inventory:transfer
  *
  * Permission map (aligned with existing ROLE_PERMISSIONS in
- * @mobilab/contracts/permissions):
+ * @instigenie/contracts/permissions):
  *
  *   GET  /inventory/**                   → inventory:read
  *   POST/PATCH/DELETE masters/bindings   → inventory:adjust
@@ -39,14 +39,14 @@ import {
   WarehouseListQuerySchema,
   type Permission,
   type StockTxnType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { createAuthGuard, requirePermission } from "../auth/guard.js";
 import type { AuthGuardOptions } from "../auth/guard.js";
 import type { RequireFeature } from "../quotas/guard.js";
 import type { ItemsService } from "./items.service.js";
 import type { WarehousesService } from "./warehouses.service.js";
 import type { StockService } from "./stock.service.js";
-import { UnauthorizedError } from "@mobilab/errors";
+import { UnauthorizedError } from "@instigenie/errors";
 import { requireUser } from "../../context/request-context.js";
 
 export interface RegisterInventoryRoutesOptions {

@@ -8,7 +8,7 @@
  * inspection board with lifecycle status filter + create dialog. Row click
  * routes to /qc/inspections/:id for the detail + findings view.
  *
- * Contract shape (from @mobilab/contracts):
+ * Contract shape (from @instigenie/contracts):
  *   - kind: IQC | SUB_QC | FINAL_QC
  *   - status: DRAFT | IN_PROGRESS | PASSED | FAILED
  *   - sourceType: GRN_LINE | WIP_STAGE | WO  (polymorphic link)
@@ -57,7 +57,7 @@ import {
   type QcInspectionStatus,
   type QcSourceType,
   type QcVerdict,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   CheckCircle2,

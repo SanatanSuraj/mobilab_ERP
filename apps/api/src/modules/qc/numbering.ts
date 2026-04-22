@@ -10,7 +10,7 @@
  */
 
 import type { PoolClient } from "pg";
-import type { QcNumberKind } from "@mobilab/contracts";
+import type { QcNumberKind } from "@instigenie/contracts";
 
 const PREFIX: Record<QcNumberKind, string> = {
   QC: "QC",

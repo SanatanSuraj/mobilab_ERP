@@ -50,7 +50,7 @@ import {
   UpdateSalesInvoiceSchema,
   VendorLedgerListQuerySchema,
   VoidPaymentSchema,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { createAuthGuard, requirePermission } from "../auth/guard.js";
 import type { AuthGuardOptions } from "../auth/guard.js";
 import type { SalesInvoicesService } from "./sales-invoices.service.js";

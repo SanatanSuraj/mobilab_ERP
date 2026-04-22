@@ -1,8 +1,8 @@
 /**
- * @mobilab/vendor-admin — service layer for the /vendor-admin/* surface.
+ * @instigenie/vendor-admin — service layer for the /vendor-admin/* surface.
  *
- * Sibling of @mobilab/quotas: Fastify-agnostic business logic over the
- * BYPASSRLS `mobilab_vendor` pool. The Fastify routes / guards live in
+ * Sibling of @instigenie/quotas: Fastify-agnostic business logic over the
+ * BYPASSRLS `instigenie_vendor` pool. The Fastify routes / guards live in
  * apps/api/src/modules/vendor/ and inject these services.
  *
  * Public exports:

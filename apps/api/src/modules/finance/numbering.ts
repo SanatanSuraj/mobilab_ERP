@@ -11,7 +11,7 @@
  */
 
 import type { PoolClient } from "pg";
-import type { FinanceNumberKind } from "@mobilab/contracts";
+import type { FinanceNumberKind } from "@instigenie/contracts";
 
 const PREFIX: Record<FinanceNumberKind, string> = {
   SI: "SI",

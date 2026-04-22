@@ -40,7 +40,7 @@ import {
   ITEM_CATEGORIES,
   type ItemCategory,
   type StockSummaryRow,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { AlertCircle, AlertTriangle, DollarSign, Package } from "lucide-react";
 
 function parseQty(q: string | null | undefined): number {

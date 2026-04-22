@@ -279,7 +279,7 @@ export const Sidebar = React.memo(function Sidebar() {
           <FlaskConical className="h-4 w-4 text-primary-foreground" />
         </div>
         {!collapsed && (
-          <span className="font-bold text-base tracking-tight">Mobilab ERP</span>
+          <span className="font-bold text-base tracking-tight">Instigenie ERP</span>
         )}
       </div>
 

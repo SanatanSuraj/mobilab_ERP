@@ -59,7 +59,7 @@ import {
   type QcFindingResult,
   type QcInspectionStatus,
   type QcVerdict,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowLeft,

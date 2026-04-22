@@ -15,7 +15,7 @@ import type {
   NotificationSeverity,
   NotificationTemplate,
   UpdateNotificationTemplate,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface TemplateRow {

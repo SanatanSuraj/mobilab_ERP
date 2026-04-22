@@ -27,7 +27,7 @@ import type {
   SalesOrderLineItem,
   SalesOrderStatus,
   UpdateSalesOrder,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface SalesOrderRow {

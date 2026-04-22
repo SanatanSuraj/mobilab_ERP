@@ -31,12 +31,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import type { PlanCode, TenantStatus } from "@mobilab/contracts/billing";
+import type { PlanCode, TenantStatus } from "@instigenie/contracts/billing";
 import type {
   VendorActionLogEntry,
   VendorTenantRow,
-} from "@mobilab/contracts/vendor-admin";
-import { PLAN_CODES } from "@mobilab/contracts/billing";
+} from "@instigenie/contracts/vendor-admin";
+import { PLAN_CODES } from "@instigenie/contracts/billing";
 
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";

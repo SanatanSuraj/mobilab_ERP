@@ -5,7 +5,7 @@
  *
  * This page existed when auth was entirely mock. The real login surface is
  * now at /auth/login (see apps/web/src/app/auth/login/page.tsx). To avoid
- * users typing real credentials (admin@mobilab.local / mobilab_dev_2026)
+ * users typing real credentials (admin@mobilab.local / instigenie_dev_2026)
  * into the old mock form — which only validates against @mobilab.in emails
  * with password "demo1234" and would show a misleading error — this page
  * now:
@@ -34,7 +34,7 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /** Cookie set client-side — proxy reads this for optimistic auth check. */
-const SESSION_COOKIE = "mobilab-session";
+const SESSION_COOKIE = "instigenie-session";
 
 const ALL_ROLES: UserRole[] = [
   "SUPER_ADMIN",
@@ -168,7 +168,7 @@ function DevPanelOnly() {
             <FlaskConical className="h-6 w-6 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">Mobilab ERP</h1>
+            <h1 className="text-xl font-bold tracking-tight">Instigenie ERP</h1>
             <p className="text-sm text-muted-foreground">
               Dev quick-login (mock store only)
             </p>
@@ -244,7 +244,7 @@ function DevPanelOnly() {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground">
-          Mobilab ERP · /login?dev=1 (mock)
+          Instigenie ERP · /login?dev=1 (mock)
         </p>
       </div>
     </div>

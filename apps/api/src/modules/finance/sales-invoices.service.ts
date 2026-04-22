@@ -23,7 +23,7 @@
  *       lineTax      = lineSubtotal * taxRatePercent / 100
  *       lineTotal    = lineSubtotal + lineTax
  *   - Header aggregates line_* fields.
- *   - All math via @mobilab/money (decimal.js). NEVER Number().
+ *   - All math via @instigenie/money (decimal.js). NEVER Number().
  *
  * Auto-numbering: SI-YYYY-NNNN via nextFinanceNumber(kind="SI").
  */
@@ -32,7 +32,7 @@ import type pg from "pg";
 import type { PoolClient } from "pg";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ConflictError, NotFoundError } from "@mobilab/errors";
+import { ConflictError, NotFoundError } from "@instigenie/errors";
 import {
   paginated,
   type CancelSalesInvoice,
@@ -45,8 +45,8 @@ import {
   type SalesInvoiceWithLines,
   type UpdateSalesInvoice,
   type UpdateSalesInvoiceLine,
-} from "@mobilab/contracts";
-import { m, moneyToPg, ZERO } from "@mobilab/money";
+} from "@instigenie/contracts";
+import { m, moneyToPg, ZERO } from "@instigenie/money";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { salesInvoicesRepo } from "./sales-invoices.repository.js";

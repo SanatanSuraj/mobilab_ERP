@@ -57,7 +57,7 @@ import {
   GRN_STATUSES,
   type Grn,
   type GrnStatus,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowRight,

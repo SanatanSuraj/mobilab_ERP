@@ -12,9 +12,9 @@ import type {
   VendorLedgerEntry,
   VendorLedgerEntryType,
   VendorLedgerReferenceType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
-import { m, moneyToPg, ZERO } from "@mobilab/money";
+import { m, moneyToPg, ZERO } from "@instigenie/money";
 
 interface LedgerRow {
   id: string;

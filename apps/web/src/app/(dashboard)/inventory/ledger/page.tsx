@@ -37,7 +37,7 @@ import {
   STOCK_TXN_TYPES,
   type StockLedgerEntry,
   type StockTxnType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowDownToLine,

@@ -31,8 +31,8 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { Logger } from "@mobilab/observability";
-import type { QuotaService } from "@mobilab/quotas";
+import type { Logger } from "@instigenie/observability";
+import type { QuotaService } from "@instigenie/quotas";
 
 const API_CALLS_METRIC = "api.calls";
 

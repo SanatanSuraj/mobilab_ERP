@@ -59,7 +59,7 @@ import type {
   UpdateWarehouse,
   UpsertItemWarehouseBinding,
   Warehouse,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
 //

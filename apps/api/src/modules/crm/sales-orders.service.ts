@@ -29,7 +29,7 @@
 
 import type pg from "pg";
 import type { FastifyRequest } from "fastify";
-import { Decimal } from "@mobilab/money";
+import { Decimal } from "@instigenie/money";
 import type {
   CreateSalesOrder,
   CreateSalesOrderLineItem,
@@ -39,14 +39,14 @@ import type {
   SalesOrderStatus,
   TransitionSalesOrderStatus,
   UpdateSalesOrder,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { z } from "zod";
 import {
   ConflictError,
   NotFoundError,
   StateTransitionError,
-} from "@mobilab/errors";
-import { paginated } from "@mobilab/contracts";
+} from "@instigenie/errors";
+import { paginated } from "@instigenie/contracts";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import {

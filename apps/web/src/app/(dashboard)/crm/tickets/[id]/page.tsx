@@ -36,7 +36,7 @@ import type {
   TicketPriority,
   TicketStatus,
   UpdateTicket,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   AlertTriangle,

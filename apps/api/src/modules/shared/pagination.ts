@@ -1,7 +1,7 @@
 /**
  * Request → SQL glue for pagination. ARCHITECTURE.md §12.2 Deliverables.
  *
- * The zod schema in @mobilab/contracts parses the query string; this file
+ * The zod schema in @instigenie/contracts parses the query string; this file
  * adapts the normalized PaginationParams to `ORDER BY ... LIMIT ... OFFSET`
  * and whitelists the sort column to prevent SQL injection.
  *
@@ -12,7 +12,7 @@
  * Gate 10 verifies that limit=9999 returns at most 100 rows.
  */
 
-import { normalizePagination, type PaginationQuery } from "@mobilab/contracts";
+import { normalizePagination, type PaginationQuery } from "@instigenie/contracts";
 
 export interface SortSpec {
   /** Column name as emitted in SQL. Must match the ORDER BY whitelist. */

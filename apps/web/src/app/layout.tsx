@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mobilab ERP - Enterprise Resource Planning",
+  title: "Instigenie ERP - Enterprise Resource Planning",
   description: "Modern ERP + CRM SaaS Platform",
 };
 

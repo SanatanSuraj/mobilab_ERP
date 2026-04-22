@@ -17,7 +17,7 @@ import {
   ROLES,
   ROLE_PERMISSIONS,
   validatePermissionMap,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { makeTestPool, waitForPg } from "./_helpers.js";
 
 describe("gate-6: RBAC catalog sync", () => {

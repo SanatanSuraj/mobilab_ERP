@@ -11,9 +11,9 @@
  */
 
 import type pg from "pg";
-import type { Logger } from "@mobilab/observability";
-import { outboxDepth } from "@mobilab/observability";
-import { retry } from "@mobilab/resilience";
+import type { Logger } from "@instigenie/observability";
+import { outboxDepth } from "@instigenie/observability";
+import { retry } from "@instigenie/resilience";
 
 /**
  * Narrow structural type that matches BullMQ's Queue#add. Typing it this way

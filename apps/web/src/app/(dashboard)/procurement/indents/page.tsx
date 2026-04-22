@@ -58,7 +58,7 @@ import {
   type IndentPriority,
   type IndentStatus,
   type Indent,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowRightCircle,

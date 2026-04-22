@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   org_id       uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   identity_id  uuid NOT NULL REFERENCES user_identities(id) ON DELETE CASCADE,
   token_hash   text NOT NULL,
-  audience     text NOT NULL CHECK (audience IN ('mobilab-internal', 'mobilab-portal')),
+  audience     text NOT NULL CHECK (audience IN ('instigenie-internal', 'instigenie-portal')),
   user_agent   text,
   ip_address   text,
   expires_at   timestamptz NOT NULL,
@@ -353,18 +353,18 @@ CREATE INDEX IF NOT EXISTS usage_records_period_idx ON usage_records (period);
 
 -- ── Vendor side (Sprint 3) ───────────────────────────────────────────────────
 -- Everything here is OUT of tenant scope. The `vendor` schema holds the
--- Mobilab operator accounts and the tamper-evident action log of what those
--- operators did across tenants. The `mobilab_vendor` role (created in
+-- Instigenie operator accounts and the tamper-evident action log of what those
+-- operators did across tenants. The `instigenie_vendor` role (created in
 -- ops/sql/seed/98-vendor-role.sql) has BYPASSRLS, so queries issued by the
 -- vendor-admin API can SELECT across all tenants in one go.
 --
--- Crucially, the application role `mobilab_app` does NOT get USAGE on this
+-- Crucially, the application role `instigenie_app` does NOT get USAGE on this
 -- schema — a tenant-side request cannot see the vendor action log or the
 -- vendor admin users even by accident. Gate 19 locks this in.
 
 CREATE SCHEMA IF NOT EXISTS vendor;
 
--- vendor.admins — Mobilab employees with vendor-admin access. Global (no
+-- vendor.admins — Instigenie employees with vendor-admin access. Global (no
 -- RLS). One email is one vendor admin. Password stored only as a bcrypt
 -- hash; the column is nullable so a vendor admin seeded without a password
 -- is forced through the "reset" flow on first login (Sprint 3+).
@@ -383,7 +383,7 @@ CREATE TABLE IF NOT EXISTS vendor.admins (
 -- row BEFORE returning 2xx. Downstream trust the log to reconstruct "who
 -- suspended this tenant?" and "when did we change this plan?".
 --
--- The grants in 98-vendor-role.sql give mobilab_vendor INSERT + SELECT but
+-- The grants in 98-vendor-role.sql give instigenie_vendor INSERT + SELECT but
 -- explicitly NOT UPDATE or DELETE — the log is the source of truth for
 -- auditors and must be immutable within the DB.
 CREATE TABLE IF NOT EXISTS vendor.action_log (

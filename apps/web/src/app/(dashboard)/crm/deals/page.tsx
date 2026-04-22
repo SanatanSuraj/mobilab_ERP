@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { formatCurrency, formatDate } from "@/data/mock";
 import { useApiDeals } from "@/hooks/useCrmApi";
-import type { Deal } from "@mobilab/contracts";
+import type { Deal } from "@instigenie/contracts";
 import { Briefcase, DollarSign, TrendingUp, Target, AlertCircle } from "lucide-react";
 
 /**

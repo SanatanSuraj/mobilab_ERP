@@ -17,19 +17,19 @@
  */
 
 // Tracing must be initialized first so auto-instrumentation captures pg + http.
-import { initTracing } from "@mobilab/observability/tracing";
+import { initTracing } from "@instigenie/observability/tracing";
 initTracing({ serviceName: "listen-notify" });
 
 import pg from "pg";
 import http from "node:http";
-import { createLogger, registry } from "@mobilab/observability";
+import { createLogger, registry } from "@instigenie/observability";
 import {
   QueueNames,
   makeQueue,
   assertBullRedisNoeviction,
   createBullConnection,
-} from "@mobilab/queue";
-import { assertDirectPgUrl } from "@mobilab/db";
+} from "@instigenie/queue";
+import { assertDirectPgUrl } from "@instigenie/db";
 import { createOutboxDrain } from "./drain.js";
 import { loadEnv } from "./env.js";
 
@@ -64,7 +64,7 @@ const listener = new pg.Client({ connectionString: env.databaseUrl });
 const pool = new pg.Pool({
   connectionString: env.databaseUrl,
   max: 5,
-  application_name: "mobilab-listen-notify",
+  application_name: "instigenie-listen-notify",
 });
 
 // ─── Drain loop ───────────────────────────────────────────────────────────────

@@ -18,7 +18,7 @@ import type {
   QcParameterType,
   UpdateInspectionParameter,
   UpdateInspectionTemplate,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 // ── Template header ──────────────────────────────────────────────────────────

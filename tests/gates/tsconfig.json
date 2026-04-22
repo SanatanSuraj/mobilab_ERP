@@ -1,5 +1,5 @@
 {
-  "extends": "@mobilab/config/tsconfig/library.json",
+  "extends": "@instigenie/config/tsconfig/library.json",
   "compilerOptions": {
     "rootDir": ".",
     "noEmit": true,

@@ -25,7 +25,7 @@ import type {
   StockSummaryRow,
   StockTxnType,
   UpsertItemWarehouseBinding,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 // ─── Ledger ─────────────────────────────────────────────────────────────────

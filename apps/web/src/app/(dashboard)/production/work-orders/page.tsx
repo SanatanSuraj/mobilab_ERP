@@ -56,7 +56,7 @@ import {
   type WoPriority,
   type WoStatus,
   type WorkOrder,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   AlertTriangle,

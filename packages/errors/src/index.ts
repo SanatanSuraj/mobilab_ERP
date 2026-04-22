@@ -1,5 +1,5 @@
 /**
- * @mobilab/errors — typed error hierarchy for the API + workers.
+ * @instigenie/errors — typed error hierarchy for the API + workers.
  *
  * ARCHITECTURE.md §5 / §14 — every error carries:
  *   - a machine code (stable, snake_case, used in Problem+JSON `type`)

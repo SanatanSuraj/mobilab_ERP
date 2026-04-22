@@ -24,16 +24,16 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import pg from "pg";
-import { Cache } from "@mobilab/cache";
-import { withOrg } from "@mobilab/db";
+import { Cache } from "@instigenie/cache";
+import { withOrg } from "@instigenie/db";
 import {
   FeatureFlagService,
   PlanResolverService,
   QuotaService,
   periodFor,
   type ClockLike,
-} from "@mobilab/quotas";
-import { QuotaExceededError } from "@mobilab/errors";
+} from "@instigenie/quotas";
+import { QuotaExceededError } from "@instigenie/errors";
 import { makeTestPool, waitForPg, REDIS_CACHE_URL } from "./_helpers.js";
 
 const FREE_ORG = "00000000-0000-0000-0000-00000000bb01";

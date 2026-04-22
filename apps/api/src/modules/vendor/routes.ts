@@ -27,8 +27,8 @@ import {
   ChangePlanRequestSchema,
   VendorTenantListQuerySchema,
   VendorAuditListQuerySchema,
-} from "@mobilab/contracts";
-import type { VendorAuthService, VendorAdminService } from "@mobilab/vendor-admin";
+} from "@instigenie/contracts";
+import type { VendorAuthService, VendorAdminService } from "@instigenie/vendor-admin";
 import {
   createVendorGuard,
   requireVendorAdmin,

@@ -47,7 +47,7 @@ import {
   INVOICE_STATUSES,
   type InvoiceStatus,
   type SalesInvoice,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   AlertTriangle,

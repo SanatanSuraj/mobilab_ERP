@@ -10,7 +10,7 @@
  * it's round-tripped through Redis SET / GET.
  */
 
-import type { PlanCode, SubscriptionStatus } from "@mobilab/contracts";
+import type { PlanCode, SubscriptionStatus } from "@instigenie/contracts";
 
 export interface FeatureEntry {
   /** module flag or capped resource — is it even available at all? */

@@ -54,7 +54,7 @@ import {
   VENDOR_TYPES,
   type Vendor,
   type VendorType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   Building2,

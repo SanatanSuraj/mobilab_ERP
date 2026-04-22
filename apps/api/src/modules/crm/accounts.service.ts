@@ -14,14 +14,14 @@ import type {
   AccountListQuerySchema,
   CreateAccount,
   UpdateAccount,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { z } from "zod";
-import { NotFoundError } from "@mobilab/errors";
+import { NotFoundError } from "@instigenie/errors";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { accountsRepo } from "./accounts.repository.js";
 import { requireUser } from "../../context/request-context.js";
-import { paginated } from "@mobilab/contracts";
+import { paginated } from "@instigenie/contracts";
 
 type AccountListQuery = z.infer<typeof AccountListQuerySchema>;
 

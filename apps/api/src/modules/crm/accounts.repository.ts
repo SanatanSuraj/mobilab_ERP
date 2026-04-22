@@ -12,7 +12,7 @@ import type {
   Account,
   CreateAccount,
   UpdateAccount,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface AccountRow {

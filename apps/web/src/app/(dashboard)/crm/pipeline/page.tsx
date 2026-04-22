@@ -30,7 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useApiDeals, useApiMoveDealStage } from "@/hooks/useCrmApi";
 import { formatCurrency, formatDate } from "@/data/mock";
-import type { Deal, DealStage } from "@mobilab/contracts";
+import type { Deal, DealStage } from "@instigenie/contracts";
 import {
   AlertCircle,
   CalendarDays,

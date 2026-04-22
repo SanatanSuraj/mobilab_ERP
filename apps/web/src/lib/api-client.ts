@@ -60,7 +60,7 @@ export interface ApiFetchOptions extends RequestInit {
 }
 
 /**
- * Drop-in replacement for fetch() that injects Mobilab ERP required headers.
+ * Drop-in replacement for fetch() that injects Instigenie ERP required headers.
  *
  * @param path  - Relative API path, e.g. "/api/crm/leads"
  * @param init  - Standard RequestInit + skipOrgId option

@@ -24,7 +24,7 @@ import type {
   QcVerdict,
   UpdateQcFinding,
   UpdateQcInspection,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 // ── Inspection header ────────────────────────────────────────────────────────

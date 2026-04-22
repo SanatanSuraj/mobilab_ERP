@@ -1,5 +1,5 @@
 /**
- * @mobilab/resilience — retry and circuit breaker primitives.
+ * @instigenie/resilience — retry and circuit breaker primitives.
  * ARCHITECTURE.md §6.
  */
 

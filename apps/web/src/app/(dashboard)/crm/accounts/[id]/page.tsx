@@ -33,7 +33,7 @@ import {
   useApiTickets,
   useApiUpdateAccount,
 } from "@/hooks/useCrmApi";
-import type { UpdateAccount } from "@mobilab/contracts";
+import type { UpdateAccount } from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowLeft,

@@ -1,5 +1,5 @@
 /**
- * VendorAuthService — login / refresh / logout / me for Mobilab vendor admins.
+ * VendorAuthService — login / refresh / logout / me for Instigenie vendor admins.
  *
  * Differences vs. tenant-side AuthService:
  *   - No tenant picker. A vendor admin IS the identity — there's no "which
@@ -8,7 +8,7 @@
  *     vendor-admin actions are enforced route-by-route (Sprint 3 surface is
  *     tiny; extend to a role catalogue in Sprint 4 if the team grows).
  *   - Refresh tokens live in `vendor.refresh_tokens`, NOT `refresh_tokens`.
- *   - Pool is the BYPASSRLS `mobilab_vendor` pool — queries see every row.
+ *   - Pool is the BYPASSRLS `instigenie_vendor` pool — queries see every row.
  *
  * Session lifecycle:
  *   POST /vendor-admin/auth/login    { email, password }  → access + refresh
@@ -23,7 +23,7 @@
 
 import pg from "pg";
 import bcrypt from "bcrypt";
-import { ForbiddenError, UnauthorizedError } from "@mobilab/errors";
+import { ForbiddenError, UnauthorizedError } from "@instigenie/errors";
 import { recordVendorActionStandalone } from "./audit.js";
 
 /**
@@ -43,7 +43,7 @@ export interface VendorTokenFactoryLike {
 }
 
 export interface VendorAuthServiceDeps {
-  /** The BYPASSRLS mobilab_vendor pool. */
+  /** The BYPASSRLS instigenie_vendor pool. */
   pool: pg.Pool;
   tokens: VendorTokenFactoryLike;
   refreshTtlSec: number;

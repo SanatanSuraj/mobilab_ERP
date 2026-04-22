@@ -1,5 +1,5 @@
 {
-  "extends": "@mobilab/config/tsconfig/node.json",
+  "extends": "@instigenie/config/tsconfig/node.json",
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src"

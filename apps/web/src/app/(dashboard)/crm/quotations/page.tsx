@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatDate } from "@/data/mock";
 import { useApiQuotations } from "@/hooks/useCrmApi";
-import type { Quotation } from "@mobilab/contracts";
+import type { Quotation } from "@instigenie/contracts";
 import { FileText, Clock, Send, CheckCircle, AlertCircle } from "lucide-react";
 
 /**

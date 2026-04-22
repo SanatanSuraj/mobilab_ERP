@@ -1,5 +1,5 @@
 /**
- * @mobilab/db — Postgres access layer for every Mobilab service.
+ * @instigenie/db — Postgres access layer for every Instigenie service.
  *
  * Public surface:
  *   - makeDb({ connectionString }): Db           → Pool + Drizzle

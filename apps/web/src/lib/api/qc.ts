@@ -3,7 +3,7 @@
  *
  * Mirrors lib/api/production.ts: every function routes through tenantFetch
  * (Bearer + X-Org-Id + silent refresh), uses the real contract types from
- * @mobilab/contracts, and returns the shared PaginatedResponse envelope for
+ * @instigenie/contracts, and returns the shared PaginatedResponse envelope for
  * list endpoints.
  *
  * Endpoints:
@@ -49,7 +49,7 @@ import type {
   IssueQcCert,
   // Shared
   ProductFamily,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
 import {

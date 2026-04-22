@@ -69,7 +69,7 @@ import {
   BOM_LINE_TRACKING_TYPES,
   type BomLineTrackingType,
   type BomStatus,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowLeft,

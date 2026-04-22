@@ -5,13 +5,13 @@
  *
  * This is the contract the whole vendor-admin surface sits on:
  *
- *   mobilab_app     — NOBYPASSRLS. Sees rows only for app.current_org.
+ *   instigenie_app     — NOBYPASSRLS. Sees rows only for app.current_org.
  *                     Pointing it at two different orgs shows only their
  *                     own row. Covered by Gate 5 / Gate 8 in detail; we
  *                     re-verify here specifically alongside the vendor
  *                     role so a single test failure is self-describing.
  *
- *   mobilab_vendor  — BYPASSRLS. Sees every organizations row regardless
+ *   instigenie_vendor  — BYPASSRLS. Sees every organizations row regardless
  *                     of app.current_org. This is how the /vendor-admin
  *                     /tenants list endpoint works without iterating
  *                     every tenant's UUID.
@@ -30,7 +30,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
-import { withOrg } from "@mobilab/db";
+import { withOrg } from "@instigenie/db";
 import {
   makeTestPool,
   makeVendorTestPool,
@@ -78,25 +78,25 @@ describe("gate-19: vendor BYPASSRLS vs tenant NOBYPASSRLS", () => {
 
   // ── 1. Role identity — guard against DATABASE_URL drift ──────────────
 
-  it("tenant pool runs as mobilab_app; vendor pool runs as mobilab_vendor", async () => {
+  it("tenant pool runs as instigenie_app; vendor pool runs as instigenie_vendor", async () => {
     const [{ rows: tRows }, { rows: vRows }] = await Promise.all([
       tenantPool.query<{ cu: string }>(`SELECT current_user AS cu`),
       vendorPool.query<{ cu: string }>(`SELECT current_user AS cu`),
     ]);
-    expect(tRows[0]?.cu).toBe("mobilab_app");
-    expect(vRows[0]?.cu).toBe("mobilab_vendor");
+    expect(tRows[0]?.cu).toBe("instigenie_app");
+    expect(vRows[0]?.cu).toBe("instigenie_vendor");
   });
 
   // ── 2. Role attributes — pinned at the DB level ──────────────────────
 
-  it("mobilab_vendor is BYPASSRLS + NOSUPERUSER + login-capable", async () => {
+  it("instigenie_vendor is BYPASSRLS + NOSUPERUSER + login-capable", async () => {
     const { rows } = await tenantPool.query<{
       rolsuper: boolean;
       rolbypassrls: boolean;
       rolcanlogin: boolean;
     }>(
       `SELECT rolsuper, rolbypassrls, rolcanlogin
-         FROM pg_roles WHERE rolname = 'mobilab_vendor'`
+         FROM pg_roles WHERE rolname = 'instigenie_vendor'`
     );
     expect(rows.length).toBe(1);
     expect(rows[0]?.rolsuper).toBe(false);
@@ -106,7 +106,7 @@ describe("gate-19: vendor BYPASSRLS vs tenant NOBYPASSRLS", () => {
 
   // ── 3. Tenant pool: no cross-tenant visibility even when asked ───────
 
-  it("mobilab_app sees ONLY the current_org even with no GUC set", async () => {
+  it("instigenie_app sees ONLY the current_org even with no GUC set", async () => {
     // With no app.current_org the RLS policy compares `id = ''::uuid` which
     // evaluates to a coercion error in pg. We set it to an obviously
     // unrelated UUID so the policy returns zero rows deterministically.
@@ -127,7 +127,7 @@ describe("gate-19: vendor BYPASSRLS vs tenant NOBYPASSRLS", () => {
     }
   });
 
-  it("mobilab_app sees only orgA when app.current_org = orgA", async () => {
+  it("instigenie_app sees only orgA when app.current_org = orgA", async () => {
     const seen = await withOrg(tenantPool, ORG_A, async (client) => {
       const { rows } = await client.query<{ id: string }>(
         `SELECT id FROM organizations WHERE id IN ($1, $2) ORDER BY id`,
@@ -140,7 +140,7 @@ describe("gate-19: vendor BYPASSRLS vs tenant NOBYPASSRLS", () => {
 
   // ── 4. Vendor pool: cross-tenant visibility, zero GUC dance ──────────
 
-  it("mobilab_vendor sees BOTH orgA and orgB without setting app.current_org", async () => {
+  it("instigenie_vendor sees BOTH orgA and orgB without setting app.current_org", async () => {
     const { rows } = await vendorPool.query<{ id: string }>(
       `SELECT id FROM organizations WHERE id IN ($1, $2) ORDER BY id`,
       [ORG_A, ORG_B]
@@ -149,7 +149,7 @@ describe("gate-19: vendor BYPASSRLS vs tenant NOBYPASSRLS", () => {
     expect(ids).toEqual([ORG_A, ORG_B].sort());
   });
 
-  it("mobilab_vendor can UPDATE across tenants in one statement", async () => {
+  it("instigenie_vendor can UPDATE across tenants in one statement", async () => {
     // Suspend-reinstate round trip confirms the vendor role can write too
     // — not just read — regardless of app.current_org.
     await vendorPool.query(
@@ -191,10 +191,10 @@ describe("gate-19: vendor BYPASSRLS vs tenant NOBYPASSRLS", () => {
 
   // ── 5. Vendor schema visibility — tenant role is blocked ─────────────
 
-  it("mobilab_app cannot SELECT from vendor.admins (REVOKEd)", async () => {
+  it("instigenie_app cannot SELECT from vendor.admins (REVOKEd)", async () => {
     // The vendor schema is the private ops surface. A tenant-side SQL
     // injection should hit an error from the DB, not silently reveal
-    // Mobilab's own employee list.
+    // Instigenie's own employee list.
     await expect(
       tenantPool.query(`SELECT count(*) FROM vendor.admins`)
     ).rejects.toMatchObject({
@@ -202,7 +202,7 @@ describe("gate-19: vendor BYPASSRLS vs tenant NOBYPASSRLS", () => {
     });
   });
 
-  it("mobilab_vendor CAN SELECT from vendor.admins", async () => {
+  it("instigenie_vendor CAN SELECT from vendor.admins", async () => {
     // Seeded admin lives here; the count is at least 1 in dev.
     const { rows } = await vendorPool.query<{ count: string }>(
       `SELECT count(*)::text AS count FROM vendor.admins`
@@ -212,7 +212,7 @@ describe("gate-19: vendor BYPASSRLS vs tenant NOBYPASSRLS", () => {
 
   // ── 6. Append-only grant: vendor can INSERT the log but not DELETE it ─
 
-  it("mobilab_vendor can INSERT into vendor.action_log but NOT DELETE", async () => {
+  it("instigenie_vendor can INSERT into vendor.action_log but NOT DELETE", async () => {
     const vendorAdminId = "00000000-0000-0000-0000-00000000ccc1";
     // Insert is fine (normal audit path).
     await vendorPool.query(

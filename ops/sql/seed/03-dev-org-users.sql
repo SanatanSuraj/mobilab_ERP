@@ -2,7 +2,7 @@
 -- + one portal customer, each with an ACTIVE membership and the right
 -- role assignment.
 --
--- Passwords are all `mobilab_dev_2026` (bcrypt hash pinned below, cost 10).
+-- Passwords are all `instigenie_dev_2026` (bcrypt hash pinned below, cost 10).
 -- Gate 7 (bootstrap-policy) verifies that this seed only exists in dev.
 -- Production migrations MUST NOT run this file — keep it in seed/, not init/.
 --
@@ -18,8 +18,8 @@
 DO $$
 DECLARE
   v_org_id uuid := '00000000-0000-0000-0000-00000000a001';
-  -- bcrypt $2b$10$ of "mobilab_dev_2026"
-  v_pw     text := '$2b$10$zoBQA.yBG66NLXsWmZzpy.87QG0KXC3oK/Y94N8PgUXKO2Ce19RaG';
+  -- bcrypt $2b$10$ of "instigenie_dev_2026"
+  v_pw     text := '$2b$10$NMi.pgkQYWK/B2HuV2c/YOat1FjOwURKL5nML1P7Q.9itOxWMSqIu';
 BEGIN
   -- Organization (seeded under its own RLS context for the memberships
   -- insert below — organizations.RLS also checks app.current_org).

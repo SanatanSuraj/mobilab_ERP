@@ -46,7 +46,7 @@ import {
 import {
   VENDOR_LEDGER_ENTRY_TYPES,
   type VendorLedgerEntryType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowDownCircle,

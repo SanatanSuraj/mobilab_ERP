@@ -1,11 +1,11 @@
 /**
- * @mobilab/contracts — the source of truth for wire shapes.
+ * @instigenie/contracts — the source of truth for wire shapes.
  *
  * Import from the barrel for convenience:
- *   import { LoginRequestSchema, ROLE_PERMISSIONS } from "@mobilab/contracts";
+ *   import { LoginRequestSchema, ROLE_PERMISSIONS } from "@instigenie/contracts";
  *
  * Or from the subpath for smaller surface area:
- *   import { hasPermission } from "@mobilab/contracts/permissions";
+ *   import { hasPermission } from "@instigenie/contracts/permissions";
  *
  * Note: explicit ".js" extensions on re-exports are required because downstream
  * consumers (apps/api, packages/quotas, packages/vendor-admin) use

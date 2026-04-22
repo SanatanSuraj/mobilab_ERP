@@ -104,7 +104,7 @@ import type {
   UpdateQuotation,
   UpdateSalesOrder,
   UpdateTicket,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
 //

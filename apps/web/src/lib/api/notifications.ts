@@ -3,7 +3,7 @@
  *
  * Pattern-matches lib/api/finance.ts: every function routes through
  * tenantFetch (Bearer + X-Org-Id + silent refresh), uses the real contract
- * types from @mobilab/contracts, and returns the shared PaginatedResponse
+ * types from @instigenie/contracts, and returns the shared PaginatedResponse
  * envelope for list endpoints.
  *
  * Surface (Phase 2 — §13.7):
@@ -30,7 +30,7 @@ import type {
   NotificationTemplate,
   NotificationUnreadCount,
   UpdateNotificationTemplate,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
 import {

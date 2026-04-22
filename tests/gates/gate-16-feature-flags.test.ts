@@ -25,11 +25,11 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
-import { Cache } from "@mobilab/cache";
-import { withOrg } from "@mobilab/db";
-import { FeatureFlagService, PlanResolverService } from "@mobilab/quotas";
-import type { FeatureSnapshot } from "@mobilab/quotas";
-import { ModuleDisabledError } from "@mobilab/errors";
+import { Cache } from "@instigenie/cache";
+import { withOrg } from "@instigenie/db";
+import { FeatureFlagService, PlanResolverService } from "@instigenie/quotas";
+import type { FeatureSnapshot } from "@instigenie/quotas";
+import { ModuleDisabledError } from "@instigenie/errors";
 import { makeTestPool, waitForPg, REDIS_CACHE_URL } from "./_helpers.js";
 
 const FREE_ORG = "00000000-0000-0000-0000-00000000b001";

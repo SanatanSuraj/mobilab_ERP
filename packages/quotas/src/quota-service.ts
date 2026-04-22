@@ -34,8 +34,8 @@
  */
 
 import type pg from "pg";
-import { withOrg } from "@mobilab/db";
-import { QuotaExceededError } from "@mobilab/errors";
+import { withOrg } from "@instigenie/db";
+import { QuotaExceededError } from "@instigenie/errors";
 import type { FeatureFlagService } from "./feature-flag.js";
 import {
   getMetricDefinition,

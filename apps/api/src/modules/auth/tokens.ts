@@ -2,9 +2,9 @@
  * JWT signing / verifying helpers. ARCHITECTURE.md §3.1a.
  *
  * Three token classes:
- *   access         — short (15m), HS256, aud ∈ {mobilab-internal, mobilab-portal}
+ *   access         — short (15m), HS256, aud ∈ {instigenie-internal, instigenie-portal}
  *   refresh        — opaque 64B, SHA-256-stored, rotated per refresh call
- *   tenantPicker   — short (5m), HS256, aud = mobilab-tenant-picker,
+ *   tenantPicker   — short (5m), HS256, aud = instigenie-tenant-picker,
  *                    subject = user_identities.id; exchanged for an access
  *                    pair at POST /auth/select-tenant.
  *
@@ -15,7 +15,7 @@
 
 import { SignJWT, jwtVerify } from "jose";
 import crypto from "node:crypto";
-import { UnauthorizedError } from "@mobilab/errors";
+import { UnauthorizedError } from "@instigenie/errors";
 import {
   AUDIENCE,
   type Audience,
@@ -26,7 +26,7 @@ import {
   type JwtClaims,
   type TenantPickerClaims,
   type VendorAdminClaims,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 export interface IssueAccessTokenInput {
   userId: string;
@@ -151,7 +151,7 @@ export class TokenFactory {
   // ─── Vendor-admin ──────────────────────────────────────────────────────
   // Separate from issueAccess because vendor tokens carry NO `org` / `roles`
   // / `capabilities`. They authorize /vendor-admin/* against the
-  // mobilab_vendor BYPASSRLS pool, not the tenant pool.
+  // instigenie_vendor BYPASSRLS pool, not the tenant pool.
 
   async issueVendorAccess(input: {
     vendorAdminId: string;

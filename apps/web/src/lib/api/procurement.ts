@@ -3,7 +3,7 @@
  *
  * Mirrors lib/api/crm.ts + lib/api/inventory.ts: every function routes through
  * tenantFetch (Bearer + X-Org-Id + silent refresh), uses the real contract
- * types from @mobilab/contracts, and returns the shared PaginatedResponse
+ * types from @instigenie/contracts, and returns the shared PaginatedResponse
  * envelope for list endpoints.
  *
  * ~25 endpoints across 4 resources:
@@ -56,7 +56,7 @@ import type {
   UpdateGrnLine,
   PostGrn,
   GrnStatus,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
 import {

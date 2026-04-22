@@ -67,7 +67,7 @@ import {
   useApiVendor,
 } from "@/hooks/useProcurementApi";
 import { useApiItems } from "@/hooks/useInventoryApi";
-import type { PoStatus } from "@mobilab/contracts";
+import type { PoStatus } from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowLeft,

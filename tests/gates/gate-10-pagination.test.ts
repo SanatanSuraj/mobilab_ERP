@@ -23,7 +23,7 @@ import {
   PAGE_LIMIT_DEFAULT,
   normalizePagination,
   paginated,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 describe("gate-10: pagination limits", () => {
   it("schema rejects <1 by falling back to default (catch)", () => {

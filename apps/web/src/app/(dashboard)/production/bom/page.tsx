@@ -48,7 +48,7 @@ import {
   BOM_STATUSES,
   type BomStatus,
   type BomVersion,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   CheckCircle2,

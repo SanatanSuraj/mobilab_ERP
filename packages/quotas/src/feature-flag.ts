@@ -20,8 +20,8 @@
  * that fire on subscription.updated / plan_features.updated notifications.
  */
 
-import { ModuleDisabledError } from "@mobilab/errors";
-import type { Cache } from "@mobilab/cache";
+import { ModuleDisabledError } from "@instigenie/errors";
+import type { Cache } from "@instigenie/cache";
 import type { PlanResolverService } from "./plan-resolver.js";
 import type {
   FeatureEntry,

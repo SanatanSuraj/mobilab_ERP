@@ -22,7 +22,7 @@
  *   POST /auth/select-tenant
  *     body:  { tenantToken, orgId }
  *     steps:
- *       1. Verify tenantToken (aud = mobilab-tenant-picker, 5m TTL).
+ *       1. Verify tenantToken (aud = instigenie-tenant-picker, 5m TTL).
  *       2. Confirm the claimed identity has an ACTIVE membership in orgId
  *          matching the surface recorded on the picker token.
  *       3. Mint access+refresh bound to (user_id, org_id, identity_id).
@@ -40,13 +40,13 @@ import {
   type Audience,
   type Role,
   isInternalRole,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   UnauthorizedError,
   ForbiddenError,
   NotFoundError,
-} from "@mobilab/errors";
-import { withOrg } from "@mobilab/db";
+} from "@instigenie/errors";
+import { withOrg } from "@instigenie/db";
 import { TokenFactory } from "./tokens.js";
 import type { TenantStatusService } from "../tenants/service.js";
 

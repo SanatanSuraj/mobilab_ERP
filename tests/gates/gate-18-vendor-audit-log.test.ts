@@ -25,10 +25,10 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import pg from "pg";
-import { Cache } from "@mobilab/cache";
-import { withOrg } from "@mobilab/db";
-import { VendorAdminService } from "@mobilab/vendor-admin";
-import { FeatureFlagService, PlanResolverService } from "@mobilab/quotas";
+import { Cache } from "@instigenie/cache";
+import { withOrg } from "@instigenie/db";
+import { VendorAdminService } from "@instigenie/vendor-admin";
+import { FeatureFlagService, PlanResolverService } from "@instigenie/quotas";
 import {
   makeTestPool,
   makeVendorTestPool,
@@ -45,7 +45,7 @@ const VENDOR_ADMIN_ID = "00000000-0000-0000-0000-00000000ccc1";
 const PLAN_STARTER = "00000000-0000-0000-0000-00000000e002";
 
 describe("gate-18: vendor action log + audit read-back", () => {
-  // Use the TENANT pool (mobilab_app) to seed the fixture row — RLS
+  // Use the TENANT pool (instigenie_app) to seed the fixture row — RLS
   // requires the org context, and the vendor pool bypasses RLS so it can't
   // drive the INSERT CHECK side either. Then use the VENDOR pool for the
   // service under test, mirroring production wiring.
@@ -108,12 +108,12 @@ describe("gate-18: vendor action log + audit read-back", () => {
   // from other gates don't have to coordinate with us.
   beforeEach(async () => {
     // NOTE: vendor.action_log has only SELECT+INSERT grants — no DELETE.
-    // Switch to the superuser `mobilab` role for cleanup. Via the tenant
-    // DATABASE_URL (mobilab_app) we literally cannot run DELETE here.
+    // Switch to the superuser `instigenie` role for cleanup. Via the tenant
+    // DATABASE_URL (instigenie_app) we literally cannot run DELETE here.
     // Seeding uses the same BYPASSRLS vendor pool + SECURITY DEFINER-like
-    // escalation: in the test harness we just execute DELETE as mobilab via
+    // escalation: in the test harness we just execute DELETE as instigenie via
     // the bootstrap role. Simplest portable path is to run it on the tenant
-    // pool's `mobilab_app` session and accept the failure path below:
+    // pool's `instigenie_app` session and accept the failure path below:
     // the gate expects a clean slate, so we DELETE from vendor.action_log
     // via vendorPool's BYPASSRLS role. That role has SELECT+INSERT only, so
     // the delete fails; instead, filter every assertion by ipAddress so we

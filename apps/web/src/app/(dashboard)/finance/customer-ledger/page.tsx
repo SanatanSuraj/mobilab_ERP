@@ -55,7 +55,7 @@ import {
 import {
   CUSTOMER_LEDGER_ENTRY_TYPES,
   type CustomerLedgerEntryType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowDownCircle,

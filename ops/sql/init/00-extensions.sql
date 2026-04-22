@@ -1,4 +1,4 @@
--- Mobilab ERP — extensions required globally.
+-- Instigenie ERP — extensions required globally.
 --
 -- uuid-ossp: server-side UUID generation fallback (we usually use gen_random_uuid
 --            from pgcrypto, but some tooling expects uuid-ossp too).

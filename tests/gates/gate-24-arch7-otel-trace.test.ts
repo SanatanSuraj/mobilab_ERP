@@ -11,7 +11,7 @@
  * with the redis arm rather than creating a parallel test.
  *
  * How we do it without Jaeger:
- *   1. Inject a SimpleSpanProcessor(InMemorySpanExporter) into @mobilab/
+ *   1. Inject a SimpleSpanProcessor(InMemorySpanExporter) into @instigenie/
  *      observability's initTracing(). Synchronous export, no 5s batch
  *      delay, and nothing leaves the process.
  *   2. DYNAMICALLY import `pg` AFTER initTracing runs so the
@@ -29,7 +29,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AddressInfo } from "node:net";
 import { createRequire } from "node:module";
-import { initTracing, shutdownTracing } from "@mobilab/observability/tracing";
+import { initTracing, shutdownTracing } from "@instigenie/observability/tracing";
 import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
@@ -41,7 +41,7 @@ import type * as HttpModule from "node:http";
 // the top level). We need pg's first load to happen AFTER initTracing().
 const DATABASE_URL =
   process.env.DATABASE_URL ??
-  "postgres://mobilab_app:mobilab_dev@localhost:5434/mobilab";
+  "postgres://instigenie_app:instigenie_dev@localhost:5434/instigenie";
 
 type PgPool = import("pg").Pool;
 

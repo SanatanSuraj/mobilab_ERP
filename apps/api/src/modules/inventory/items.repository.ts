@@ -9,7 +9,7 @@ import type {
   ItemCategory,
   ItemUom,
   UpdateItem,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface ItemRow {

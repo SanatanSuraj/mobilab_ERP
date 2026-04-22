@@ -19,7 +19,7 @@ import type {
   SalesInvoiceLine,
   UpdateSalesInvoice,
   UpdateSalesInvoiceLine,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 // ── Header ───────────────────────────────────────────────────────────────────

@@ -41,17 +41,17 @@ import {
 // Token storage: we use sessionStorage for dev simplicity. Production should
 // move to httpOnly cookies set by a Next.js Route Handler that proxies to
 // the API so the access token never touches JS.
-const ACCESS_KEY = "mobilab-access";
-const REFRESH_KEY = "mobilab-refresh";
+const ACCESS_KEY = "instigenie-access";
+const REFRESH_KEY = "instigenie-refresh";
 
 /**
- * The proxy (proxy.ts) does an optimistic `mobilab-session` cookie check on
+ * The proxy (proxy.ts) does an optimistic `instigenie-session` cookie check on
  * every protected route. The real access+refresh tokens live in
  * sessionStorage — but if we don't also set this cookie, the proxy bounces
  * the user straight back to /auth/login after they sign in. Set it to any
  * truthy value; the proxy only checks presence.
  */
-const SESSION_COOKIE = "mobilab-session";
+const SESSION_COOKIE = "instigenie-session";
 
 /**
  * Pick a single `UserRole` from the set of roles on the JWT `user.roles`
@@ -131,7 +131,7 @@ function LoginForm() {
    *   2. Populate the mock Zustand store with a derived role so unmigrated
    *      prototype pages (admin UI, sidebar persona chip, dashboard widgets)
    *      render correctly.
-   *   3. Set the `mobilab-session` cookie that proxy.ts checks on every
+   *   3. Set the `instigenie-session` cookie that proxy.ts checks on every
    *      protected route. Without this, the proxy immediately bounces the
    *      user back here after a successful sign-in.
    */
@@ -245,7 +245,7 @@ function LoginForm() {
             <FlaskConical className="h-6 w-6 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">Mobilab ERP</h1>
+            <h1 className="text-xl font-bold tracking-tight">Instigenie ERP</h1>
             <p className="text-sm text-muted-foreground">
               {surface === "portal"
                 ? "Customer portal sign-in"
@@ -317,7 +317,7 @@ function LoginForm() {
             </form>
 
             <p className="text-[11px] text-muted-foreground leading-snug pt-1">
-              Dev seeds (password <code>mobilab_dev_2026</code>):{" "}
+              Dev seeds (password <code>instigenie_dev_2026</code>):{" "}
               <code>admin@mobilab.local</code>,{" "}
               <code>finance@mobilab.local</code>,{" "}
               <code>prodmgr@mobilab.local</code>, etc.
@@ -326,7 +326,7 @@ function LoginForm() {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground">
-          Mobilab ERP · Phase 1 · /auth/login (real API)
+          Instigenie ERP · Phase 1 · /auth/login (real API)
         </p>
       </div>
     </div>
@@ -418,7 +418,7 @@ function TenantPicker({
         </Card>
 
         <p className="text-center text-xs text-muted-foreground">
-          Mobilab ERP · Phase 1 · /auth/select-tenant
+          Instigenie ERP · Phase 1 · /auth/select-tenant
         </p>
       </div>
     </div>

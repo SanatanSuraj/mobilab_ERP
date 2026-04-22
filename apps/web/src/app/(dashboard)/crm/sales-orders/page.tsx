@@ -8,7 +8,7 @@ import { KPICard } from "@/components/shared/kpi-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatDate } from "@/data/mock";
 import { useApiSalesOrders } from "@/hooks/useCrmApi";
-import type { SalesOrder } from "@mobilab/contracts";
+import type { SalesOrder } from "@instigenie/contracts";
 import {
   ShoppingCart,
   DollarSign,

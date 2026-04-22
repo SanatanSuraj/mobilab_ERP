@@ -44,7 +44,7 @@ import {
   QC_INSPECTION_KINDS,
   type InspectionTemplate,
   type QcInspectionKind,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   ClipboardList,

@@ -12,7 +12,7 @@
  * webhook, etc.) — don't share across unrelated services.
  */
 
-import { DependencyUnavailableError } from "@mobilab/errors";
+import { DependencyUnavailableError } from "@instigenie/errors";
 
 type State = "CLOSED" | "OPEN" | "HALF_OPEN";
 

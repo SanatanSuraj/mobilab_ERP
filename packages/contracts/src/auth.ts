@@ -31,8 +31,8 @@ export const JwtClaimsSchema = z.object({
   sub: z.string().uuid(), // user id (per-tenant profile)
   org: z.string().uuid(), // tenant org id
   idn: z.string().uuid().optional(), // user_identities.id (global)
-  aud: z.enum(["mobilab-internal", "mobilab-portal"]),
-  iss: z.literal("mobilab-api"),
+  aud: z.enum(["instigenie-internal", "instigenie-portal"]),
+  iss: z.literal("instigenie-api"),
   roles: z.array(z.enum(ROLES)).min(1),
   capabilities: z
     .object({
@@ -55,8 +55,8 @@ export type JwtClaims = z.infer<typeof JwtClaimsSchema>;
  */
 export const TenantPickerClaimsSchema = z.object({
   sub: z.string().uuid(), // user_identities.id
-  aud: z.literal("mobilab-tenant-picker"),
-  iss: z.literal("mobilab-api"),
+  aud: z.literal("instigenie-tenant-picker"),
+  iss: z.literal("instigenie-api"),
   surface: z.enum(["internal", "portal"]),
   iat: z.number().int(),
   exp: z.number().int(),
@@ -181,4 +181,4 @@ export type Problem = z.infer<typeof ProblemSchema>;
 
 // AUDIENCE lives in ./roles.ts — see the re-export via the barrel (index.ts).
 
-export type TenantPickerAudience = "mobilab-tenant-picker";
+export type TenantPickerAudience = "instigenie-tenant-picker";

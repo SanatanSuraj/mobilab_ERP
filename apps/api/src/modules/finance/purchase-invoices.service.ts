@@ -14,7 +14,7 @@ import type pg from "pg";
 import type { PoolClient } from "pg";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ConflictError, NotFoundError } from "@mobilab/errors";
+import { ConflictError, NotFoundError } from "@instigenie/errors";
 import {
   paginated,
   type CancelPurchaseInvoice,
@@ -27,8 +27,8 @@ import {
   type PurchaseInvoiceWithLines,
   type UpdatePurchaseInvoice,
   type UpdatePurchaseInvoiceLine,
-} from "@mobilab/contracts";
-import { m, moneyToPg, ZERO } from "@mobilab/money";
+} from "@instigenie/contracts";
+import { m, moneyToPg, ZERO } from "@instigenie/money";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { purchaseInvoicesRepo } from "./purchase-invoices.repository.js";

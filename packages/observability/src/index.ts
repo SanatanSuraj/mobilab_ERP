@@ -1,11 +1,11 @@
 /**
- * @mobilab/observability — logger + tracer + metrics, wired together.
+ * @instigenie/observability — logger + tracer + metrics, wired together.
  *
  * Service entrypoint order matters:
- *   1. import { initTracing } from "@mobilab/observability/tracing";
+ *   1. import { initTracing } from "@instigenie/observability/tracing";
  *      initTracing({ serviceName: "api" });
  *   2. ...any other import that does I/O
- *   3. import { createLogger, registry } from "@mobilab/observability";
+ *   3. import { createLogger, registry } from "@instigenie/observability";
  */
 
 export { createLogger, type Logger } from "./logger.js";

@@ -46,7 +46,7 @@ import {
   type Item,
   type ItemCategory,
   type ItemUom,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   Cpu,

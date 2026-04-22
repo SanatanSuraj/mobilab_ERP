@@ -11,7 +11,7 @@ import type {
   UpdateVendor,
   Vendor,
   VendorType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface VendorRow {

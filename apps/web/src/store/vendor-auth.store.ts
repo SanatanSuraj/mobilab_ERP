@@ -2,12 +2,12 @@
  * Vendor-admin auth store — separate from the tenant useAuthStore.
  *
  * Why a second store? Vendor identity has no org / roles / permissions —
- * it's a flat "who is this Mobilab employee" model. Trying to shoehorn it
+ * it's a flat "who is this Instigenie employee" model. Trying to shoehorn it
  * into useAuthStore would mean nullable role/orgId + permission gates that
  * don't apply, which makes both surfaces harder to reason about.
  *
  * Persistence strategy:
- *   - Tokens live in sessionStorage (mobilab-vendor-access / -refresh)
+ *   - Tokens live in sessionStorage (instigenie-vendor-access / -refresh)
  *     managed by lib/api/vendor-admin.ts. NOT persisted through this store.
  *   - Identity (id/email/name) is NOT persisted. On page reload we call
  *     GET /vendor-admin/auth/me to rehydrate. If /me fails, tokens are
@@ -20,7 +20,7 @@
 
 import { create } from "zustand";
 
-import type { VendorMeResponse } from "@mobilab/contracts/vendor-admin";
+import type { VendorMeResponse } from "@instigenie/contracts/vendor-admin";
 
 import {
   apiVendorLogin,

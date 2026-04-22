@@ -8,7 +8,7 @@
  */
 
 import type { PoolClient } from "pg";
-import type { QcCert } from "@mobilab/contracts";
+import type { QcCert } from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface CertRow {

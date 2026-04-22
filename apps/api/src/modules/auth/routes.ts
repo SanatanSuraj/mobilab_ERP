@@ -20,7 +20,7 @@ import {
   RefreshRequestSchema,
   SelectTenantRequestSchema,
   AUDIENCE,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { z } from "zod";
 import type { AuthService } from "./service.js";
 import { createAuthGuard, type AuthGuardOptions } from "./guard.js";
@@ -83,7 +83,7 @@ export async function registerAuthRoutes(
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return reply.code(401).send({
-        type: "https://mobilab.dev/problems/unauthorized",
+        type: "https://instigenie.dev/problems/unauthorized",
         title: "unauthorized",
         status: 401,
         detail: "missing bearer token",

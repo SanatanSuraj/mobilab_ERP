@@ -1,5 +1,5 @@
 /**
- * @mobilab/cache — Redis-CACHE helper. ARCHITECTURE.md §6 / §10.
+ * @instigenie/cache — Redis-CACHE helper. ARCHITECTURE.md §6 / §10.
  *
  * Two Redis instances exist in the dev stack:
  *   - redis-bull   (packages/queue)  → BullMQ only, never used for cache
@@ -40,7 +40,7 @@ export class Cache {
       maxRetriesPerRequest: 2,
       enableAutoPipelining: true,
       // Distinguish from BullMQ in `CLIENT LIST` output.
-      connectionName: "mobilab-cache",
+      connectionName: "instigenie-cache",
     });
 
     this.prefix = opts.prefix ?? "cache";

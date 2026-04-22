@@ -4,7 +4,7 @@
  *
  * Mirrors lib/api/vendor-admin.ts but for tenant traffic:
  *
- *   - Reads `mobilab-access` / `mobilab-refresh` from sessionStorage —
+ *   - Reads `instigenie-access` / `instigenie-refresh` from sessionStorage —
  *     written by /auth/login after a successful login + optional tenant
  *     pick. No other code should ever touch these keys directly.
  *
@@ -24,15 +24,15 @@
  * real flow. Once the entire app migrates off the mock, the two can merge.
  */
 
-import type { Problem } from "@mobilab/contracts";
+import type { Problem } from "@instigenie/contracts";
 
 /** Where to reach the real API. Override with NEXT_PUBLIC_API_BASE_URL. */
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 // Keep these in sync with /auth/login page.tsx.
-export const TENANT_ACCESS_KEY = "mobilab-access";
-export const TENANT_REFRESH_KEY = "mobilab-refresh";
+export const TENANT_ACCESS_KEY = "instigenie-access";
+export const TENANT_REFRESH_KEY = "instigenie-refresh";
 
 export class ApiProblem extends Error {
   readonly problem: Problem;

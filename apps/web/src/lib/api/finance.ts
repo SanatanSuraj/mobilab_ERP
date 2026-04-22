@@ -3,7 +3,7 @@
  *
  * Pattern-matches lib/api/qc.ts: every function routes through tenantFetch
  * (Bearer + X-Org-Id + silent refresh), uses the real contract types from
- * @mobilab/contracts, and returns the shared PaginatedResponse envelope
+ * @instigenie/contracts, and returns the shared PaginatedResponse envelope
  * for list endpoints.
  *
  * Surface (Phase 2):
@@ -57,7 +57,7 @@ import type {
   PaymentType,
   CreatePayment,
   VoidPayment,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
 import {

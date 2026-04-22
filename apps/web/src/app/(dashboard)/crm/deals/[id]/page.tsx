@@ -33,7 +33,7 @@ import {
   useApiUpdateDeal,
 } from "@/hooks/useCrmApi";
 import { formatCurrency, formatDate } from "@/data/mock";
-import type { DealStage, UpdateDeal } from "@mobilab/contracts";
+import type { DealStage, UpdateDeal } from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowLeft,

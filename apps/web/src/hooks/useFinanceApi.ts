@@ -103,7 +103,7 @@ import type {
   Payment,
   CreatePayment,
   VoidPayment,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
 //

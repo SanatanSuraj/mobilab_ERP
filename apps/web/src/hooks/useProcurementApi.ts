@@ -93,7 +93,7 @@ import type {
   UpdatePurchaseOrder,
   UpdateVendor,
   Vendor,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
 //

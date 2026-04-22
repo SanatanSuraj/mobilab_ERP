@@ -84,7 +84,7 @@ import type {
   LeadActivity,
   LeadActivityType,
   LeadStatus,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 // ─── Activity type presentation ────────────────────────────────────────────
 

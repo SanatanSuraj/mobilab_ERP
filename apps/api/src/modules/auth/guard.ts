@@ -6,14 +6,14 @@
  */
 
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { UnauthorizedError } from "@mobilab/errors";
+import { UnauthorizedError } from "@instigenie/errors";
 import {
   AUDIENCE,
   type Audience,
   type Role,
   ROLE_PERMISSIONS,
   type Permission,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { TokenFactory } from "./tokens.js";
 import type { TenantStatusService } from "../tenants/service.js";
 import type { RequestUser } from "../../context/request-context.js";

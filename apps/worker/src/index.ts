@@ -7,19 +7,19 @@
  * Runs the bootstrap policy guard (Gate 7) at start.
  */
 
-import { initTracing } from "@mobilab/observability/tracing";
+import { initTracing } from "@instigenie/observability/tracing";
 initTracing({ serviceName: "worker" });
 
 import http from "node:http";
 import pg from "pg";
-import { createLogger, registry } from "@mobilab/observability";
-import { installNumericTypeParser } from "@mobilab/db";
+import { createLogger, registry } from "@instigenie/observability";
+import { installNumericTypeParser } from "@instigenie/db";
 import {
   QueueNames,
   makeWorker,
   assertBullRedisNoeviction,
   createBullConnection,
-} from "@mobilab/queue";
+} from "@instigenie/queue";
 import type { Worker } from "bullmq";
 import { loadEnv } from "./env.js";
 import { runBootstrapPolicy } from "./bootstrap-policy.js";
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   const pool = new pg.Pool({
     connectionString: env.databaseUrl,
     max: 5,
-    application_name: "mobilab-worker",
+    application_name: "instigenie-worker",
   });
 
   await runBootstrapPolicy(pool, log);

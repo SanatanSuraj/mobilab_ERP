@@ -48,7 +48,7 @@ import { useApiLeads } from "@/hooks/useCrmApi";
 import { useTenantAuthGuard } from "@/hooks/useTenantAuthGuard";
 import { formatCurrencyStr, formatRelativeDate } from "@/lib/format";
 import { ApiProblem } from "@/lib/api/tenant-fetch";
-import type { Lead, LeadStatus } from "@mobilab/contracts";
+import type { Lead, LeadStatus } from "@instigenie/contracts";
 import type { LeadListQuery } from "@/lib/api/crm";
 
 // ─── Filter options ────────────────────────────────────────────────────────

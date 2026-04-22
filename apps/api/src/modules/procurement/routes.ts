@@ -35,7 +35,7 @@ import {
   UpdatePurchaseOrderSchema,
   UpdateVendorSchema,
   VendorListQuerySchema,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import { createAuthGuard, requirePermission } from "../auth/guard.js";
 import type { AuthGuardOptions } from "../auth/guard.js";
 import type { RequireFeature } from "../quotas/guard.js";

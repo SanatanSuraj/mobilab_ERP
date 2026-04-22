@@ -1,5 +1,5 @@
 /**
- * @mobilab/quotas — plan-features + quota enforcement.
+ * @instigenie/quotas — plan-features + quota enforcement.
  *
  * Sprint 1C: READ path
  *   - FeatureFlagService: isModuleEnabled / isEnabled / getLimit / assertEnabled

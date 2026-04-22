@@ -23,7 +23,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
-import { withOrg } from "@mobilab/db";
+import { withOrg } from "@instigenie/db";
 import { makeTestPool, waitForPg, DEV_ORG_ID } from "./_helpers.js";
 
 const OTHER_ORG_ID = "00000000-0000-0000-0000-0000000000d1";

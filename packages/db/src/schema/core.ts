@@ -235,7 +235,7 @@ export const refreshTokens = pgTable(
       .notNull()
       .references(() => userIdentities.id, { onDelete: "cascade" }),
     tokenHash: text("token_hash").notNull(), // sha256, never raw
-    audience: text("audience").notNull(), // mobilab-internal | mobilab-portal
+    audience: text("audience").notNull(), // instigenie-internal | instigenie-portal
     userAgent: text("user_agent"),
     ipAddress: text("ip_address"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

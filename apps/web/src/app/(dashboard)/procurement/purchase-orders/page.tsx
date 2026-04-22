@@ -54,7 +54,7 @@ import {
   PO_STATUSES,
   type PoStatus,
   type PurchaseOrder,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   CheckCircle2,

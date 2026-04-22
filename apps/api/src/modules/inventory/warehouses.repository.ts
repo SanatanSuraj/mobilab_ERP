@@ -15,7 +15,7 @@ import type {
   UpdateWarehouse,
   Warehouse,
   WarehouseKind,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
 interface WarehouseRow {

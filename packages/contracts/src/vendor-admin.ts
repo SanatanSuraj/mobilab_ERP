@@ -1,20 +1,20 @@
 /**
  * Vendor-admin contracts (Sprint 3).
  *
- * The vendor-admin surface is the Mobilab employee console used to onboard
+ * The vendor-admin surface is the Instigenie employee console used to onboard
  * and offboard real customers. It sits ABOVE the tenant boundary:
  *
  *   - Vendor tokens do NOT carry `org` — there is no "current tenant".
- *   - The DB role (mobilab_vendor) has BYPASSRLS — queries see every row
+ *   - The DB role (instigenie_vendor) has BYPASSRLS — queries see every row
  *     regardless of the `app.current_org` GUC. RLS still protects tenant
- *     traffic because that still flows through `mobilab_app`.
+ *     traffic because that still flows through `instigenie_app`.
  *   - Every mutation is recorded to `vendor.action_log` via the
  *     service layer (not a DB trigger) so the actor id + request
  *     metadata (ip, ua) land in one place.
  *
  * This file is the single source of truth for:
  *   - VENDOR_ACTION_TYPES   — enum of things a vendor admin can do
- *   - VendorAdminClaims     — JWT shape for mobilab-vendor tokens
+ *   - VendorAdminClaims     — JWT shape for instigenie-vendor tokens
  *   - Login / me schemas    — POST /vendor-admin/auth/login, GET /me
  *   - Tenant admin schemas  — suspend / reinstate / change plan / list
  *   - Audit log schema      — GET /vendor-admin/audit
@@ -65,8 +65,8 @@ export type VendorTargetType = (typeof VENDOR_TARGET_TYPES)[number];
  */
 export const VendorAdminClaimsSchema = z.object({
   sub: z.string().uuid(),                  // vendor.admins.id
-  aud: z.literal("mobilab-vendor"),
-  iss: z.literal("mobilab-api"),
+  aud: z.literal("instigenie-vendor"),
+  iss: z.literal("instigenie-api"),
   email: z.string().email(),
   name: z.string(),
   iat: z.number().int(),

@@ -8,8 +8,8 @@
 
 import type { Processor } from "bullmq";
 import type pg from "pg";
-import type { Logger } from "@mobilab/observability";
-import { jobsProcessedTotal } from "@mobilab/observability";
+import type { Logger } from "@instigenie/observability";
+import { jobsProcessedTotal } from "@instigenie/observability";
 
 export interface OutboxJob {
   outboxId: string;

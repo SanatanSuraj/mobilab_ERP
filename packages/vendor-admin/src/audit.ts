@@ -20,7 +20,7 @@ import type pg from "pg";
 import type {
   VendorActionType,
   VendorTargetType,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 export interface VendorAuditEntry {
   vendorAdminId: string;

@@ -54,7 +54,7 @@ import type {
   WipStageStatus,
   WoPriority,
   WoStatus,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 import {
   AlertCircle,
   AlertTriangle,

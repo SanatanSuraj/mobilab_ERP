@@ -4,7 +4,7 @@
  * Every function:
  *   - Routes through tenantFetch, which handles Bearer + X-Org-Id + silent
  *     refresh.
- *   - Uses the real contract types from @mobilab/contracts — NOT the
+ *   - Uses the real contract types from @instigenie/contracts — NOT the
  *     prototype shapes under src/data/crm-mock.ts. Pages that still
  *     consume mock shapes must adapt or be rewritten before calling these.
  *
@@ -56,7 +56,7 @@ import type {
   UpdateSalesOrder,
   TransitionSalesOrderStatus,
   FinanceApproveSalesOrder,
-} from "@mobilab/contracts";
+} from "@instigenie/contracts";
 
 import {
   tenantDelete,
@@ -69,7 +69,7 @@ import {
 
 /**
  * Every `list*` endpoint returns this envelope. Matches
- * `listResponseSchema(EntitySchema)` in @mobilab/contracts/pagination.
+ * `listResponseSchema(EntitySchema)` in @instigenie/contracts/pagination.
  */
 export interface PaginatedResponse<T> {
   data: T[];

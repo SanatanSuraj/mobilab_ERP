@@ -41,13 +41,13 @@ export function makeDb(opts: MakePoolOptions): Db {
     max: opts.max ?? 10,
     idleTimeoutMillis: opts.idleTimeoutMillis ?? 30_000,
     connectionTimeoutMillis: opts.connectionTimeoutMillis ?? 5_000,
-    application_name: opts.applicationName ?? "mobilab-app",
+    application_name: opts.applicationName ?? "instigenie-app",
   });
 
   // Surface pool errors — without this they're silently swallowed.
   pool.on("error", (err) => {
     // eslint-disable-next-line no-console
-    console.error("[@mobilab/db] pool error:", err);
+    console.error("[@instigenie/db] pool error:", err);
   });
 
   const d = drizzle(pool);
