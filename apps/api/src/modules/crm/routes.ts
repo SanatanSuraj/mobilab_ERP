@@ -22,6 +22,7 @@ import {
   AddLeadActivitySchema,
   AddTicketCommentSchema,
   ApproveQuotationSchema,
+  BulkCreateLeadsSchema,
   ContactListQuerySchema,
   ConvertLeadSchema,
   ConvertQuotationSchema,
@@ -224,6 +225,20 @@ export async function registerCrmRoutes(
       const body = CreateLeadSchema.parse(req.body);
       const result = await opts.leads.create(req, body);
       return reply.code(201).send(result);
+    }
+  );
+
+  // Bulk import. Returns 200 (not 201) because a partial-success response
+  // isn't a clean "resource created" — the body carries per-row statuses
+  // so the client can reconcile. Zod enforces the 500-row soft cap; larger
+  // batches should be chunked client-side.
+  app.post(
+    "/crm/leads/bulk",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("leads:create")] },
+    async (req, reply) => {
+      const body = BulkCreateLeadsSchema.parse(req.body);
+      const result = await opts.leads.bulkCreate(req, body);
+      return reply.send(result);
     }
   );
 

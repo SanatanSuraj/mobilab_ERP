@@ -31,6 +31,8 @@ import type {
   AddLeadActivity,
   MarkLeadLost,
   ConvertLead,
+  BulkCreateLeads,
+  BulkCreateLeadsResponse,
   // Deals
   Deal,
   CreateDeal,
@@ -199,6 +201,18 @@ export async function apiGetLead(id: string): Promise<Lead> {
 
 export async function apiCreateLead(body: CreateLead): Promise<Lead> {
   return tenantPost(`/crm/leads`, body);
+}
+
+/**
+ * POST /crm/leads/bulk — spreadsheet import. Returns per-row statuses so the
+ * UI can render a row-by-row report (created / duplicate_skipped / failed).
+ * Zod on the backend caps each request at BULK_LEADS_MAX rows; chunk
+ * larger uploads client-side.
+ */
+export async function apiBulkCreateLeads(
+  body: BulkCreateLeads
+): Promise<BulkCreateLeadsResponse> {
+  return tenantPost(`/crm/leads/bulk`, body);
 }
 
 export async function apiUpdateLead(

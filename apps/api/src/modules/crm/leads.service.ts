@@ -17,6 +17,9 @@ import type pg from "pg";
 import type { FastifyRequest } from "fastify";
 import type {
   AddLeadActivity,
+  BulkCreateLeads,
+  BulkCreateLeadsResponse,
+  BulkCreateLeadsRowResult,
   ConvertLead,
   CreateLead,
   Deal,
@@ -94,6 +97,91 @@ export class LeadsService {
       });
       return lead;
     });
+  }
+
+  /**
+   * Bulk import — one txn per row so partial failures don't poison the whole
+   * batch. For each row we:
+   *   1. findDuplicate(email|phone) among non-terminal leads
+   *   2. if input.skipDuplicates && dup → report `duplicate_skipped`
+   *      (no insert, but we surface `duplicateOfLeadId` so the UI can link)
+   *   3. otherwise create + insert initial activity (same shape as single
+   *      create, so the timeline stays consistent)
+   *   4. on ANY exception inside the row's txn → capture the message and
+   *      continue to the next row
+   *
+   * Sequential on purpose: 500 simultaneous txns on a single pool saturates
+   * connections and removes the isolation benefit we're paying for.
+   */
+  async bulkCreate(
+    req: FastifyRequest,
+    input: BulkCreateLeads
+  ): Promise<BulkCreateLeadsResponse> {
+    const user = requireUser(req);
+    const rows: BulkCreateLeadsRowResult[] = [];
+    let created = 0;
+    let duplicatesSkipped = 0;
+    let failed = 0;
+
+    for (let i = 0; i < input.leads.length; i++) {
+      const row = input.leads[i]!;
+      try {
+        const result = await withRequest(req, this.pool, async (client) => {
+          const dup = await leadsRepo.findDuplicate(
+            client,
+            row.email,
+            row.phone
+          );
+          if (input.skipDuplicates && dup) {
+            return {
+              index: i,
+              status: "duplicate_skipped" as const,
+              leadId: null,
+              duplicateOfLeadId: dup.id,
+              error: null,
+            };
+          }
+          const dedup = dup
+            ? { isDuplicate: true, duplicateOfLeadId: dup.id }
+            : { isDuplicate: false, duplicateOfLeadId: null };
+          const lead = await leadsRepo.create(client, user.orgId, row, dedup);
+          await leadsRepo.insertActivity(client, {
+            orgId: user.orgId,
+            leadId: lead.id,
+            type: "NOTE",
+            content: `Lead created from ${row.source ?? "bulk import"}.`,
+            actorId: user.id,
+          });
+          return {
+            index: i,
+            status: "created" as const,
+            leadId: lead.id,
+            duplicateOfLeadId: dedup.duplicateOfLeadId,
+            error: null,
+          };
+        });
+        rows.push(result);
+        if (result.status === "created") created++;
+        else if (result.status === "duplicate_skipped") duplicatesSkipped++;
+      } catch (err) {
+        failed++;
+        rows.push({
+          index: i,
+          status: "failed",
+          leadId: null,
+          duplicateOfLeadId: null,
+          error: err instanceof Error ? err.message : "unknown error",
+        });
+      }
+    }
+
+    return {
+      total: input.leads.length,
+      created,
+      duplicatesSkipped,
+      failed,
+      rows,
+    };
   }
 
   async update(

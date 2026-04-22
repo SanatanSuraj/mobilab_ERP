@@ -1,0 +1,27 @@
+{"level":30,"time":"2026-04-22T05:23:10.809Z","service":"api","env":"development","port":4001,"host":"0.0.0.0","msg":"api listening"}
+{"level":20,"time":"2026-04-22T05:23:11.889Z","service":"api","env":"development","method":"GET","url":"/metrics","ip":"127.0.0.1","reqId":"req-1","msg":"req"}
+[unhandled error] POST /auth/login error: password authentication failed for user "instigenie_app"
+    at /Users/sanatansuraj/Desktop/crm _prototype/crm-prototype/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async AuthService.login (/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype/apps/api/src/modules/auth/service.ts:114:22)
+    at async Object.<anonymous> (/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype/apps/api/src/modules/auth/routes.ts:41:20) {
+  length: 110,
+  severity: 'FATAL',
+  code: '28P01',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'auth.c',
+  line: '331',
+  routine: 'auth_failed'
+}
+{"level":20,"time":"2026-04-22T05:23:15.215Z","service":"api","env":"development","method":"POST","url":"/auth/login","ip":"127.0.0.1","reqId":"req-2","msg":"req"}
+{"level":30,"time":"2026-04-22T05:23:15.270Z","service":"api","env":"development","signal":"SIGTERM","msg":"shutting down"}

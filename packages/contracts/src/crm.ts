@@ -276,6 +276,62 @@ export const ConvertLeadSchema = z.object({
 });
 export type ConvertLead = z.infer<typeof ConvertLeadSchema>;
 
+// ─── Bulk lead import ───────────────────────────────────────────────────────
+// Used by POST /crm/leads/bulk so the UI (spreadsheet upload) can send a
+// batch of lead rows in one round-trip. Per-row results are returned with
+// stable `index` values so the client can render a row-by-row report.
+//
+// Size cap of 500 is a soft ceiling: each row opens its own txn on the
+// server so we don't exceed statement timeouts, and large uploads can be
+// chunked client-side by just sending multiple batches.
+
+export const BULK_LEADS_MAX = 500;
+
+export const BulkCreateLeadsSchema = z.object({
+  leads: z.array(CreateLeadSchema).min(1).max(BULK_LEADS_MAX),
+  /**
+   * When true, rows whose (email | phone) collides with an existing
+   * non-terminal lead are reported as `duplicate_skipped` and NOT
+   * inserted. When false (default), duplicates are still inserted but
+   * flagged `is_duplicate=true` on the row — matching the single-create
+   * behaviour so importing on top of an existing CRM is additive.
+   */
+  skipDuplicates: z.boolean().default(false),
+});
+export type BulkCreateLeads = z.infer<typeof BulkCreateLeadsSchema>;
+
+export const BulkCreateLeadsResultStatusSchema = z.enum([
+  "created",
+  "duplicate_skipped",
+  "failed",
+]);
+export type BulkCreateLeadsResultStatus = z.infer<
+  typeof BulkCreateLeadsResultStatusSchema
+>;
+
+export const BulkCreateLeadsRowResultSchema = z.object({
+  index: z.number().int().min(0),
+  status: BulkCreateLeadsResultStatusSchema,
+  leadId: uuid.nullable(),
+  duplicateOfLeadId: uuid.nullable(),
+  /** Human-readable error for `failed` rows; null otherwise. */
+  error: z.string().nullable(),
+});
+export type BulkCreateLeadsRowResult = z.infer<
+  typeof BulkCreateLeadsRowResultSchema
+>;
+
+export const BulkCreateLeadsResponseSchema = z.object({
+  total: z.number().int().min(0),
+  created: z.number().int().min(0),
+  duplicatesSkipped: z.number().int().min(0),
+  failed: z.number().int().min(0),
+  rows: z.array(BulkCreateLeadsRowResultSchema),
+});
+export type BulkCreateLeadsResponse = z.infer<
+  typeof BulkCreateLeadsResponseSchema
+>;
+
 // ─── Deals ───────────────────────────────────────────────────────────────────
 
 export const DealSchema = z.object({

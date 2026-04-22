@@ -27,6 +27,7 @@ import {
   apiAddLeadActivity,
   apiAddTicketComment,
   apiApproveQuotation,
+  apiBulkCreateLeads,
   apiConvertLead,
   apiConvertQuotation,
   apiCreateLead,
@@ -80,6 +81,8 @@ import type {
   AddLeadActivity,
   AddTicketComment,
   ApproveQuotation,
+  BulkCreateLeads,
+  BulkCreateLeadsResponse,
   ConvertLead,
   ConvertQuotation,
   CreateLead,
@@ -212,6 +215,23 @@ export function useApiCreateLead() {
     mutationFn: (body) => apiCreateLead(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: crmApiKeys.leads.all });
+    },
+  });
+}
+
+/**
+ * Bulk-import leads from a spreadsheet. Always invalidates the leads list
+ * on success — even partial successes (some created + some failed) still
+ * wrote rows that should show up in the table.
+ */
+export function useApiBulkCreateLeads() {
+  const qc = useQueryClient();
+  return useMutation<BulkCreateLeadsResponse, Error, BulkCreateLeads>({
+    mutationFn: (body) => apiBulkCreateLeads(body),
+    onSuccess: (res) => {
+      if (res.created > 0) {
+        qc.invalidateQueries({ queryKey: crmApiKeys.leads.all });
+      }
     },
   });
 }

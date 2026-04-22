@@ -20,15 +20,21 @@
  *     endpoint to resolve names, so for now we display a short fingerprint
  *     of the UUID or "Unassigned". When /org/users lands, hook it up here.
  *
- *   - CSV import is intentionally dropped — the real API has no bulk
- *     import endpoint yet. When one ships, wire a new dialog.
+ *   - Bulk import is wired to POST /crm/leads/bulk via
+ *     BulkImportLeadsDialog. Accepts .csv and .xlsx; shows per-row results.
  *
  * Auth: relies on useTenantAuthGuard to bounce unauth'd users to /auth/login.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, UserPlus, AlertTriangle, ShieldAlert } from "lucide-react";
+import {
+  Loader2,
+  UserPlus,
+  Upload,
+  AlertTriangle,
+  ShieldAlert,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, type Column } from "@/components/shared/data-table";
@@ -44,6 +50,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { NewApiLeadSheet } from "@/components/crm/leads/NewApiLeadSheet";
+import { BulkImportLeadsDialog } from "@/components/crm/leads/BulkImportLeadsDialog";
 import { useApiLeads } from "@/hooks/useCrmApi";
 import { useTenantAuthGuard } from "@/hooks/useTenantAuthGuard";
 import { formatCurrencyStr, formatRelativeDate } from "@/lib/format";
@@ -118,6 +125,7 @@ export default function LeadsPage() {
   }, [statusFilter]);
 
   const [newLeadOpen, setNewLeadOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
 
   // React Query is paused while the guard is checking/redirecting to
   // avoid a spurious 401 ping against the API before login.
@@ -292,6 +300,15 @@ export default function LeadsPage() {
                 </SelectContent>
               </Select>
 
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setBulkImportOpen(true)}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Import
+              </Button>
+
               <Button size="sm" onClick={() => setNewLeadOpen(true)}>
                 <UserPlus className="h-4 w-4 mr-2" />
                 New Lead
@@ -302,6 +319,10 @@ export default function LeadsPage() {
       )}
 
       <NewApiLeadSheet open={newLeadOpen} onOpenChange={setNewLeadOpen} />
+      <BulkImportLeadsDialog
+        open={bulkImportOpen}
+        onOpenChange={setBulkImportOpen}
+      />
     </div>
   );
 }
