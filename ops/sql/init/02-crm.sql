@@ -413,3 +413,32 @@ CREATE TABLE IF NOT EXISTS sales_order_line_items (
 CREATE INDEX IF NOT EXISTS sales_order_line_items_org_idx ON sales_order_line_items (org_id);
 CREATE INDEX IF NOT EXISTS sales_order_line_items_order_idx
   ON sales_order_line_items (order_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Quotation send log — append-only record of outbound email dispatches
+-- produced by the worker after processing a `quotation.sent` outbox event.
+-- The API never writes here; the worker is the sole producer.
+-- Used to answer "did we send this, when, to whom, did it bounce?".
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS quotation_send_log (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id              uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  quotation_id        uuid NOT NULL REFERENCES quotations(id) ON DELETE CASCADE,
+  quotation_version   integer NOT NULL,
+  channel             text NOT NULL DEFAULT 'EMAIL'
+                        CHECK (channel IN ('EMAIL')),
+  status              text NOT NULL
+                        CHECK (status IN ('SENT','SKIPPED_DEV','FAILED')),
+  recipient_email     citext,
+  subject             text,
+  provider            text,                 -- 'resend' | 'stub'
+  provider_message_id text,                 -- id returned by the email provider
+  error_message       text,
+  sent_at             timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS quotation_send_log_quotation_idx
+  ON quotation_send_log (quotation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS quotation_send_log_org_idx
+  ON quotation_send_log (org_id, created_at DESC);

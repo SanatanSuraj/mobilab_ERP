@@ -29,11 +29,13 @@ import { toast } from "sonner";
 import {
   useApiAccount,
   useApiDeal,
+  useApiQuotations,
   useApiTransitionDealStage,
   useApiUpdateDeal,
 } from "@/hooks/useCrmApi";
 import { formatCurrency, formatDate } from "@/data/mock";
-import type { DealStage, UpdateDeal } from "@instigenie/contracts";
+import type { DealStage, Quotation, UpdateDeal } from "@instigenie/contracts";
+import { NewQuotationDialog } from "@/components/crm/quotations/NewQuotationDialog";
 import {
   AlertCircle,
   ArrowLeft,
@@ -41,8 +43,10 @@ import {
   CalendarDays,
   DollarSign,
   ExternalLink,
+  FileText,
   Pencil,
   Percent,
+  Plus,
   Save,
   User,
   X,
@@ -141,6 +145,12 @@ export default function DealDetailPage() {
   const [lostDialogOpen, setLostDialogOpen] = useState(false);
   const [lostReason, setLostReason] = useState("");
   const [lostCategory, setLostCategory] = useState<LostCategory | "">("");
+
+  // New-quotation dialog + per-deal quotation list. The list is enabled
+  // only once we have a dealId (always truthy here, but kept conditional
+  // so the hook signature matches the detail-page pattern).
+  const [newQuoteOpen, setNewQuoteOpen] = useState(false);
+  const quotationsQuery = useApiQuotations({ dealId, limit: 50 });
 
   // Inline-edit state. `draft` is only meaningful when editMode is true;
   // it seeds from the server row on every "Edit" click so the form is
@@ -381,6 +391,11 @@ export default function DealDetailPage() {
 
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
+      <NewQuotationDialog
+        open={newQuoteOpen}
+        onOpenChange={setNewQuoteOpen}
+        deal={deal}
+      />
       <Dialog
         open={lostDialogOpen}
         onOpenChange={(open) => {
@@ -626,6 +641,14 @@ export default function DealDetailPage() {
       <Tabs defaultValue="overview" className="space-y-4">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="quotations">
+            Quotations
+            {quotationsQuery.data && quotationsQuery.data.data.length > 0 && (
+              <span className="ml-1.5 text-xs text-muted-foreground">
+                ({quotationsQuery.data.data.length})
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
         </TabsList>
 
@@ -824,6 +847,79 @@ export default function DealDetailPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="quotations">
+          <Card>
+            <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-base">Quotations</CardTitle>
+              <Button
+                size="sm"
+                onClick={() => setNewQuoteOpen(true)}
+                disabled={isTerminal}
+                title={
+                  isTerminal
+                    ? "Closed deals cannot receive new quotations"
+                    : "Create a new quotation for this deal"
+                }
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                New Quotation
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {quotationsQuery.isLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ) : quotationsQuery.isError ? (
+                <p className="text-sm text-red-600">
+                  Failed to load quotations.
+                </p>
+              ) : (quotationsQuery.data?.data.length ?? 0) === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center gap-2">
+                  <FileText className="h-8 w-8 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    No quotations yet for this deal.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Create one to send a price to the customer.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {quotationsQuery.data?.data.map((q: Quotation) => (
+                    <button
+                      type="button"
+                      key={q.id}
+                      onClick={() => router.push(`/crm/quotations/${q.id}`)}
+                      className="w-full flex items-center gap-3 py-3 text-left hover:bg-muted/50 px-2 rounded transition-colors"
+                    >
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-mono font-medium">
+                          {q.quotationNumber}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {q.contactName} · Valid until{" "}
+                          {q.validUntil ? formatDate(q.validUntil) : "—"}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-medium">
+                          {formatCurrency(toNumber(q.grandTotal))}
+                        </p>
+                        <div className="mt-0.5">
+                          <StatusBadge status={q.status} />
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="timeline">

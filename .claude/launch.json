@@ -4,7 +4,7 @@
     {
       "name": "crm-prototype",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype' && npm run dev"],
+      "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype' && pnpm dev"],
       "port": 3000
     }
   ]

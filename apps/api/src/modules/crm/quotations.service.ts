@@ -50,6 +50,7 @@ import {
   ValidationError,
 } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import {
@@ -274,6 +275,24 @@ export class QuotationsService {
       if (result === null) throw new NotFoundError("quotation");
       if (result === "version_conflict") {
         throw new ConflictError("quotation was modified by someone else");
+      }
+      // Transitioning INTO `SENT` fires the outbound email pipeline.
+      // The row lands in the same txn as the status flip, so either both
+      // commit or neither — no "status says SENT but no email queued".
+      // The idempotency key includes the post-transition version so retries
+      // from the client can't enqueue a second email for the same send.
+      if (input.status === "SENT") {
+        await enqueueOutbox(client, {
+          aggregateType: "quotation",
+          aggregateId: id,
+          eventType: "quotation.sent",
+          payload: {
+            orgId: result.orgId,
+            quotationId: id,
+            quotationVersion: result.version,
+          },
+          idempotencyKey: `quotation.sent:${id}:v${result.version}`,
+        });
       }
       return result;
     });

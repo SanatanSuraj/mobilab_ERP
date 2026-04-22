@@ -23,6 +23,7 @@ BEGIN
     'ticket_comments',
     'quotations',
     'quotation_line_items',
+    'quotation_send_log',
     'sales_orders',
     'sales_order_line_items',
     'crm_number_sequences'

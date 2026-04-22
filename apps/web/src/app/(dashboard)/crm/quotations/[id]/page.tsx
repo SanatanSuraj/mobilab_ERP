@@ -273,18 +273,26 @@ export default function QuotationDetailPage() {
               Approve
             </Button>
           )}
-          {allowedTransitions.map((s) => (
-            <Button
-              key={s}
-              size="sm"
-              variant="outline"
-              onClick={() => handleTransition(s)}
-              disabled={transitionStatus.isPending}
-            >
-              <Send className="h-4 w-4 mr-2" />
-              Move to {s}
-            </Button>
-          ))}
+          {allowedTransitions.map((s) => {
+            // "Move to SENT" is actually the send-the-quote-to-the-customer
+            // action — triggers the outbound email + PDF pipeline server-side.
+            // Give it a clearer label so users don't mistake it for a generic
+            // state change.
+            const label = s === "SENT" ? "Send Quotation" : `Move to ${s}`;
+            const variant = s === "SENT" ? "default" : "outline";
+            return (
+              <Button
+                key={s}
+                size="sm"
+                variant={variant}
+                onClick={() => handleTransition(s)}
+                disabled={transitionStatus.isPending}
+              >
+                <Send className="h-4 w-4 mr-2" />
+                {label}
+              </Button>
+            );
+          })}
           {quotation.status === "ACCEPTED" && (
             <Button
               size="sm"

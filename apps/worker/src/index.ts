@@ -16,6 +16,7 @@ import { createLogger, registry } from "@instigenie/observability";
 import { installNumericTypeParser } from "@instigenie/db";
 import {
   QueueNames,
+  makeQueue,
   makeWorker,
   assertBullRedisNoeviction,
   createBullConnection,
@@ -25,8 +26,14 @@ import { loadEnv } from "./env.js";
 import { runBootstrapPolicy } from "./bootstrap-policy.js";
 import {
   createOutboxDispatchProcessor,
+  type EmailQueueJobData,
   type OutboxJob,
 } from "./processors/outbox-dispatch.js";
+import {
+  createEmailProcessor,
+  type EmailJob,
+} from "./processors/email.js";
+import { createMailer } from "./email/mailer.js";
 
 const env = loadEnv();
 const log = createLogger({ service: "worker", level: env.logLevel });
@@ -54,11 +61,45 @@ async function main(): Promise<void> {
     }
   }
 
+  // The email queue is written to by the outbox-dispatch processor and read
+  // by the email worker registered below. One Queue handle is enough — it's
+  // a thin wrapper around the Redis connection.
+  const emailQueue = makeQueue<EmailQueueJobData>(QueueNames.email, {
+    redisUrl: env.bullRedisUrl,
+  });
+
+  const mailer = createMailer({
+    resendApiKey: env.resendApiKey,
+    emailDisabled: env.emailDisabled,
+  });
+  if (env.emailDisabled) {
+    log.warn(
+      {},
+      "email sending is DISABLED (set RESEND_API_KEY + EMAIL_DISABLED=false to enable)",
+    );
+  }
+
   const workers: Worker[] = [];
   workers.push(
     makeWorker<OutboxJob>(QueueNames.outboxDispatch, {
       redisUrl: env.bullRedisUrl,
-      processor: createOutboxDispatchProcessor(pool, log),
+      processor: createOutboxDispatchProcessor({
+        pool,
+        log,
+        emailQueue,
+      }),
+      concurrency: env.concurrency,
+    }),
+    makeWorker<EmailJob>(QueueNames.email, {
+      redisUrl: env.bullRedisUrl,
+      processor: createEmailProcessor({
+        pool,
+        log,
+        mailer,
+        mailFrom: env.mailFrom,
+        mailReplyTo: env.mailReplyTo,
+        brandName: "InstiGenie",
+      }),
       concurrency: env.concurrency,
     })
   );
@@ -101,6 +142,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     log.info({ signal }, "shutting down");
     await Promise.all(workers.map((w) => w.close()));
+    await emailQueue.close().catch(() => undefined);
     await pool.end().catch(() => undefined);
     process.exit(0);
   };
