@@ -14,6 +14,7 @@
 
 export { makeDb, type Db, type MakePoolOptions } from "./pool.js";
 export { withOrg } from "./with-org.js";
+export { withPortalUser } from "./with-portal-user.js";
 export { enqueueOutbox, type OutboxEvent } from "./outbox.js";
 export {
   installNumericTypeParser,

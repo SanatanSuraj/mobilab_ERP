@@ -224,3 +224,304 @@ CREATE UNIQUE INDEX IF NOT EXISTS stock_summary_item_wh_unique
 -- For the "low stock" dashboard: anything where on_hand <= reorder_level.
 CREATE INDEX IF NOT EXISTS stock_summary_lowstock_idx
   ON stock_summary (org_id, on_hand);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- stock_reservations — Phase 3 concurrency-safe reservations.
+-- ARCHITECTURE.md §3.2.
+--
+-- One row per outstanding reservation. Callers INSERT via the stored
+-- function reserve_stock_atomic() which locks the summary row with
+-- FOR UPDATE NOWAIT, checks `available >= qty`, and updates the
+-- summary's reserved/available counters in the same transaction.
+--
+-- Status transitions are linear and one-way:
+--     ACTIVE ──(release)──▶ RELEASED
+--     ACTIVE ──(consume)──▶ CONSUMED  (also writes a WO_ISSUE ledger row)
+--
+-- `consumed_ledger_id` points at the ledger row created by the consume
+-- call — gives us the audit trail linking back from the issued stock
+-- to the reservation that authorised it.
+--
+-- IMPORTANT: this table is NOT written directly by services. Go through
+-- reserve_stock_atomic / release_stock_reservation / consume_stock_reservation.
+-- Direct INSERTs would skip the summary-counter update and silently
+-- diverge stock_summary.reserved from the sum of ACTIVE rows here.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS stock_reservations (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id             uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  item_id            uuid NOT NULL REFERENCES items(id) ON DELETE RESTRICT,
+  warehouse_id       uuid NOT NULL REFERENCES warehouses(id) ON DELETE RESTRICT,
+  -- Always positive; the summary update adds this to reserved and
+  -- subtracts from available.
+  quantity           numeric(18, 3) NOT NULL CHECK (quantity > 0),
+  uom                text NOT NULL,
+  status             text NOT NULL DEFAULT 'ACTIVE'
+                       CHECK (status IN ('ACTIVE', 'RELEASED', 'CONSUMED')),
+  -- What document asked for the reservation. 'WO' for work orders,
+  -- 'SO' for sales orders, 'MRP' for planning holds, 'MANUAL' for
+  -- operator-driven holds. Free text to stay forward-compatible.
+  ref_doc_type       text NOT NULL,
+  ref_doc_id         uuid NOT NULL,
+  ref_line_id        uuid,
+  reserved_by        uuid REFERENCES users(id) ON DELETE SET NULL,
+  reserved_at        timestamptz NOT NULL DEFAULT now(),
+  released_at        timestamptz,
+  released_by        uuid REFERENCES users(id) ON DELETE SET NULL,
+  consumed_at        timestamptz,
+  consumed_by        uuid REFERENCES users(id) ON DELETE SET NULL,
+  consumed_ledger_id uuid REFERENCES stock_ledger(id) ON DELETE SET NULL,
+  notes              text,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS stock_reservations_org_idx
+  ON stock_reservations (org_id);
+-- Partial index: the "live holds for this doc" query is the common
+-- lookup for release_by_ref.
+CREATE INDEX IF NOT EXISTS stock_reservations_active_ref_idx
+  ON stock_reservations (org_id, ref_doc_type, ref_doc_id)
+  WHERE status = 'ACTIVE';
+CREATE INDEX IF NOT EXISTS stock_reservations_active_item_wh_idx
+  ON stock_reservations (org_id, item_id, warehouse_id)
+  WHERE status = 'ACTIVE';
+CREATE INDEX IF NOT EXISTS stock_reservations_status_idx
+  ON stock_reservations (org_id, status, reserved_at DESC);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Reservation stored functions.
+--
+-- Custom SQLSTATE codes (class 'UR' = Unreservable, user-defined):
+--   UR001 — insufficient stock (available < requested qty)
+--   UR002 — reservation not ACTIVE (already released or consumed)
+--
+-- Built-in codes callers should know about:
+--   55P03 — lock_not_available: FOR UPDATE NOWAIT hit a contended row.
+--           The TS wrapper retries with jittered exponential backoff.
+--   40P01 — deadlock_detected: cycle in the wait-for graph. Same retry
+--           path; canonical lock ordering in mrpReserveAll makes this
+--           nearly impossible in practice.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.reserve_stock_atomic(
+  p_org_id       uuid,
+  p_item_id      uuid,
+  p_warehouse_id uuid,
+  p_qty          numeric,
+  p_uom          text,
+  p_ref_doc_type text,
+  p_ref_doc_id   uuid,
+  p_ref_line_id  uuid,
+  p_reserved_by  uuid
+) RETURNS uuid
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_available  numeric;
+  v_summary_id uuid;
+  v_res_id     uuid;
+BEGIN
+  IF p_qty IS NULL OR p_qty <= 0 THEN
+    RAISE EXCEPTION 'reserve qty must be > 0 (got %)', p_qty
+      USING ERRCODE = '22023';  -- invalid_parameter_value
+  END IF;
+
+  -- Make sure the summary row exists before we try to lock it. This is
+  -- a no-op if stock has ever moved for this (item, warehouse); for a
+  -- fresh item it primes the row at zero so the lock can target it.
+  INSERT INTO stock_summary (
+    org_id, item_id, warehouse_id, on_hand, reserved, available
+  ) VALUES (
+    p_org_id, p_item_id, p_warehouse_id, 0, 0, 0
+  )
+  ON CONFLICT (org_id, item_id, warehouse_id) DO NOTHING;
+
+  -- Lock the summary row. NOWAIT: if another session holds it we fail
+  -- fast with SQLSTATE 55P03 and let the caller retry. Parking here
+  -- would burn connections and obscure latency.
+  SELECT id, available
+    INTO v_summary_id, v_available
+    FROM stock_summary
+   WHERE org_id = p_org_id
+     AND item_id = p_item_id
+     AND warehouse_id = p_warehouse_id
+   FOR UPDATE NOWAIT;
+
+  IF v_available < p_qty THEN
+    RAISE EXCEPTION 'insufficient stock: available=%, requested=%',
+                    v_available, p_qty
+      USING ERRCODE = 'UR001',
+            HINT    = format('item=%s wh=%s', p_item_id, p_warehouse_id);
+  END IF;
+
+  INSERT INTO stock_reservations (
+    org_id, item_id, warehouse_id, quantity, uom, status,
+    ref_doc_type, ref_doc_id, ref_line_id, reserved_by
+  ) VALUES (
+    p_org_id, p_item_id, p_warehouse_id, p_qty, p_uom, 'ACTIVE',
+    p_ref_doc_type, p_ref_doc_id, p_ref_line_id, p_reserved_by
+  ) RETURNING id INTO v_res_id;
+
+  UPDATE stock_summary
+     SET reserved   = reserved  + p_qty,
+         available  = available - p_qty,
+         updated_at = now()
+   WHERE id = v_summary_id;
+
+  RETURN v_res_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.release_stock_reservation(
+  p_reservation_id uuid,
+  p_released_by    uuid
+) RETURNS void
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_res stock_reservations%ROWTYPE;
+BEGIN
+  -- Lock the reservation row first — cheap, and eliminates the window
+  -- where two releasers see it ACTIVE and both try to decrement.
+  SELECT * INTO v_res
+    FROM stock_reservations
+   WHERE id = p_reservation_id
+   FOR UPDATE NOWAIT;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'reservation not found: %', p_reservation_id
+      USING ERRCODE = 'P0002';  -- no_data_found (pg convention)
+  END IF;
+
+  IF v_res.status <> 'ACTIVE' THEN
+    RAISE EXCEPTION 'reservation % is %; cannot release',
+                    p_reservation_id, v_res.status
+      USING ERRCODE = 'UR002';
+  END IF;
+
+  -- Lock the summary row. NOWAIT for the same reason as reserve.
+  PERFORM 1 FROM stock_summary
+   WHERE org_id = v_res.org_id
+     AND item_id = v_res.item_id
+     AND warehouse_id = v_res.warehouse_id
+   FOR UPDATE NOWAIT;
+
+  UPDATE stock_reservations
+     SET status      = 'RELEASED',
+         released_at = now(),
+         released_by = p_released_by,
+         updated_at  = now()
+   WHERE id = p_reservation_id;
+
+  UPDATE stock_summary
+     SET reserved   = reserved  - v_res.quantity,
+         available  = available + v_res.quantity,
+         updated_at = now()
+   WHERE org_id = v_res.org_id
+     AND item_id = v_res.item_id
+     AND warehouse_id = v_res.warehouse_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.consume_stock_reservation(
+  p_reservation_id uuid,
+  p_consumed_by    uuid,
+  p_batch_no       text DEFAULT NULL,
+  p_serial_no      text DEFAULT NULL,
+  p_unit_cost      numeric DEFAULT NULL
+) RETURNS uuid
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_res       stock_reservations%ROWTYPE;
+  v_ledger_id uuid;
+BEGIN
+  SELECT * INTO v_res
+    FROM stock_reservations
+   WHERE id = p_reservation_id
+   FOR UPDATE NOWAIT;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'reservation not found: %', p_reservation_id
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  IF v_res.status <> 'ACTIVE' THEN
+    RAISE EXCEPTION 'reservation % is %; cannot consume',
+                    p_reservation_id, v_res.status
+      USING ERRCODE = 'UR002';
+  END IF;
+
+  PERFORM 1 FROM stock_summary
+   WHERE org_id = v_res.org_id
+     AND item_id = v_res.item_id
+     AND warehouse_id = v_res.warehouse_id
+   FOR UPDATE NOWAIT;
+
+  -- Post the issue ledger row. The tg_stock_summary_from_ledger trigger
+  -- fires AFTER INSERT and decrements on_hand + recomputes available.
+  -- We then adjust `reserved` (the trigger doesn't touch it) and add
+  -- the consumed quantity back to `available` — the reservation no
+  -- longer holds that quantity now that real stock has moved.
+  INSERT INTO stock_ledger (
+    org_id, item_id, warehouse_id, quantity, uom, txn_type,
+    ref_doc_type, ref_doc_id, ref_line_id,
+    batch_no, serial_no, unit_cost, posted_by, reason
+  ) VALUES (
+    v_res.org_id, v_res.item_id, v_res.warehouse_id,
+    -v_res.quantity, v_res.uom, 'WO_ISSUE',
+    v_res.ref_doc_type, v_res.ref_doc_id, v_res.ref_line_id,
+    p_batch_no, p_serial_no, p_unit_cost, p_consumed_by,
+    'consumed from reservation ' || p_reservation_id::text
+  ) RETURNING id INTO v_ledger_id;
+
+  -- Trigger has already reduced on_hand by v_res.quantity and
+  -- recomputed available = (new on_hand) - reserved. That dropped
+  -- available by v_res.quantity erroneously (the reservation was
+  -- already holding it). Add it back and release the reserved slot.
+  UPDATE stock_summary
+     SET reserved   = reserved  - v_res.quantity,
+         available  = available + v_res.quantity,
+         updated_at = now()
+   WHERE org_id = v_res.org_id
+     AND item_id = v_res.item_id
+     AND warehouse_id = v_res.warehouse_id;
+
+  UPDATE stock_reservations
+     SET status             = 'CONSUMED',
+         consumed_at        = now(),
+         consumed_by        = p_consumed_by,
+         consumed_ledger_id = v_ledger_id,
+         updated_at         = now()
+   WHERE id = p_reservation_id;
+
+  RETURN v_ledger_id;
+END $$;
+
+-- Bulk release by ref doc. Used when a work order is cancelled — release
+-- every ACTIVE hold tagged with that ref. Sorts by id so two concurrent
+-- cancels acquire reservation locks in the same order → no deadlock.
+CREATE OR REPLACE FUNCTION public.release_stock_reservations_by_ref(
+  p_org_id       uuid,
+  p_ref_doc_type text,
+  p_ref_doc_id   uuid,
+  p_released_by  uuid
+) RETURNS integer
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  r_id  uuid;
+  n_rel integer := 0;
+BEGIN
+  FOR r_id IN
+    SELECT id FROM stock_reservations
+     WHERE org_id = p_org_id
+       AND ref_doc_type = p_ref_doc_type
+       AND ref_doc_id = p_ref_doc_id
+       AND status = 'ACTIVE'
+     ORDER BY id
+  LOOP
+    PERFORM public.release_stock_reservation(r_id, p_released_by);
+    n_rel := n_rel + 1;
+  END LOOP;
+  RETURN n_rel;
+END $$;

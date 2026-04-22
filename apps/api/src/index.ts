@@ -57,6 +57,7 @@ import { registerCrmRoutes } from "./modules/crm/routes.js";
 import { ItemsService } from "./modules/inventory/items.service.js";
 import { WarehousesService } from "./modules/inventory/warehouses.service.js";
 import { StockService } from "./modules/inventory/stock.service.js";
+import { ReservationsService } from "./modules/inventory/reservations.service.js";
 import { registerInventoryRoutes } from "./modules/inventory/routes.js";
 import { VendorsService } from "./modules/procurement/vendors.service.js";
 import { IndentsService } from "./modules/procurement/indents.service.js";
@@ -83,8 +84,11 @@ import { registerFinanceRoutes } from "./modules/finance/routes.js";
 import { NotificationTemplatesService } from "./modules/notifications/templates.service.js";
 import { NotificationsService } from "./modules/notifications/notifications.service.js";
 import { registerNotificationsRoutes } from "./modules/notifications/routes.js";
+import { ApprovalsService } from "./modules/approvals/approvals.service.js";
+import { registerApprovalsRoutes } from "./modules/approvals/routes.js";
 import { VendorAuthService, VendorAdminService } from "@instigenie/vendor-admin";
 import { registerVendorRoutes } from "./modules/vendor/routes.js";
+import { PortalService, registerPortalRoutes } from "./modules/portal/index.js";
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -162,6 +166,8 @@ async function main(): Promise<void> {
   const itemsService = new ItemsService(pool);
   const warehousesService = new WarehousesService(pool);
   const stockService = new StockService(pool);
+  // Phase 3 §3.2 — concurrency-safe reservations on top of stock_summary.
+  const reservationsService = new ReservationsService(pool);
 
   // Procurement services — Phase 2 §12.1 #4. Vendors + indents + POs + GRNs.
   // GRNs.post() writes to stock_ledger, so these services live downstream
@@ -203,6 +209,10 @@ async function main(): Promise<void> {
   // wiring). CORE module — every tenant gets it, no feature flag.
   const notificationTemplatesService = new NotificationTemplatesService(pool);
   const notificationsService = new NotificationsService(pool);
+
+  // Approvals service — Phase 3 §3.3. Chain-driven workflow engine with
+  // e-signature support and an append-only workflow_transitions audit log.
+  const approvalsService = new ApprovalsService(pool);
 
   // Sprint 3 — vendor-admin stack. Uses the BYPASSRLS `vendorPool`, shares
   // the same TokenFactory (vendor tokens are a different audience within
@@ -331,6 +341,7 @@ async function main(): Promise<void> {
     items: itemsService,
     warehouses: warehousesService,
     stock: stockService,
+    reservations: reservationsService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
@@ -400,12 +411,51 @@ async function main(): Promise<void> {
     },
   });
 
+  await registerApprovalsRoutes(app, {
+    approvals: approvalsService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+  });
+
   // Sprint 3 — /vendor-admin/* surface. Lives alongside tenant routes but
   // uses the BYPASSRLS `vendorPool` via the services wired above.
   await registerVendorRoutes(app, {
     authService: vendorAuthService,
     adminService: vendorAdminService,
     guard: { tokens },
+  });
+
+  // Phase 3 §3.7 — Customer portal surface at /portal/*.
+  //
+  // Rate limit: 60 rpm/user. We build a route-scoped limiter via
+  // app.rateLimit({...}) — the global limiter registered above stays at
+  // 300/min/IP for every other surface. keyGenerator prefers user.id (set
+  // by guardPortal before this runs) and falls back to ip so that an
+  // unauthenticated probe can't evade the cap by omitting the header.
+  //
+  // Audience fencing: registerPortalRoutes uses guardPortal (expectedAudience
+  // = instigenie-portal), which rejects internal tokens on JWT verify. The
+  // internal routes above already use guardInternal, which symmetrically
+  // rejects portal tokens. So "portal tokens blocked from non-/portal/* " is
+  // enforced at the JWT layer — no per-route hook needed.
+  const portalService = new PortalService({ pool });
+  const portalRateLimit = app.rateLimit({
+    max: 60,
+    timeWindow: "1 minute",
+    keyGenerator: (req) => req.user?.id ?? req.ip ?? "anon",
+  });
+  await registerPortalRoutes(app, {
+    service: portalService,
+    pool,
+    guardPortal: {
+      tokens,
+      expectedAudience: AUDIENCE.portal,
+      tenantStatus,
+    },
+    portalRateLimit,
   });
 
   // ─── Start ──────────────────────────────────────────────────────────────────

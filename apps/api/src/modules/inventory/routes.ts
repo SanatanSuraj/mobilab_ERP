@@ -26,12 +26,16 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
 import {
+  BulkReserveStockRequestSchema,
+  ConsumeReservationRequestSchema,
   CreateItemSchema,
   CreateWarehouseSchema,
   ItemListQuerySchema,
   ItemWarehouseBindingListQuerySchema,
   PostStockLedgerEntrySchema,
+  ReserveStockRequestSchema,
   StockLedgerListQuerySchema,
+  StockReservationListQuerySchema,
   StockSummaryListQuerySchema,
   UpdateItemSchema,
   UpdateWarehouseSchema,
@@ -46,6 +50,7 @@ import type { RequireFeature } from "../quotas/guard.js";
 import type { ItemsService } from "./items.service.js";
 import type { WarehousesService } from "./warehouses.service.js";
 import type { StockService } from "./stock.service.js";
+import type { ReservationsService } from "./reservations.service.js";
 import { UnauthorizedError } from "@instigenie/errors";
 import { requireUser } from "../../context/request-context.js";
 
@@ -53,9 +58,15 @@ export interface RegisterInventoryRoutesOptions {
   items: ItemsService;
   warehouses: WarehousesService;
   stock: StockService;
+  reservations: ReservationsService;
   guardInternal: AuthGuardOptions;
   requireFeature: RequireFeature;
 }
+
+const RefPathSchema = z.object({
+  refDocType: z.string().trim().min(1).max(32),
+  refDocId: z.string().uuid(),
+});
 
 const IdParamSchema = z.object({ id: z.string().uuid() });
 
@@ -397,6 +408,131 @@ export async function registerInventoryRoutes(
         warehouseId
       );
       return reply.send(result);
+    }
+  );
+
+  // ─── Stock reservations (Phase 3) ─────────────────────────────────────────
+  //
+  // Read: inventory:read. Create/release: inventory:issue (holding stock
+  // is functionally "planning to issue"). Consume: inventory:issue
+  // (actually issues via a WO_ISSUE ledger row).
+
+  app.get(
+    "/inventory/reservations",
+    {
+      preHandler: [
+        authGuard,
+        requireInventoryModule,
+        requirePermission("inventory:read"),
+      ],
+    },
+    async (req, reply) => {
+      const query = StockReservationListQuerySchema.parse(req.query);
+      const result = await opts.reservations.list(req, query);
+      return reply.send(result);
+    }
+  );
+
+  app.get(
+    "/inventory/reservations/:id",
+    {
+      preHandler: [
+        authGuard,
+        requireInventoryModule,
+        requirePermission("inventory:read"),
+      ],
+    },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const result = await opts.reservations.getById(req, id);
+      return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/inventory/reservations",
+    {
+      preHandler: [
+        authGuard,
+        requireInventoryModule,
+        requirePermission("inventory:issue"),
+      ],
+    },
+    async (req, reply) => {
+      const body = ReserveStockRequestSchema.parse(req.body);
+      const result = await opts.reservations.reserve(req, body);
+      return reply.code(201).send(result);
+    }
+  );
+
+  // Bulk / MRP reserve-all. Canonical-ordered, all-or-nothing.
+  app.post(
+    "/inventory/reservations/bulk",
+    {
+      preHandler: [
+        authGuard,
+        requireInventoryModule,
+        requirePermission("inventory:issue"),
+      ],
+    },
+    async (req, reply) => {
+      const body = BulkReserveStockRequestSchema.parse(req.body);
+      const result = await opts.reservations.mrpReserveAll(req, body);
+      return reply.code(201).send({ data: result });
+    }
+  );
+
+  app.post(
+    "/inventory/reservations/:id/release",
+    {
+      preHandler: [
+        authGuard,
+        requireInventoryModule,
+        requirePermission("inventory:issue"),
+      ],
+    },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      await opts.reservations.release(req, id);
+      return reply.code(204).send();
+    }
+  );
+
+  // Bulk release by ref doc. Idempotent — returns a count of rows released.
+  app.post(
+    "/inventory/reservations/by-ref/:refDocType/:refDocId/release",
+    {
+      preHandler: [
+        authGuard,
+        requireInventoryModule,
+        requirePermission("inventory:issue"),
+      ],
+    },
+    async (req, reply) => {
+      const { refDocType, refDocId } = RefPathSchema.parse(req.params);
+      const released = await opts.reservations.releaseByRef(
+        req,
+        refDocType,
+        refDocId
+      );
+      return reply.send({ released });
+    }
+  );
+
+  app.post(
+    "/inventory/reservations/:id/consume",
+    {
+      preHandler: [
+        authGuard,
+        requireInventoryModule,
+        requirePermission("inventory:issue"),
+      ],
+    },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = ConsumeReservationRequestSchema.parse(req.body ?? {});
+      const result = await opts.reservations.consume(req, id, body);
+      return reply.code(201).send(result);
     }
   );
 }

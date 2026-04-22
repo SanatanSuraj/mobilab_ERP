@@ -157,6 +157,13 @@ export const PERMISSIONS = [
   "notifications:dispatch",
   "notifications:templates:manage",
 
+  // approvals (§3.3 workflow engine)
+  "approvals:read",
+  "approvals:request",
+  "approvals:act",
+  "approvals:cancel",
+  "approvals:chains:manage",
+
   // reports
   "reports:read",
   "reports:export",
@@ -203,6 +210,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "payments:read",
     "notifications:read",
     "notifications:admin_read",
+    "approvals:read",
+    "approvals:request",
+    "approvals:act",
+    "approvals:cancel",
+    "approvals:chains:manage",
     "reports:read",
     "reports:export",
     "admin:audit:read",
@@ -236,6 +248,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "sales_invoices:read",
     "payments:read",
     "notifications:read",
+    "approvals:read",
+    "approvals:request",
   ],
 
   SALES_MANAGER: [
@@ -274,6 +288,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "sales_invoices:read",
     "payments:read",
     "notifications:read",
+    "approvals:read",
+    "approvals:request",
+    "approvals:act",
+    "approvals:cancel",
     "reports:read",
   ],
 
@@ -297,6 +315,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "payments:read",
     "payments:reconcile",
     "notifications:read",
+    "approvals:read",
+    "approvals:request",
+    "approvals:act",
+    "approvals:cancel",
     "reports:read",
     "reports:export",
   ],
@@ -318,6 +340,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "inventory:read",
     "inventory:issue",
     "notifications:read",
+    "approvals:read",
+    "approvals:request",
   ],
 
   PRODUCTION_MANAGER: [
@@ -351,6 +375,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "inventory:issue",
     "inventory:adjust",
     "notifications:read",
+    "approvals:read",
+    "approvals:request",
+    "approvals:act",
+    "approvals:cancel",
     "reports:read",
   ],
 
@@ -364,6 +392,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "work_orders:read",
     "bmr:read",
     "notifications:read",
+    "approvals:read",
   ],
 
   QC_INSPECTOR: [
@@ -380,6 +409,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "ncr:create",
     "ncr:read",
     "notifications:read",
+    "approvals:read",
+    "approvals:request",
+    "approvals:act",
   ],
 
   QC_MANAGER: [
@@ -407,6 +439,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "ncr:disposition",
     "ncr:close",
     "notifications:read",
+    "approvals:read",
+    "approvals:request",
+    "approvals:act",
+    "approvals:cancel",
     "reports:read",
   ],
 
@@ -418,6 +454,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "inventory:issue",
     "purchase_orders:read",
     "notifications:read",
+    "approvals:read",
+    "approvals:request",
   ],
 
   CUSTOMER: [

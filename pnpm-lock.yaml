@@ -566,6 +566,9 @@ importers:
       '@instigenie/vendor-admin':
         specifier: workspace:*
         version: link:../../packages/vendor-admin
+      '@instigenie/worker':
+        specifier: workspace:*
+        version: link:../../apps/worker
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.1

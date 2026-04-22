@@ -255,3 +255,57 @@ SELECT r.id, 'notifications:read'
                                                 -- everything via the catch-all
                                                 -- INSERT above
 ON CONFLICT DO NOTHING;
+
+-- Approvals (§3.3):
+--   * :read — every internal role can read approval requests for context.
+--   * :request — every mutating internal role can kick off a request;
+--     service layer still validates the entity_type belongs to a module
+--     they have create/update rights on.
+--   * :act — approver-eligible roles only. Service layer additionally
+--     checks that the current step's role_id matches the actor's role.
+--   * :cancel — requester's own manager ranks + SUPER_ADMIN.
+--   * :chains:manage — SUPER_ADMIN and MANAGEMENT; others caught by the
+--     blanket SUPER_ADMIN grant at the top of this file.
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, 'approvals:read'
+  FROM roles r
+ WHERE r.id NOT IN ('CUSTOMER', 'SUPER_ADMIN')
+ON CONFLICT DO NOTHING;
+
+-- Request-create perm: any internal role that writes business entities.
+INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('SALES_REP',          'approvals:request'),
+  ('SALES_MANAGER',      'approvals:request'),
+  ('FINANCE',            'approvals:request'),
+  ('PRODUCTION',         'approvals:request'),
+  ('PRODUCTION_MANAGER', 'approvals:request'),
+  ('QC_INSPECTOR',       'approvals:request'),
+  ('QC_MANAGER',         'approvals:request'),
+  ('STORES',             'approvals:request'),
+  ('MANAGEMENT',         'approvals:request')
+ON CONFLICT DO NOTHING;
+
+-- Act perm: only the roles that appear in chain definitions as approvers.
+INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('SALES_MANAGER',      'approvals:act'),
+  ('FINANCE',            'approvals:act'),
+  ('PRODUCTION_MANAGER', 'approvals:act'),
+  ('QC_INSPECTOR',       'approvals:act'),
+  ('QC_MANAGER',         'approvals:act'),
+  ('MANAGEMENT',         'approvals:act')
+ON CONFLICT DO NOTHING;
+
+-- Cancel perm: requesters can cancel their own; managers can cancel wider.
+INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('SALES_MANAGER',      'approvals:cancel'),
+  ('FINANCE',            'approvals:cancel'),
+  ('PRODUCTION_MANAGER', 'approvals:cancel'),
+  ('QC_MANAGER',         'approvals:cancel'),
+  ('MANAGEMENT',         'approvals:cancel')
+ON CONFLICT DO NOTHING;
+
+-- Chain-management perm: MANAGEMENT + (SUPER_ADMIN via catch-all above).
+INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('MANAGEMENT', 'approvals:chains:manage')
+ON CONFLICT DO NOTHING;

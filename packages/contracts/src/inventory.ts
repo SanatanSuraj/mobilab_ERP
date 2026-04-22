@@ -349,3 +349,103 @@ export const StockSummaryListQuerySchema = PaginationQuerySchema.extend({
     .optional(),
   search: z.string().trim().min(1).max(200).optional(),
 });
+
+// ─── Stock reservations (Phase 3) ────────────────────────────────────────────
+
+export const RESERVATION_STATUSES = ["ACTIVE", "RELEASED", "CONSUMED"] as const;
+export const ReservationStatusSchema = z.enum(RESERVATION_STATUSES);
+export type ReservationStatus = z.infer<typeof ReservationStatusSchema>;
+
+/**
+ * A single outstanding or historical stock reservation. Maintained by the
+ * reserve_stock_atomic / release_stock_reservation / consume_stock_reservation
+ * stored functions — services never INSERT here directly.
+ */
+export const StockReservationSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  itemId: uuid,
+  warehouseId: uuid,
+  quantity: qtyStr, // always positive
+  uom: ItemUomSchema,
+  status: ReservationStatusSchema,
+  refDocType: z.string(),
+  refDocId: uuid,
+  refLineId: uuid.nullable(),
+  reservedBy: uuid.nullable(),
+  reservedAt: z.string(),
+  releasedAt: z.string().nullable(),
+  releasedBy: uuid.nullable(),
+  consumedAt: z.string().nullable(),
+  consumedBy: uuid.nullable(),
+  consumedLedgerId: uuid.nullable(),
+  notes: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type StockReservation = z.infer<typeof StockReservationSchema>;
+
+/**
+ * Single-line reservation request. Callers either POST this directly
+ * (manual holds) or it's built internally by MRP/WO release paths.
+ */
+export const ReserveStockRequestSchema = z.object({
+  itemId: uuid,
+  warehouseId: uuid,
+  quantity: qtyStr.refine((v) => v !== "0" && v !== "-0" && v !== "0.0", {
+    message: "quantity must be > 0",
+  }),
+  uom: ItemUomSchema,
+  refDocType: z.string().trim().min(1).max(32),
+  refDocId: uuid,
+  refLineId: uuid.optional(),
+  notes: z.string().trim().max(500).optional(),
+});
+export type ReserveStockRequest = z.infer<typeof ReserveStockRequestSchema>;
+
+/**
+ * MRP bulk-reserve: multi-line in one atomic call. The service sorts
+ * lines by (itemId, warehouseId) before locking so concurrent MRP runs
+ * acquire locks in the same order and never deadlock on each other.
+ *
+ * Semantics: all-or-nothing. If any line fails (shortage or lock
+ * timeout after retries) every reservation posted so far in the call
+ * rolls back.
+ */
+export const BulkReserveStockRequestSchema = z.object({
+  refDocType: z.string().trim().min(1).max(32),
+  refDocId: uuid,
+  lines: z
+    .array(
+      z.object({
+        itemId: uuid,
+        warehouseId: uuid,
+        quantity: qtyStr.refine((v) => v !== "0" && v !== "-0" && v !== "0.0"),
+        uom: ItemUomSchema,
+        refLineId: uuid.optional(),
+      })
+    )
+    .min(1)
+    .max(200),
+  notes: z.string().trim().max(500).optional(),
+});
+export type BulkReserveStockRequest = z.infer<
+  typeof BulkReserveStockRequestSchema
+>;
+
+export const ConsumeReservationRequestSchema = z.object({
+  batchNo: z.string().trim().max(64).optional(),
+  serialNo: z.string().trim().max(64).optional(),
+  unitCost: decimalStr.optional(),
+});
+export type ConsumeReservationRequest = z.infer<
+  typeof ConsumeReservationRequestSchema
+>;
+
+export const StockReservationListQuerySchema = PaginationQuerySchema.extend({
+  itemId: uuid.optional(),
+  warehouseId: uuid.optional(),
+  status: ReservationStatusSchema.optional(),
+  refDocType: z.string().trim().max(32).optional(),
+  refDocId: uuid.optional(),
+});

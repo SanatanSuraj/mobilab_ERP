@@ -14,7 +14,8 @@ BEGIN
     'items',
     'item_warehouse_bindings',
     'stock_ledger',
-    'stock_summary'
+    'stock_summary',
+    'stock_reservations'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);

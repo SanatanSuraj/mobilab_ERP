@@ -27,6 +27,17 @@ export interface RequestUser {
 declare module "fastify" {
   interface FastifyRequest {
     user?: RequestUser;
+    /**
+     * Portal customer link. Populated by the portal guard's post-auth hook
+     * by looking up account_portal_users for (orgId, userId). Consumed by
+     * withPortalRequest, which passes it to @instigenie/db/withPortalUser
+     * as `app.current_portal_customer`. See ARCHITECTURE.md §3.7.
+     *
+     * Only ever set for requests on the portal audience. Reading it from an
+     * internal-audience handler is a no-op (undefined); withPortalRequest
+     * throws if it's missing.
+     */
+    portalCustomerId?: string;
   }
 }
 

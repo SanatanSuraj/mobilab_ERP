@@ -140,6 +140,13 @@ INSERT INTO permissions (id, resource, action, description) VALUES
   ('notifications:dispatch',    'notifications', 'dispatch',    'Emit notifications to other users'),
   ('notifications:templates:manage', 'notification_templates', 'manage', 'Manage notification templates'),
 
+  -- approvals (§3.3 workflow engine)
+  ('approvals:read',            'approvals',     'read',        'Read approval requests in own org'),
+  ('approvals:request',         'approvals',     'request',     'Create an approval request on a business entity'),
+  ('approvals:act',             'approvals',     'act',         'Approve or reject the step assigned to your role'),
+  ('approvals:cancel',          'approvals',     'cancel',      'Cancel an in-flight approval request'),
+  ('approvals:chains:manage',   'approval_chains', 'manage',    'Manage approval chain definitions'),
+
   -- reports
   ('reports:read',     'reports', 'read',    NULL),
   ('reports:export',   'reports', 'export',  NULL),

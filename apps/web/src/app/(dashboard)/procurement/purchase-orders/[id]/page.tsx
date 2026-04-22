@@ -4,26 +4,31 @@
  * PO detail — reads /procurement/purchase-orders/:id (returns
  * PurchaseOrderWithLines) via useApiPurchaseOrder.
  *
+ * **Edit-in-place**: every header input and every line cell is a real form
+ * control. A sticky "Save Changes" bar appears when the user dirties the
+ * header; each line row has its own per-row save affordance so users can
+ * commit an edit without impacting the rest.
+ *
  * Capabilities:
- *   - Add / update / delete line items (while PO is in DRAFT status);
- *     server recomputes subtotal/tax_total/discount_total/grand_total.
+ *   - Inline-edit header (vendor, dates, currency, payment term, shipping
+ *     address, notes) while PO is in DRAFT status. Saves via
+ *     useApiUpdatePurchaseOrder with `expectedVersion`.
+ *   - Inline-edit lines (qty, UoM, unit price, discount%, tax%, description,
+ *     notes) via useApiUpdatePoLine. Server recomputes header totals.
+ *   - Add / delete line items (unchanged dialog flow).
  *   - Status transitions:
  *       DRAFT → PENDING_APPROVAL
- *       PENDING_APPROVAL → APPROVED  (approval workflow collapses to a
- *                                     single step in Phase 2)
- *       APPROVED → SENT              (service stamps sentAt)
+ *       PENDING_APPROVAL → APPROVED
+ *       APPROVED → SENT
  *       DRAFT | PENDING_APPROVAL | APPROVED → CANCELLED
- *         (service stamps cancelledAt + cancelReason)
- *   - Everything uses optimistic concurrency via `expectedVersion`; 409
- *     bubbles up as an ApiProblem.
+ *   - All writes use optimistic concurrency via `expectedVersion`; 409
+ *     bubbles up as an ApiProblem on the save bar.
  *
- * Deltas vs mock:
- *   - Approval logs + finance/mgmt dual-sign + proforma-invoice upload
- *     are Phase 3. The mock flow squashes into a single APPROVED state.
- *   - totalValue is derived from `grandTotal` (decimal string).
+ * Once the PO leaves DRAFT status, inputs lock to read-only so we don't
+ * surface edit affordances that would 409 on save.
  */
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,15 +68,18 @@ import {
   useApiAddPoLine,
   useApiDeletePoLine,
   useApiPurchaseOrder,
+  useApiUpdatePoLine,
   useApiUpdatePurchaseOrder,
   useApiVendor,
+  useApiVendors,
 } from "@/hooks/useProcurementApi";
-import { useApiItems } from "@/hooks/useInventoryApi";
-import type { PoStatus } from "@instigenie/contracts";
+import { useApiItems, useApiWarehouses } from "@/hooks/useInventoryApi";
+import type { Item, PoLine, PoStatus } from "@instigenie/contracts";
 import {
   AlertCircle,
   ArrowLeft,
   Ban,
+  Check,
   CheckCircle2,
   Plus,
   Send,
@@ -100,6 +108,15 @@ function formatDate(iso: string | null | undefined): string {
   });
 }
 
+// Normalise the server's ISO timestamp into the `YYYY-MM-DD` string that
+// `<input type="date">` expects. The server returns ISO strings; a bare
+// `value={po.orderDate}` leaves the input empty when the string has a
+// time component.
+function toDateInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  return iso.slice(0, 10);
+}
+
 const STATUS_TONE: Record<PoStatus, string> = {
   DRAFT: "bg-gray-50 text-gray-700 border-gray-200",
   PENDING_APPROVAL: "bg-amber-50 text-amber-700 border-amber-200",
@@ -109,6 +126,10 @@ const STATUS_TONE: Record<PoStatus, string> = {
   RECEIVED: "bg-green-50 text-green-700 border-green-200",
   CANCELLED: "bg-red-50 text-red-700 border-red-200",
 };
+
+const CURRENCY_OPTIONS = ["INR", "USD", "EUR", "GBP"] as const;
+
+// ─── Component ──────────────────────────────────────────────────────────────
 
 export default function PoDetailPage({
   params,
@@ -122,18 +143,24 @@ export default function PoDetailPage({
   const po = poQuery.data;
   const vendorQuery = useApiVendor(po?.vendorId);
 
-  const itemsQuery = useApiItems({ limit: 200, isActive: true });
+  const itemsQuery = useApiItems({ limit: 500, isActive: true });
   const items = itemsQuery.data?.data ?? [];
+
+  const vendorsQuery = useApiVendors({ limit: 200, isActive: true });
+  const vendors = vendorsQuery.data?.data ?? [];
+
+  const warehousesQuery = useApiWarehouses({ limit: 100, isActive: true });
+  const warehouses = warehousesQuery.data?.data ?? [];
 
   const updatePo = useApiUpdatePurchaseOrder(id);
   const addLine = useApiAddPoLine(id);
+  const updateLine = useApiUpdatePoLine(id);
   const deleteLine = useApiDeletePoLine(id);
 
-  // Dialog state
+  // ─── Dialog state ────────────────────────────────────────────────────────
   const [lineDialogOpen, setLineDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
 
-  // Line form
   const [formItemId, setFormItemId] = useState("");
   const [formQty, setFormQty] = useState("");
   const [formUom, setFormUom] = useState("");
@@ -145,11 +172,63 @@ export default function PoDetailPage({
   const [cancelReason, setCancelReason] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const selectedItem = useMemo(
-    () => items.find((i) => i.id === formItemId),
-    [items, formItemId]
-  );
+  // ─── Editable header draft ───────────────────────────────────────────────
+  // We keep a local draft keyed to `po.updatedAt`. If the server data bumps
+  // underneath us (another tab / GRN posting), we reseed so the draft
+  // doesn't trample a concurrent change. Dirty detection compares draft to
+  // the cached server view via JSON string — fine for a handful of fields.
+  type HeaderDraft = {
+    vendorId: string;
+    currency: string;
+    orderDate: string;
+    expectedDate: string;
+    deliveryWarehouseId: string;
+    paymentTermsDays: string;
+    shippingAddress: string;
+    billingAddress: string;
+    notes: string;
+  };
 
+  function draftFromPo(): HeaderDraft {
+    return {
+      vendorId: po?.vendorId ?? "",
+      currency: po?.currency ?? "INR",
+      orderDate: toDateInput(po?.orderDate),
+      expectedDate: toDateInput(po?.expectedDate),
+      deliveryWarehouseId: po?.deliveryWarehouseId ?? "",
+      paymentTermsDays: String(po?.paymentTermsDays ?? 30),
+      shippingAddress: po?.shippingAddress ?? "",
+      billingAddress: po?.billingAddress ?? "",
+      notes: po?.notes ?? "",
+    };
+  }
+
+  const [draft, setDraft] = useState<HeaderDraft>(() => draftFromPo());
+
+  // Reseed when the underlying PO changes (version bump, refetch).
+  useEffect(() => {
+    if (!po) return;
+    setDraft(draftFromPo());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [po?.id, po?.updatedAt, po?.version]);
+
+  const isDirty = useMemo(() => {
+    if (!po) return false;
+    const server = {
+      vendorId: po.vendorId,
+      currency: po.currency,
+      orderDate: toDateInput(po.orderDate),
+      expectedDate: toDateInput(po.expectedDate),
+      deliveryWarehouseId: po.deliveryWarehouseId ?? "",
+      paymentTermsDays: String(po.paymentTermsDays),
+      shippingAddress: po.shippingAddress ?? "",
+      billingAddress: po.billingAddress ?? "",
+      notes: po.notes ?? "",
+    };
+    return JSON.stringify(server) !== JSON.stringify(draft);
+  }, [po, draft]);
+
+  // Early returns — all hooks are above this line.
   if (poQuery.isLoading) {
     return (
       <div className="p-6 max-w-[1400px] mx-auto space-y-4">
@@ -194,6 +273,32 @@ export default function PoDetailPage({
 
   const vendor = vendorQuery.data;
   const editable = po.status === "DRAFT";
+
+  // ─── Header save ────────────────────────────────────────────────────────
+  async function saveHeader(): Promise<void> {
+    if (!po) return;
+    setActionError(null);
+    try {
+      await updatePo.mutateAsync({
+        vendorId: draft.vendorId || undefined,
+        currency: draft.currency || undefined,
+        orderDate: draft.orderDate || undefined,
+        expectedDate: draft.expectedDate || undefined,
+        deliveryWarehouseId: draft.deliveryWarehouseId || undefined,
+        paymentTermsDays: draft.paymentTermsDays
+          ? Number.parseInt(draft.paymentTermsDays, 10)
+          : undefined,
+        shippingAddress: draft.shippingAddress || undefined,
+        billingAddress: draft.billingAddress || undefined,
+        notes: draft.notes || undefined,
+        expectedVersion: po.version,
+      });
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Save failed — please refresh."
+      );
+    }
+  }
 
   async function changeStatus(next: PoStatus): Promise<void> {
     if (!po) return;
@@ -268,9 +373,11 @@ export default function PoDetailPage({
     po.status === "PENDING_APPROVAL" ||
     po.status === "APPROVED";
 
+  const selectedFormItem = items.find((i) => i.id === formItemId);
+
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
-      {/* Back button */}
+      {/* Back */}
       <div>
         <Button
           variant="ghost"
@@ -356,63 +463,201 @@ export default function PoDetailPage({
 
       {/* Two-column layout */}
       <div className="grid grid-cols-3 gap-6">
-        {/* Left: header info */}
+        {/* Left */}
         <div className="col-span-2 space-y-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">PO Header</CardTitle>
+              {!editable && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-normal text-muted-foreground"
+                >
+                  Read-only ({po.status.replace(/_/g, " ")})
+                </Badge>
+              )}
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+              {/* Vendor */}
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
                   Vendor
-                </p>
-                <p className="font-medium">{vendor?.name ?? "—"}</p>
+                </Label>
+                {editable ? (
+                  <Select
+                    value={draft.vendorId}
+                    onValueChange={(v) =>
+                      setDraft((d) => ({ ...d, vendorId: v ?? "" }))
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select vendor…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {vendors.map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {v.code} — {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="font-medium">{vendor?.name ?? "—"}</p>
+                )}
                 {vendor?.gstin && (
                   <p className="text-xs text-muted-foreground font-mono">
                     {vendor.gstin}
                   </p>
                 )}
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
-                  Payment Terms
-                </p>
-                <p>Net {po.paymentTermsDays} days</p>
+
+              {/* Payment Terms */}
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
+                  Payment Terms (days)
+                </Label>
+                {editable ? (
+                  <Input
+                    type="number"
+                    value={draft.paymentTermsDays}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        paymentTermsDays: e.target.value,
+                      }))
+                    }
+                    className="h-9"
+                  />
+                ) : (
+                  <p>Net {po.paymentTermsDays} days</p>
+                )}
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+
+              {/* Order Date */}
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
                   Order Date
-                </p>
-                <p>{formatDate(po.orderDate)}</p>
+                </Label>
+                {editable ? (
+                  <Input
+                    type="date"
+                    value={draft.orderDate}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, orderDate: e.target.value }))
+                    }
+                    className="h-9"
+                  />
+                ) : (
+                  <p>{formatDate(po.orderDate)}</p>
+                )}
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+
+              {/* Expected Date */}
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
                   Expected Date
-                </p>
-                <p>{formatDate(po.expectedDate)}</p>
+                </Label>
+                {editable ? (
+                  <Input
+                    type="date"
+                    value={draft.expectedDate}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        expectedDate: e.target.value,
+                      }))
+                    }
+                    className="h-9"
+                  />
+                ) : (
+                  <p>{formatDate(po.expectedDate)}</p>
+                )}
               </div>
+
+              {/* Currency */}
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
+                  Currency
+                </Label>
+                {editable ? (
+                  <Select
+                    value={draft.currency}
+                    onValueChange={(v) =>
+                      setDraft((d) => ({ ...d, currency: v ?? "INR" }))
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CURRENCY_OPTIONS.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p>{po.currency}</p>
+                )}
+              </div>
+
+              {/* Delivery Warehouse */}
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
+                  Delivery Warehouse
+                </Label>
+                {editable ? (
+                  <Select
+                    value={draft.deliveryWarehouseId}
+                    onValueChange={(v) =>
+                      setDraft((d) => ({
+                        ...d,
+                        deliveryWarehouseId: v ?? "",
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="—" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {warehouses.map((w) => (
+                        <SelectItem key={w.id} value={w.id}>
+                          {w.code} — {w.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p>
+                    {warehouses.find(
+                      (w) => w.id === po.deliveryWarehouseId
+                    )?.name ?? "—"}
+                  </p>
+                )}
+              </div>
+
               {po.approvedAt && (
                 <div>
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                  <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
                     Approved
-                  </p>
+                  </Label>
                   <p>{formatDate(po.approvedAt)}</p>
                 </div>
               )}
               {po.sentAt && (
                 <div>
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                  <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
                     Sent
-                  </p>
+                  </Label>
                   <p>{formatDate(po.sentAt)}</p>
                 </div>
               )}
               {po.cancelledAt && (
                 <div>
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                  <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
                     Cancelled
-                  </p>
+                  </Label>
                   <p>{formatDate(po.cancelledAt)}</p>
                   {po.cancelReason && (
                     <p className="text-xs text-red-600 mt-0.5">
@@ -421,12 +666,99 @@ export default function PoDetailPage({
                   )}
                 </div>
               )}
-              {po.notes && (
-                <div className="col-span-2 pt-2 border-t">
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
-                    Notes
+
+              {/* Shipping Address */}
+              <div className="col-span-2 space-y-1 pt-2 border-t">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
+                  Shipping Address
+                </Label>
+                {editable ? (
+                  <Textarea
+                    rows={2}
+                    value={draft.shippingAddress}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        shippingAddress: e.target.value,
+                      }))
+                    }
+                  />
+                ) : (
+                  <p className="whitespace-pre-line">
+                    {po.shippingAddress ?? "—"}
                   </p>
-                  <p>{po.notes}</p>
+                )}
+              </div>
+
+              {/* Billing Address */}
+              <div className="col-span-2 space-y-1">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
+                  Billing Address
+                </Label>
+                {editable ? (
+                  <Textarea
+                    rows={2}
+                    value={draft.billingAddress}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        billingAddress: e.target.value,
+                      }))
+                    }
+                  />
+                ) : (
+                  <p className="whitespace-pre-line">
+                    {po.billingAddress ?? "—"}
+                  </p>
+                )}
+              </div>
+
+              {/* Notes */}
+              <div className="col-span-2 space-y-1">
+                <Label className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
+                  Notes
+                </Label>
+                {editable ? (
+                  <Textarea
+                    rows={3}
+                    value={draft.notes}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, notes: e.target.value }))
+                    }
+                    placeholder="Internal notes…"
+                  />
+                ) : (
+                  <p className="whitespace-pre-line">{po.notes ?? "—"}</p>
+                )}
+              </div>
+
+              {/* Inline save bar */}
+              {editable && (
+                <div className="col-span-2 pt-3 border-t flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    {isDirty
+                      ? "Unsaved changes — click Save to commit."
+                      : "No pending header changes."}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!isDirty || updatePo.isPending}
+                      onClick={() => setDraft(draftFromPo())}
+                    >
+                      Reset
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={!isDirty || updatePo.isPending}
+                      onClick={saveHeader}
+                      className="gap-1"
+                    >
+                      <Check className="h-4 w-4" />
+                      {updatePo.isPending ? "Saving…" : "Save Changes"}
+                    </Button>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -453,7 +785,10 @@ export default function PoDetailPage({
             <CardContent className="p-0">
               {po.lines.length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
-                  No line items yet. Click "Add Line" to add the first one.
+                  No line items yet.{" "}
+                  {editable && (
+                    <>Click <b>Add Line</b> to add the first one.</>
+                  )}
                 </div>
               ) : (
                 <Table>
@@ -461,67 +796,40 @@ export default function PoDetailPage({
                     <TableRow className="bg-muted/40 hover:bg-muted/40">
                       <TableHead className="w-10 text-xs">#</TableHead>
                       <TableHead className="text-xs">Item</TableHead>
+                      <TableHead className="text-xs">Description</TableHead>
                       <TableHead className="text-right text-xs">Qty</TableHead>
-                      <TableHead className="text-right text-xs">Unit Price</TableHead>
-                      <TableHead className="text-right text-xs">Disc %</TableHead>
-                      <TableHead className="text-right text-xs">Tax %</TableHead>
-                      <TableHead className="text-right text-xs">Total</TableHead>
-                      <TableHead className="text-right text-xs">Received</TableHead>
-                      {editable && <TableHead className="w-10" />}
+                      <TableHead className="text-xs">UoM</TableHead>
+                      <TableHead className="text-right text-xs">
+                        Unit Price
+                      </TableHead>
+                      <TableHead className="text-right text-xs">
+                        Disc %
+                      </TableHead>
+                      <TableHead className="text-right text-xs">
+                        Tax %
+                      </TableHead>
+                      <TableHead className="text-right text-xs">
+                        Total
+                      </TableHead>
+                      <TableHead className="text-right text-xs">
+                        Received
+                      </TableHead>
+                      {editable && <TableHead className="w-20 text-xs" />}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {po.lines.map((line) => {
-                      const item = items.find((i) => i.id === line.itemId);
-                      return (
-                        <TableRow key={line.id}>
-                          <TableCell className="text-xs font-mono text-muted-foreground">
-                            {line.lineNo}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            <p className="font-medium">
-                              {item?.name ?? line.itemId.slice(0, 8)}
-                            </p>
-                            {item && (
-                              <p className="text-xs font-mono text-muted-foreground">
-                                {item.sku}
-                              </p>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right text-sm">
-                            {line.quantity} {line.uom}
-                          </TableCell>
-                          <TableCell className="text-right text-sm">
-                            {formatMoney(line.unitPrice)}
-                          </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground">
-                            {line.discountPct}%
-                          </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground">
-                            {line.taxPct}%
-                          </TableCell>
-                          <TableCell className="text-right text-sm font-medium">
-                            {formatMoney(line.lineTotal)}
-                          </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground">
-                            {line.receivedQty}
-                          </TableCell>
-                          {editable && (
-                            <TableCell>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7 text-red-600"
-                                disabled={deleteLine.isPending}
-                                onClick={() => handleDeleteLine(line.id)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      );
-                    })}
+                    {po.lines.map((line) => (
+                      <EditableLineRow
+                        key={line.id}
+                        line={line}
+                        poVersion={po.version}
+                        items={items}
+                        editable={editable}
+                        updateLine={updateLine}
+                        onDelete={() => handleDeleteLine(line.id)}
+                        deleting={deleteLine.isPending}
+                      />
+                    ))}
                   </TableBody>
                 </Table>
               )}
@@ -631,7 +939,7 @@ export default function PoDetailPage({
                 <Input
                   value={formUom}
                   onChange={(e) => setFormUom(e.target.value)}
-                  placeholder={selectedItem?.uom ?? "EA"}
+                  placeholder={selectedFormItem?.uom ?? "EA"}
                 />
               </div>
               <div className="space-y-1.5">
@@ -720,5 +1028,229 @@ export default function PoDetailPage({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ─── Editable line row ──────────────────────────────────────────────────────
+
+type EditableLineRowProps = {
+  line: PoLine;
+  poVersion: number;
+  items: Item[];
+  editable: boolean;
+  updateLine: ReturnType<typeof useApiUpdatePoLine>;
+  onDelete: () => void;
+  deleting: boolean;
+};
+
+/**
+ * A per-row local draft, so editing one line doesn't invalidate edits in
+ * progress on another. On "Save" we fire useApiUpdatePoLine which
+ * invalidates the detail query — the draft reseeds via the `useEffect`
+ * on `line.updatedAt`.
+ *
+ * (`poVersion` is passed in to force a re-seed on unrelated header saves
+ *  that bump the parent version.)
+ */
+function EditableLineRow({
+  line,
+  poVersion,
+  items,
+  editable,
+  updateLine,
+  onDelete,
+  deleting,
+}: EditableLineRowProps): React.ReactElement {
+  type LineDraft = {
+    description: string;
+    quantity: string;
+    uom: string;
+    unitPrice: string;
+    discountPct: string;
+    taxPct: string;
+    notes: string;
+  };
+
+  function fromLine(): LineDraft {
+    return {
+      description: line.description ?? "",
+      quantity: line.quantity,
+      uom: line.uom,
+      unitPrice: line.unitPrice,
+      discountPct: line.discountPct,
+      taxPct: line.taxPct,
+      notes: line.notes ?? "",
+    };
+  }
+
+  const [draft, setDraft] = useState<LineDraft>(() => fromLine());
+
+  useEffect(() => {
+    setDraft(fromLine());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [line.id, line.updatedAt, poVersion]);
+
+  const isDirty = useMemo(() => {
+    return (
+      draft.description !== (line.description ?? "") ||
+      draft.quantity !== line.quantity ||
+      draft.uom !== line.uom ||
+      draft.unitPrice !== line.unitPrice ||
+      draft.discountPct !== line.discountPct ||
+      draft.taxPct !== line.taxPct ||
+      draft.notes !== (line.notes ?? "")
+    );
+  }, [draft, line]);
+
+  async function saveLine(): Promise<void> {
+    await updateLine.mutateAsync({
+      lineId: line.id,
+      body: {
+        description: draft.description,
+        quantity: draft.quantity,
+        uom: draft.uom,
+        unitPrice: draft.unitPrice,
+        discountPct: draft.discountPct,
+        taxPct: draft.taxPct,
+        notes: draft.notes,
+      },
+    });
+  }
+
+  const item = items.find((i) => i.id === line.itemId);
+
+  return (
+    <TableRow>
+      <TableCell className="text-xs font-mono text-muted-foreground">
+        {line.lineNo}
+      </TableCell>
+      <TableCell className="text-sm">
+        <p className="font-medium">
+          {item?.name ?? line.itemId.slice(0, 8)}
+        </p>
+        {item && (
+          <p className="text-xs font-mono text-muted-foreground">{item.sku}</p>
+        )}
+      </TableCell>
+      <TableCell className="text-sm">
+        {editable ? (
+          <Input
+            value={draft.description}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, description: e.target.value }))
+            }
+            className="h-8 min-w-[180px]"
+            placeholder={item?.name ?? "—"}
+          />
+        ) : (
+          <span>{line.description ?? "—"}</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right">
+        {editable ? (
+          <Input
+            type="number"
+            value={draft.quantity}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, quantity: e.target.value }))
+            }
+            className="h-8 w-[80px] text-right"
+          />
+        ) : (
+          <span className="text-sm">{line.quantity}</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {editable ? (
+          <Input
+            value={draft.uom}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, uom: e.target.value }))
+            }
+            className="h-8 w-[70px]"
+          />
+        ) : (
+          <span className="text-sm">{line.uom}</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right">
+        {editable ? (
+          <Input
+            type="number"
+            value={draft.unitPrice}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, unitPrice: e.target.value }))
+            }
+            className="h-8 w-[100px] text-right"
+          />
+        ) : (
+          <span className="text-sm">{formatMoney(line.unitPrice)}</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right">
+        {editable ? (
+          <Input
+            type="number"
+            value={draft.discountPct}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, discountPct: e.target.value }))
+            }
+            className="h-8 w-[70px] text-right"
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            {line.discountPct}%
+          </span>
+        )}
+      </TableCell>
+      <TableCell className="text-right">
+        {editable ? (
+          <Input
+            type="number"
+            value={draft.taxPct}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, taxPct: e.target.value }))
+            }
+            className="h-8 w-[70px] text-right"
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">{line.taxPct}%</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right text-sm font-medium">
+        {formatMoney(line.lineTotal)}
+      </TableCell>
+      <TableCell className="text-right text-xs text-muted-foreground">
+        {line.receivedQty}
+      </TableCell>
+      {editable && (
+        <TableCell>
+          <div className="flex items-center gap-1 justify-end">
+            <Button
+              size="icon"
+              variant={isDirty ? "default" : "ghost"}
+              className="h-7 w-7"
+              disabled={!isDirty || updateLine.isPending}
+              onClick={saveLine}
+              aria-label={`Save line ${line.lineNo}`}
+              title="Save line"
+            >
+              <Check className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 text-red-600"
+              disabled={deleting}
+              onClick={onDelete}
+              aria-label={`Delete line ${line.lineNo}`}
+              title="Delete line"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </TableCell>
+      )}
+    </TableRow>
   );
 }

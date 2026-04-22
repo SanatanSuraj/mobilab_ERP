@@ -103,3 +103,11 @@ DROP TRIGGER IF EXISTS stock_summary_audit ON stock_summary;
 CREATE TRIGGER stock_summary_audit
 AFTER INSERT OR UPDATE OR DELETE ON stock_summary
 FOR EACH ROW EXECUTE FUNCTION audit.tg_log();
+
+-- ── stock_reservations (Phase 3) ───────────────────────────────────────────
+-- Writes go through reserve/release/consume stored functions which set
+-- updated_at inline, so we audit only — no updated_at trigger needed.
+DROP TRIGGER IF EXISTS stock_reservations_audit ON stock_reservations;
+CREATE TRIGGER stock_reservations_audit
+AFTER INSERT OR UPDATE OR DELETE ON stock_reservations
+FOR EACH ROW EXECUTE FUNCTION audit.tg_log();

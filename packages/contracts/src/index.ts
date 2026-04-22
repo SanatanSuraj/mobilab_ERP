@@ -25,5 +25,7 @@ export * from "./production.js";
 export * from "./qc.js";
 export * from "./finance.js";
 export * from "./notifications.js";
+export * from "./approvals.js";
 export * from "./billing.js";
 export * from "./vendor-admin.js";
+export * from "./portal.js";
