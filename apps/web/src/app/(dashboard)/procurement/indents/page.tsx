@@ -19,7 +19,9 @@
  *   - "Create PO from Indent" inline flow dropped — use the dedicated PO
  *     page, which can link back to an indentId via UpdatePurchaseOrder.
  *
- * Create dialog posts header + 1 line via useApiCreateIndent.
+ * "+ New Indent" routes to /procurement/indents/new — a full-document form
+ * matching the Primary Healthtech document style (Buyer / Delivery /
+ * Primary Document Details cards, items table, signature + save bar).
  */
 
 import { useMemo, useState } from "react";
@@ -29,15 +31,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -46,12 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  useApiCreateIndent,
-  useApiIndents,
-} from "@/hooks/useProcurementApi";
-import { useApiItems } from "@/hooks/useInventoryApi";
+import { useApiIndents } from "@/hooks/useProcurementApi";
 import {
   INDENT_PRIORITIES,
   INDENT_STATUSES,
@@ -115,24 +104,6 @@ export default function IndentsPage() {
   );
 
   const indentsQuery = useApiIndents(query);
-  const createIndent = useApiCreateIndent();
-  const itemsQuery = useApiItems({ limit: 200, isActive: true });
-
-  // ─── Create dialog state ────────────────────────────────────────────────
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [formDepartment, setFormDepartment] = useState("");
-  const [formPurpose, setFormPurpose] = useState("");
-  const [formPriority, setFormPriority] = useState<IndentPriority>("NORMAL");
-  const [formRequiredBy, setFormRequiredBy] = useState("");
-  const [formItemId, setFormItemId] = useState("");
-  const [formQty, setFormQty] = useState("");
-  const [formUom, setFormUom] = useState("");
-  const [formEstCost, setFormEstCost] = useState("");
-  const [formNotes, setFormNotes] = useState("");
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const items = itemsQuery.data?.data ?? [];
-  const selectedItem = items.find((i) => i.id === formItemId);
 
   // Loading / error shells
   if (indentsQuery.isLoading) {
@@ -248,43 +219,6 @@ export default function IndentsPage() {
     },
   ];
 
-  async function handleSave(): Promise<void> {
-    setSaveError(null);
-    if (!formItemId || !formQty || !formUom) {
-      setSaveError("Pick an item and enter quantity + UoM.");
-      return;
-    }
-    try {
-      await createIndent.mutateAsync({
-        department: formDepartment.trim() || undefined,
-        purpose: formPurpose.trim() || undefined,
-        priority: formPriority,
-        requiredBy: formRequiredBy || undefined,
-        notes: formNotes.trim() || undefined,
-        lines: [
-          {
-            itemId: formItemId,
-            quantity: formQty,
-            uom: formUom,
-            estimatedCost: formEstCost.trim() || "0",
-          },
-        ],
-      });
-      setDialogOpen(false);
-      setFormDepartment("");
-      setFormPurpose("");
-      setFormPriority("NORMAL");
-      setFormRequiredBy("");
-      setFormItemId("");
-      setFormQty("");
-      setFormUom("");
-      setFormEstCost("");
-      setFormNotes("");
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Save failed");
-    }
-  }
-
   return (
     <div className="p-6 max-w-[1400px] mx-auto">
       <PageHeader
@@ -377,7 +311,10 @@ export default function IndentsPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button onClick={() => setDialogOpen(true)} className="gap-1.5">
+            <Button
+              onClick={() => router.push("/procurement/indents/new")}
+              className="gap-1.5"
+            >
               <Plus className="h-4 w-4" />
               New Indent
             </Button>
@@ -393,156 +330,6 @@ export default function IndentsPage() {
           </p>
         </div>
       )}
-
-      {/* Create dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>New Indent</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            {saveError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
-                {saveError}
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Department</Label>
-                <Input
-                  placeholder="e.g. Production"
-                  value={formDepartment}
-                  onChange={(e) => setFormDepartment(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Priority</Label>
-                <Select
-                  value={formPriority}
-                  onValueChange={(v) =>
-                    setFormPriority((v ?? "NORMAL") as IndentPriority)
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {INDENT_PRIORITIES.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {p}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Purpose</Label>
-              <Input
-                placeholder="Reason for requisition"
-                value={formPurpose}
-                onChange={(e) => setFormPurpose(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Required By</Label>
-              <Input
-                type="date"
-                value={formRequiredBy}
-                onChange={(e) => setFormRequiredBy(e.target.value)}
-              />
-            </div>
-            <div className="rounded-md border p-3 space-y-3">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                First Line
-              </p>
-              <div className="space-y-1.5">
-                <Label>Item</Label>
-                <Select
-                  value={formItemId}
-                  onValueChange={(v) => {
-                    setFormItemId(v ?? "");
-                    const item = items.find((i) => i.id === v);
-                    if (item) setFormUom(item.uom);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select item..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {items.map((it) => (
-                      <SelectItem key={it.id} value={it.id}>
-                        {it.sku} — {it.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Qty</Label>
-                  <Input
-                    type="number"
-                    value={formQty}
-                    onChange={(e) => setFormQty(e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>UoM</Label>
-                  <Input
-                    value={formUom}
-                    onChange={(e) => setFormUom(e.target.value)}
-                    placeholder={selectedItem?.uom ?? "EA"}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Est. Cost</Label>
-                  <Input
-                    type="number"
-                    value={formEstCost}
-                    onChange={(e) => setFormEstCost(e.target.value)}
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Additional lines can be added from the indent detail page
-                after creation.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Notes</Label>
-              <Textarea
-                rows={2}
-                value={formNotes}
-                onChange={(e) => setFormNotes(e.target.value)}
-                placeholder="Optional notes..."
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-              disabled={createIndent.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={
-                createIndent.isPending ||
-                !formItemId ||
-                !formQty ||
-                !formUom
-              }
-            >
-              {createIndent.isPending ? "Saving…" : "Create Indent"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

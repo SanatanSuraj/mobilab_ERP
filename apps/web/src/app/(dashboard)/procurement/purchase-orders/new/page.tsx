@@ -61,7 +61,6 @@ import {
   FileText,
   HelpCircle,
   Lightbulb,
-  MapPin,
   Pencil,
   Plus,
   Save,
@@ -137,10 +136,11 @@ const PAYMENT_TERM_OPTIONS = [
   { value: "90", label: "Net 90" },
 ] as const;
 
-// Hardcoded buyer info — the CRM doesn't yet expose an org-profile endpoint,
-// so we surface the same primary-entity data shown in the product screenshot.
-// Replace with a real `useApiOrgProfile` hook when it lands.
-const BUYER_INFO = {
+// Default buyer info — seeds the editable Buyer / Delivery cards on first
+// render. The CRM doesn't yet expose an org-profile endpoint, so this stands
+// in until `useApiOrgProfile` lands. All fields are editable on the form,
+// and user edits fold into `notes` on save.
+const BUYER_DEFAULTS = {
   name: "Primary Healthtech Pvt. Ltd.",
   address:
     "3rd FLOOR, BLOCK C/37, SECTOR 6, NOIDA, UTTAR PRADESH, 201301., PRIMARY HEALTHTECH PVT. LTD.",
@@ -207,10 +207,39 @@ export default function NewPurchaseOrderPage() {
   const items = itemsQuery.data?.data ?? [];
 
   // ─── Form state ──────────────────────────────────────────────────────────
+  // Buyer card (editable). Seeds from BUYER_DEFAULTS but every field is a
+  // plain input so users can override on a per-document basis. The overrides
+  // fold into `notes` on save.
+  const [buyerName, setBuyerName] = useState(BUYER_DEFAULTS.name);
+  const [buyerAddress, setBuyerAddress] = useState(BUYER_DEFAULTS.address);
+  const [buyerDistrict, setBuyerDistrict] = useState(BUYER_DEFAULTS.district);
+  const [buyerCountry, setBuyerCountry] = useState(BUYER_DEFAULTS.country);
+  const [buyerGstin, setBuyerGstin] = useState(BUYER_DEFAULTS.gstin);
+
+  // Delivery card (editable). Name auto-updates when a store is picked but the
+  // user can still type over it.
+  const [deliveryName, setDeliveryName] = useState("Location 2");
+  const [deliveryAddress, setDeliveryAddress] = useState(BUYER_DEFAULTS.address);
+  const [deliveryDistrict, setDeliveryDistrict] = useState(
+    BUYER_DEFAULTS.district
+  );
+  const [deliveryCountry, setDeliveryCountry] = useState(
+    BUYER_DEFAULTS.country
+  );
+  const [deliveryGstin, setDeliveryGstin] = useState(BUYER_DEFAULTS.gstin);
+
+  // Supplier overrides — pre-filled from the selected vendor but editable.
+  // Empty string means "use vendor's value verbatim".
+  const [supplierAddressOverride, setSupplierAddressOverride] = useState("");
+  const [supplierCityStateOverride, setSupplierCityStateOverride] = useState("");
+  const [supplierPostalOverride, setSupplierPostalOverride] = useState("");
+  const [supplierGstinOverride, setSupplierGstinOverride] = useState("");
+
   // Primary document
   const [title, setTitle] = useState("");
-  const [docNumber] = useState(() => makeDocNumber());
+  const [docNumber, setDocNumber] = useState(() => makeDocNumber());
   const [docDate, setDocDate] = useState<string>(todayIso());
+  const [currency, setCurrency] = useState<string>("INR");
   const [amendment, setAmendment] = useState("0");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [ocNumber, setOcNumber] = useState("");
@@ -348,7 +377,28 @@ export default function NewPurchaseOrderPage() {
       `[Amendment: ${amendment || "0"}]`,
       `[Advance Payable: ${advancePayable}]`,
       `[Approving Authority: ${approvingAuthority}]`,
+      // Editable buyer / delivery card overrides
+      `[Buyer: ${buyerName.trim()}]`,
+      `[Buyer Address: ${buyerAddress.trim()}]`,
+      `[Buyer District: ${buyerDistrict.trim()}]`,
+      `[Buyer Country: ${buyerCountry.trim()}]`,
+      `[Buyer GSTIN: ${buyerGstin.trim()}]`,
+      `[Delivery: ${deliveryName.trim()}]`,
+      `[Delivery Address: ${deliveryAddress.trim()}]`,
+      `[Delivery District: ${deliveryDistrict.trim()}]`,
+      `[Delivery Country: ${deliveryCountry.trim()}]`,
+      `[Delivery GSTIN: ${deliveryGstin.trim()}]`,
     ];
+    // Supplier card overrides — only persist if the user typed a value
+    // different from the vendor's native field.
+    if (supplierAddressOverride.trim())
+      extras.push(`[Supplier Address Override: ${supplierAddressOverride.trim()}]`);
+    if (supplierCityStateOverride.trim())
+      extras.push(`[Supplier City/State Override: ${supplierCityStateOverride.trim()}]`);
+    if (supplierPostalOverride.trim())
+      extras.push(`[Supplier Postal Override: ${supplierPostalOverride.trim()}]`);
+    if (supplierGstinOverride.trim())
+      extras.push(`[Supplier GSTIN Override: ${supplierGstinOverride.trim()}]`);
     if (advancePaymentDate)
       extras.push(`[Advance Payment Date: ${advancePaymentDate}]`);
     if (ocNumber.trim()) extras.push(`[OC#: ${ocNumber.trim()}]`);
@@ -374,7 +424,7 @@ export default function NewPurchaseOrderPage() {
         orderDate: docDate || undefined,
         expectedDate: deliveryDate || undefined,
         paymentTermsDays: Number.parseInt(paymentTerm, 10) || 30,
-        currency: "INR",
+        currency,
         shippingAddress: placeOfSupply,
         notes: combinedNotes,
         lines: validLines.map((l) => ({
@@ -432,7 +482,7 @@ export default function NewPurchaseOrderPage() {
           <FileText className="h-5 w-5" />
           <h1 className="text-lg font-semibold">{headerTitle}</h1>
         </div>
-        <Select value="INR" onValueChange={() => {}}>
+        <Select value={currency} onValueChange={(v) => setCurrency(v ?? "INR")}>
           <SelectTrigger className="h-8 min-w-[110px] border-white/20 bg-white/10 text-white">
             <SelectValue />
           </SelectTrigger>
@@ -459,37 +509,46 @@ export default function NewPurchaseOrderPage() {
           <InfoCard
             title="Buyer Details"
             action={
-              <button
-                type="button"
-                className="rounded-md p-1 text-muted-foreground hover:bg-muted"
-                aria-label="Edit buyer"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
             }
           >
-            <p className="text-sm font-semibold">{BUYER_INFO.name}</p>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {BUYER_INFO.address}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {BUYER_INFO.district}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {BUYER_INFO.country}
-            </p>
-            <div className="mt-2 flex items-center justify-between">
-              <p className="text-xs">
-                <span className="text-muted-foreground">GSTIN:</span>{" "}
-                <span className="font-mono">{BUYER_INFO.gstin}</span>
-              </p>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
-              >
-                <MapPin className="h-3.5 w-3.5" />
-                Place of Supply
-              </button>
+            <div className="space-y-1.5">
+              <Input
+                value={buyerName}
+                onChange={(e) => setBuyerName(e.target.value)}
+                placeholder="Company name"
+                className="h-7 text-sm font-semibold"
+              />
+              <Textarea
+                rows={3}
+                value={buyerAddress}
+                onChange={(e) => setBuyerAddress(e.target.value)}
+                placeholder="Address"
+                className="text-xs leading-relaxed resize-none"
+              />
+              <Input
+                value={buyerDistrict}
+                onChange={(e) => setBuyerDistrict(e.target.value)}
+                placeholder="District (State)"
+                className="h-7 text-xs"
+              />
+              <Input
+                value={buyerCountry}
+                onChange={(e) => setBuyerCountry(e.target.value)}
+                placeholder="Country - PIN"
+                className="h-7 text-xs"
+              />
+              <div className="flex items-center gap-1.5">
+                <Label className="text-xs text-muted-foreground shrink-0">
+                  GSTIN:
+                </Label>
+                <Input
+                  value={buyerGstin}
+                  onChange={(e) => setBuyerGstin(e.target.value)}
+                  placeholder="GSTIN"
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
             </div>
           </InfoCard>
 
@@ -497,39 +556,48 @@ export default function NewPurchaseOrderPage() {
           <InfoCard
             title="Delivery Location"
             action={
-              <button
-                type="button"
-                className="rounded-md p-1 text-muted-foreground hover:bg-muted"
-                aria-label="Edit delivery"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
             }
           >
-            <p className="text-sm font-semibold">
-              {warehouses.find((w) => w.id === storeId)?.name ?? "Location 2"}
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {BUYER_INFO.address}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {BUYER_INFO.district}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {BUYER_INFO.country}
-            </p>
-            <div className="mt-2 flex items-center justify-between">
-              <p className="text-xs">
-                <span className="text-muted-foreground">GSTIN:</span>{" "}
-                <span className="font-mono">{BUYER_INFO.gstin}</span>
-              </p>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
-              >
-                <MapPin className="h-3.5 w-3.5" />
-                Place of Supply
-              </button>
+            <div className="space-y-1.5">
+              <Input
+                value={deliveryName}
+                onChange={(e) => setDeliveryName(e.target.value)}
+                placeholder={
+                  warehouses.find((w) => w.id === storeId)?.name ?? "Location"
+                }
+                className="h-7 text-sm font-semibold"
+              />
+              <Textarea
+                rows={3}
+                value={deliveryAddress}
+                onChange={(e) => setDeliveryAddress(e.target.value)}
+                placeholder="Address"
+                className="text-xs leading-relaxed resize-none"
+              />
+              <Input
+                value={deliveryDistrict}
+                onChange={(e) => setDeliveryDistrict(e.target.value)}
+                placeholder="District (State)"
+                className="h-7 text-xs"
+              />
+              <Input
+                value={deliveryCountry}
+                onChange={(e) => setDeliveryCountry(e.target.value)}
+                placeholder="Country - PIN"
+                className="h-7 text-xs"
+              />
+              <div className="flex items-center gap-1.5">
+                <Label className="text-xs text-muted-foreground shrink-0">
+                  GSTIN:
+                </Label>
+                <Input
+                  value={deliveryGstin}
+                  onChange={(e) => setDeliveryGstin(e.target.value)}
+                  placeholder="GSTIN"
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
             </div>
           </InfoCard>
 
@@ -537,13 +605,7 @@ export default function NewPurchaseOrderPage() {
           <InfoCard
             title="Supplier Details"
             action={
-              <button
-                type="button"
-                className="rounded-md p-1 text-muted-foreground hover:bg-muted"
-                aria-label="Edit supplier"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
             }
           >
             <div className="space-y-1.5">
@@ -562,41 +624,50 @@ export default function NewPurchaseOrderPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            {selectedVendor ? (
-              <>
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                  {selectedVendor.address ?? "—"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {[selectedVendor.city, selectedVendor.state]
+              <Textarea
+                rows={2}
+                value={
+                  supplierAddressOverride || selectedVendor?.address || ""
+                }
+                onChange={(e) => setSupplierAddressOverride(e.target.value)}
+                placeholder="Supplier address"
+                className="text-xs leading-relaxed resize-none"
+              />
+              <Input
+                value={
+                  supplierCityStateOverride ||
+                  ([selectedVendor?.city, selectedVendor?.state]
                     .filter(Boolean)
-                    .join(", ") || ""}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  India - {selectedVendor.postalCode ?? ""}
-                </p>
-                <div className="mt-2 flex items-center justify-between">
-                  <p className="text-xs">
-                    <span className="text-muted-foreground">GSTIN:</span>{" "}
-                    <span className="font-mono">
-                      {selectedVendor.gstin ?? "—"}
-                    </span>
-                  </p>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
-                  >
-                    <MapPin className="h-3.5 w-3.5" />
-                    Place of Supply
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className="mt-2 text-xs italic text-muted-foreground">
-                Select a supplier to see their address and GSTIN.
-              </p>
-            )}
+                    .join(", ") ||
+                    "")
+                }
+                onChange={(e) => setSupplierCityStateOverride(e.target.value)}
+                placeholder="City, State"
+                className="h-7 text-xs"
+              />
+              <Input
+                value={
+                  supplierPostalOverride ||
+                  (selectedVendor?.postalCode
+                    ? `India - ${selectedVendor.postalCode}`
+                    : "")
+                }
+                onChange={(e) => setSupplierPostalOverride(e.target.value)}
+                placeholder="Country - PIN"
+                className="h-7 text-xs"
+              />
+              <div className="flex items-center gap-1.5">
+                <Label className="text-xs text-muted-foreground shrink-0">
+                  GSTIN:
+                </Label>
+                <Input
+                  value={supplierGstinOverride || selectedVendor?.gstin || ""}
+                  onChange={(e) => setSupplierGstinOverride(e.target.value)}
+                  placeholder="GSTIN"
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
+            </div>
           </InfoCard>
 
           {/* Place Of Supply */}
@@ -675,7 +746,7 @@ export default function NewPurchaseOrderPage() {
                   <div className="flex items-center gap-1.5">
                     <Input
                       value={docNumber}
-                      readOnly
+                      onChange={(e) => setDocNumber(e.target.value)}
                       className="h-8 flex-1 font-mono"
                     />
                     <Button
