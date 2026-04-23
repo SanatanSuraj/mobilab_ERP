@@ -157,6 +157,9 @@ INSERT INTO permissions (id, resource, action, description) VALUES
   ('admin:settings:manage',  'admin_settings', 'manage',  NULL),
   ('admin:audit:read',       'admin_audit',    'read',    NULL),
 
+  -- users (invitation flow)
+  ('users:invite',           'users',          'invite',  'Invite a user to this tenant'),
+
   -- portal (CUSTOMER)
   ('portal:orders:read',     'portal_orders',    'read',  NULL),
   ('portal:invoices:read',   'portal_invoices',  'read',  NULL),

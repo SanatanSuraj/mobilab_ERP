@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,8 +12,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuthStore, UserRole, MOCK_USERS_BY_ROLE } from "@/store/auth.store";
-import { Shield, UserPlus, Edit2, Lock } from "lucide-react";
+import { Shield, UserPlus, Edit2, Lock, Loader2, MailX, Clock } from "lucide-react";
 import { toast } from "sonner";
+
+import { InviteUserDialog } from "@/components/admin-users/InviteUserDialog";
+import {
+  apiListInvitations,
+  apiRevokeInvitation,
+} from "@/lib/api/admin-users";
+import { ApiProblem } from "@/lib/api/tenant-fetch";
+import type { InvitationSummary } from "@instigenie/contracts";
 
 const ROLE_LABELS: Record<UserRole, string> = {
   SUPER_ADMIN: "Super Admin",
@@ -92,6 +100,96 @@ export default function UsersRolesPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [newRole, setNewRole] = useState<UserRole | "">("");
   const [activeTab, setActiveTab] = useState<"users" | "roles">("users");
+
+  // Invite flow state — real API (/admin/users/*).
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [invitations, setInvitations] = useState<InvitationSummary[]>([]);
+  // Start in loading=true so the card shows a spinner on first paint until
+  // the mount effect resolves — flipping to true *inside* the effect would
+  // trip React 19's set-state-in-effect rule.
+  const [invitationsLoading, setInvitationsLoading] = useState(true);
+  const [invitationsError, setInvitationsError] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  // Manual refresh — wired to the "Refresh" button on the invitations card.
+  // Safe to call setState synchronously here because a click is a user event,
+  // not an effect, so React 19's set-state-in-effect rule doesn't apply.
+  const refreshInvitations = useCallback(async () => {
+    setInvitationsLoading(true);
+    setInvitationsError(null);
+    try {
+      // No status filter → API returns PENDING + EXPIRED + REVOKED (anything
+      // that isn't ACCEPTED). The admin cares about all open threads.
+      const res = await apiListInvitations({ limit: 100 });
+      setInvitations(res.items);
+    } catch (err) {
+      if (err instanceof ApiProblem) {
+        setInvitationsError(err.problem.detail ?? err.problem.title);
+      } else {
+        setInvitationsError("Couldn't load invitations. Is the API running?");
+      }
+    } finally {
+      setInvitationsLoading(false);
+    }
+  }, []);
+
+  // Only SUPER_ADMIN renders below, but we still gate on the permission
+  // before making the API call — prevents a flood of 403s on role-switch
+  // in dev. The early-return below handles the UI path. We launch a floating
+  // promise (no setState synchronously) so the React 19 effect rule passes.
+  useEffect(() => {
+    if (currentRole !== "SUPER_ADMIN") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiListInvitations({ limit: 100 });
+        if (cancelled) return;
+        setInvitations(res.items);
+        setInvitationsError(null);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiProblem) {
+          setInvitationsError(err.problem.detail ?? err.problem.title);
+        } else {
+          setInvitationsError("Couldn't load invitations. Is the API running?");
+        }
+      } finally {
+        if (!cancelled) setInvitationsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRole]);
+
+  function handleInvited(invitation: InvitationSummary) {
+    // Optimistic prepend — backend RLS guarantees we'll see this row on
+    // the next refresh anyway, but showing it immediately feels snappier.
+    setInvitations((prev) => [
+      invitation,
+      ...prev.filter((i) => i.id !== invitation.id),
+    ]);
+  }
+
+  async function handleRevoke(invitation: InvitationSummary) {
+    if (revokingId) return;
+    setRevokingId(invitation.id);
+    try {
+      const updated = await apiRevokeInvitation(invitation.id);
+      setInvitations((prev) =>
+        prev.map((i) => (i.id === updated.id ? updated : i)),
+      );
+      toast.success(`Revoked invite to ${invitation.email}.`);
+    } catch (err) {
+      const msg =
+        err instanceof ApiProblem
+          ? (err.problem.detail ?? err.problem.title)
+          : "Could not revoke invite.";
+      toast.error(msg);
+    } finally {
+      setRevokingId(null);
+    }
+  }
 
   const roleCount = Object.entries(
     users.reduce((acc, u) => ({ ...acc, [u.role]: (acc[u.role] ?? 0) + 1 }), {} as Record<string, number>)
@@ -180,6 +278,13 @@ export default function UsersRolesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Invite flow dialog — real API (/admin/users/invite) */}
+      <InviteUserDialog
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        onInvited={handleInvited}
+      />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Users & Roles</h1>
@@ -187,7 +292,7 @@ export default function UsersRolesPage() {
             Manage system users and their access permissions. All permissions enforced at API layer.
           </p>
         </div>
-        <Button onClick={() => toast.info("User invitations aren't wired yet — seed accounts via ops/sql/seed/03-dev-org-users.sql and pnpm db:seed.")}>
+        <Button onClick={() => setInviteOpen(true)}>
           <UserPlus className="h-4 w-4 mr-2" />
           Invite User
         </Button>
@@ -283,6 +388,16 @@ export default function UsersRolesPage() {
               </TableBody>
             </Table>
           </div>
+
+          {/* Pending Invitations — real API (/admin/users/invitations) */}
+          <InvitationsCard
+            invitations={invitations}
+            loading={invitationsLoading}
+            error={invitationsError}
+            revokingId={revokingId}
+            onRevoke={handleRevoke}
+            onRefresh={refreshInvitations}
+          />
         </div>
       )}
 
@@ -325,5 +440,149 @@ export default function UsersRolesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Invitations sub-card ────────────────────────────────────────────────────
+//
+// Kept in this file rather than its own component because it's only ever
+// rendered here and it shares the page's ROLE_LABELS / ROLE_COLORS lookup
+// tables. If a second page ever needs to list invitations, promote to
+// components/admin-users/.
+
+interface InvitationsCardProps {
+  invitations: InvitationSummary[];
+  loading: boolean;
+  error: string | null;
+  revokingId: string | null;
+  onRevoke: (invitation: InvitationSummary) => void | Promise<void>;
+  onRefresh: () => void | Promise<void>;
+}
+
+function InvitationsCard({
+  invitations,
+  loading,
+  error,
+  revokingId,
+  onRevoke,
+  onRefresh,
+}: InvitationsCardProps) {
+  const pending = invitations.filter((i) => i.status === "PENDING");
+  const other = invitations.filter((i) => i.status !== "PENDING");
+
+  return (
+    <div className="rounded-lg border bg-card">
+      <div className="flex items-center justify-between px-4 py-3 border-b">
+        <div>
+          <h3 className="text-sm font-semibold">Invitations</h3>
+          <p className="text-xs text-muted-foreground">
+            {pending.length} pending · {other.length} closed
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void onRefresh()}
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Loading
+            </>
+          ) : (
+            "Refresh"
+          )}
+        </Button>
+      </div>
+      {error ? (
+        <p className="px-4 py-6 text-sm text-destructive">{error}</p>
+      ) : loading && invitations.length === 0 ? (
+        <p className="px-4 py-8 text-sm text-muted-foreground flex items-center gap-2 justify-center">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading invitations…
+        </p>
+      ) : invitations.length === 0 ? (
+        <p className="px-4 py-8 text-sm text-muted-foreground text-center">
+          No invitations yet. Use <span className="font-medium">Invite User</span> above to send the first one.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/30 hover:bg-muted/30">
+              <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Expires</TableHead>
+              <TableHead className="w-24"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {invitations.map((invite) => {
+              const roleLabel = ROLE_LABELS[invite.roleId as UserRole] ?? invite.roleId;
+              const isRevoking = revokingId === invite.id;
+              return (
+                <TableRow key={invite.id} className="hover:bg-muted/20">
+                  <TableCell className="text-sm font-medium break-all">{invite.email}</TableCell>
+                  <TableCell>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ROLE_COLORS[invite.roleId as UserRole] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
+                      {roleLabel}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <InvitationStatusChip status={invite.status} />
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {new Date(invite.expiresAt).toLocaleString()}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {invite.status === "PENDING" ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={isRevoking}
+                        onClick={() => void onRevoke(invite)}
+                        className="h-7 text-xs"
+                      >
+                        {isRevoking ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <>
+                            <MailX className="h-3.5 w-3.5 mr-1" /> Revoke
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground pr-2">—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
+function InvitationStatusChip({ status }: { status: InvitationSummary["status"] }) {
+  // Small inline chip so the table row stays compact. Colours mirror the
+  // role chips so the whole page has a coherent palette.
+  const classes: Record<InvitationSummary["status"], string> = {
+    PENDING: "bg-blue-50 text-blue-700 border-blue-200",
+    EXPIRED: "bg-gray-50 text-gray-600 border-gray-200",
+    REVOKED: "bg-red-50 text-red-700 border-red-200",
+    ACCEPTED: "bg-green-50 text-green-700 border-green-200",
+  };
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${classes[status]}`}
+    >
+      {status}
+    </span>
   );
 }

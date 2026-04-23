@@ -34,7 +34,8 @@ INSERT INTO role_permissions (role_id, permission_id) VALUES
   ('MANAGEMENT', 'notifications:admin_read'),
   ('MANAGEMENT', 'reports:read'),
   ('MANAGEMENT', 'reports:export'),
-  ('MANAGEMENT', 'admin:audit:read');
+  ('MANAGEMENT', 'admin:audit:read'),
+  ('MANAGEMENT', 'users:invite');
 
 -- SALES_REP
 INSERT INTO role_permissions (role_id, permission_id) VALUES

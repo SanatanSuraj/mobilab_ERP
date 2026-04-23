@@ -27,22 +27,31 @@ import type { NextRequest } from "next/server";
 /**
  * Completely public — no auth cookie required.
  *
- *   /login           — legacy mock login + dev-panel role switcher.
- *                      Now redirects to /auth/login; left here so its own
- *                      markup can render (its redirect effect triggers on
- *                      mount).
- *   /auth/login      — real-API login. Primary sign-in page.
- *   /vendor-admin    — entire cross-tenant vendor console. It uses its
- *                      OWN token store (sessionStorage, keyed
- *                      `instigenie-vendor-*`) and its own in-app layout
- *                      guard that bounces unauthed users to
- *                      /vendor-admin/login. It has no reason to require
- *                      the tenant-side `instigenie-session` cookie, and
- *                      demanding it here means a pure-vendor user who
- *                      never logged in on the tenant side gets kicked to
- *                      /auth/login the moment they click a tenant row.
+ *   /login               — legacy mock login + dev-panel role switcher.
+ *                          Now redirects to /auth/login; left here so its own
+ *                          markup can render (its redirect effect triggers on
+ *                          mount).
+ *   /auth/login          — real-API login. Primary sign-in page.
+ *   /auth/accept-invite  — invitation-link landing. The raw token in the
+ *                          URL is the authenticator; the page itself mints
+ *                          access+refresh tokens on submit and then hops
+ *                          to /. Must be reachable without a session.
+ *   /vendor-admin        — entire cross-tenant vendor console. It uses its
+ *                          OWN token store (sessionStorage, keyed
+ *                          `instigenie-vendor-*`) and its own in-app layout
+ *                          guard that bounces unauthed users to
+ *                          /vendor-admin/login. It has no reason to require
+ *                          the tenant-side `instigenie-session` cookie, and
+ *                          demanding it here means a pure-vendor user who
+ *                          never logged in on the tenant side gets kicked
+ *                          to /auth/login the moment they click a tenant row.
  */
-const PUBLIC_PATHS = ["/login", "/auth/login", "/vendor-admin"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth/login",
+  "/auth/accept-invite",
+  "/vendor-admin",
+];
 
 /**
  * Where we send unauthenticated users. Must match an entry in PUBLIC_PATHS.

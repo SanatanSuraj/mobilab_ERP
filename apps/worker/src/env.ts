@@ -24,6 +24,12 @@ export interface Env {
   pdfBucket: string;
   /** Brand name rendered in the PDF header. Default "InstiGenie". */
   brandName: string;
+  /**
+   * Public origin of the web app — used by the user-invite-created
+   * handler when rendering the accept-invite URL. Mirrors apps/api's
+   * WEB_ORIGIN so the email link lands on the customer-visible host.
+   */
+  webOrigin: string;
 }
 
 function required(name: string): string {
@@ -52,5 +58,6 @@ export function loadEnv(): Env {
     minioSecretKey: process.env.MINIO_SECRET_KEY ?? "instigenie_dev_minio",
     pdfBucket: process.env.PDF_BUCKET ?? "instigenie-pdfs",
     brandName: process.env.BRAND_NAME ?? "InstiGenie",
+    webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:3000",
   };
 }

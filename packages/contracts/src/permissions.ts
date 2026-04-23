@@ -174,6 +174,11 @@ export const PERMISSIONS = [
   "admin:settings:manage",
   "admin:audit:read",
 
+  // users (invitation flow — distinct from the older admin:users:manage
+  // catch-all so we can grant invite rights without handing over the whole
+  // users/roles admin surface).
+  "users:invite",
+
   // portal (CUSTOMER)
   "portal:orders:read",
   "portal:invoices:read",
@@ -218,6 +223,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "reports:read",
     "reports:export",
     "admin:audit:read",
+    "users:invite",
   ],
 
   SALES_REP: [

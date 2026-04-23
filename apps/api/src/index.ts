@@ -88,6 +88,8 @@ import { ApprovalsService } from "./modules/approvals/approvals.service.js";
 import { registerApprovalsRoutes } from "./modules/approvals/routes.js";
 import { AdminAuditService } from "./modules/admin-audit/service.js";
 import { registerAdminAuditRoutes } from "./modules/admin-audit/routes.js";
+import { AdminUsersService } from "./modules/admin-users/service.js";
+import { registerAdminUsersRoutes } from "./modules/admin-users/routes.js";
 import { EsignatureService } from "./modules/esignature/service.js";
 import { VendorAuthService, VendorAdminService } from "@instigenie/vendor-admin";
 import { registerVendorRoutes } from "./modules/vendor/routes.js";
@@ -458,6 +460,31 @@ async function main(): Promise<void> {
   const adminAuditService = new AdminAuditService(pool);
   await registerAdminAuditRoutes(app, {
     service: adminAuditService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+  });
+
+  // User-invitation flow. Admin routes (invite/list/revoke) at
+  // /admin/users/* guarded by `users:invite`; public accept routes at
+  // /auth/accept-invite(/preview) authenticated by the raw token carried
+  // in the email URL. Worker handler `user-invite-created` (see
+  // apps/worker/src/handlers/user-invite-created.ts) consumes the outbox
+  // event emitted by invite() and writes to invitation_emails.
+  const adminUsersService = new AdminUsersService({
+    pool,
+    tokens,
+    refreshTtlSec: env.refreshTokenTtlSec,
+    tenantStatus,
+    webOrigin: env.webOrigin,
+    // Emit dev accept URL on the invite response for any non-prod build so
+    // the dashboard can link straight to the accept page without an email.
+    includeDevAcceptUrl: env.nodeEnv !== "production",
+  });
+  await registerAdminUsersRoutes(app, {
+    service: adminUsersService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,

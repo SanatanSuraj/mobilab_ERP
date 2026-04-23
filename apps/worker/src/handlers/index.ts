@@ -39,7 +39,17 @@ import {
 } from "./sales-order-dispatched.js";
 import { openTicket as openQuotationApprovalTicket } from "./quotation-approval-requested.js";
 import { observeSettlement } from "./payment-received.js";
+import { makeSendInvitationEmail } from "./user-invite-created.js";
+import { loadEnv } from "../env.js";
 import type { HandlerEntry } from "./types.js";
+
+// The user.invite.created handler needs the web origin to render accept
+// URLs. Build the handler once at module load from the same env source the
+// rest of the worker uses, then register it below like any other entry.
+// (No DI wiring needed: webOrigin is static per process.)
+const sendInvitationEmail = makeSendInvitationEmail({
+  webOrigin: loadEnv().webOrigin,
+});
 
 export const HANDLER_CATALOGUE: HandlerEntry[] = [
   // deal.won → production + procurement
@@ -143,6 +153,15 @@ export const HANDLER_CATALOGUE: HandlerEntry[] = [
     eventType: "payment.received",
     handlerName: "finance.observeSettlement",
     handler: observeSettlement as unknown as HandlerEntry["handler"],
+  },
+
+  // user.invite.created → admin.sendInvitationEmail
+  // Writes a row to invitation_emails (dev mailbox). Production swaps this
+  // for a transactional-email adapter; the handler contract is unchanged.
+  {
+    eventType: "user.invite.created",
+    handlerName: "admin.sendInvitationEmail",
+    handler: sendInvitationEmail as unknown as HandlerEntry["handler"],
   },
 ];
 
