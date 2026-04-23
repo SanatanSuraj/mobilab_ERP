@@ -19,6 +19,7 @@ import type {
 import { z } from "zod";
 import { ConflictError, NotFoundError } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { purchaseOrdersRepo } from "./purchase-orders.repository.js";
@@ -116,7 +117,37 @@ export class PurchaseOrdersService {
         await purchaseOrdersRepo.recomputeHeaderTotals(client, header.id);
       }
       const fresh = await purchaseOrdersRepo.getById(client, header.id);
-      return { ...(fresh ?? header), lines };
+      const finalHeader = fresh ?? header;
+
+      // Track 1 emit #7 (automate.md). No separate issue step exists today —
+      // PO create *is* the issuance. If a DRAFT/ISSUED split lands later,
+      // move this emit to that transition. The payload carries grand_total so
+      // Track 2 F2 (vendor advance posting) can compute advance % without a
+      // second read. Line snapshot is optional — handlers that need full line
+      // detail should join po_lines on poId.
+      await enqueueOutbox(client, {
+        aggregateType: "purchase_order",
+        aggregateId: finalHeader.id,
+        eventType: "po.issued",
+        payload: {
+          orgId: user.orgId,
+          poId: finalHeader.id,
+          poNumber: finalHeader.poNumber,
+          vendorId: finalHeader.vendorId,
+          totalValue: finalHeader.grandTotal,
+          currency: finalHeader.currency,
+          lines: lines.map((ln) => ({
+            itemId: ln.itemId,
+            quantity: ln.quantity,
+            uom: ln.uom,
+            unitPrice: ln.unitPrice,
+          })),
+          actorId: user.id,
+        },
+        idempotencyKey: `po.issued:${finalHeader.id}`,
+      });
+
+      return { ...finalHeader, lines };
     });
   }
 

@@ -35,6 +35,7 @@ import type {
 import { z } from "zod";
 import { ConflictError, NotFoundError } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { workOrdersRepo } from "./work-orders.repository.js";
@@ -266,6 +267,7 @@ export class WorkOrdersService {
     stageId: string,
     input: AdvanceWipStage
   ): Promise<WorkOrderWithStages> {
+    const user = requireUser(req);
     return withRequest(req, this.pool, async (client) => {
       const header = await workOrdersRepo.getById(client, woId);
       if (!header) throw new NotFoundError("work order");
@@ -390,7 +392,39 @@ export class WorkOrdersService {
 
       const fresh = await workOrdersRepo.getById(client, woId);
       const freshStages = await workOrdersRepo.listStages(client, woId);
-      return { ...(fresh ?? header), stages: freshStages };
+      const finalWo = fresh ?? header;
+
+      // Track 1 emit #10 (automate.md): every WIP-stage advance emits a
+      // wo.stage_changed event carrying the WO-level status transition
+      // (header.status → finalWo.status). The header status is derived from
+      // stage state by the switch/case above, so this captures the whole
+      // production ladder (PLANNED → IN_PROGRESS → QC_HOLD → REWORK →
+      // COMPLETED). Phase 2 consumers: Track 2 F5 FG valuation (on
+      // COMPLETED), Track 2 F8 material issue (on start of first stage).
+      //
+      // Idempotency: (woId, stageId, newStatus, reworkCount) uniquely
+      // identifies a transition because rework loops bump reworkCount on the
+      // STAGE. We pin on WO status + stage id + rework counter. For the same
+      // stage in the same counter generation, repeating the emit dedupes.
+      const freshStage = freshStages.find((s) => s.id === stageId) ?? null;
+      if (finalWo.status !== header.status || freshStage) {
+        await enqueueOutbox(client, {
+          aggregateType: "work_order",
+          aggregateId: woId,
+          eventType: "wo.stage_changed",
+          payload: {
+            orgId: finalWo.orgId,
+            workOrderId: woId,
+            workOrderPid: finalWo.pid,
+            fromStage: header.status,
+            toStage: finalWo.status,
+            actorId: user.id,
+          },
+          idempotencyKey: `wo.stage_changed:${woId}:${stageId}:${finalWo.status}:r${freshStage?.reworkCount ?? 0}`,
+        });
+      }
+
+      return { ...finalWo, stages: freshStages };
     });
   }
 

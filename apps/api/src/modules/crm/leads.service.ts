@@ -32,6 +32,7 @@ import type {
 import { z } from "zod";
 import { NotFoundError, StateTransitionError } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { leadsRepo } from "./leads.repository.js";
@@ -334,6 +335,24 @@ export class LeadsService {
         type: "STATUS_CHANGE",
         content: `Converted to deal ${deal.dealNumber}.`,
         actorId: user.id,
+      });
+
+      // Track 1 emit #1 (automate.md): lead.converted — broadcasts the lead
+      // transition to any downstream module that wants to react (e.g. mark
+      // lead source ROI, trigger a CRM welcome flow). No handlers today;
+      // the event is written so Phase 2 consumers have something to sub to.
+      await enqueueOutbox(client, {
+        aggregateType: "lead",
+        aggregateId: id,
+        eventType: "lead.converted",
+        payload: {
+          orgId: user.orgId,
+          leadId: id,
+          accountId: account.id,
+          dealId: deal.id,
+          convertedBy: user.id,
+        },
+        idempotencyKey: `lead.converted:${id}`,
       });
 
       return { lead: updated, deal, accountId: account.id };

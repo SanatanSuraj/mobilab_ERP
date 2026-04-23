@@ -16,9 +16,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "lint": "eslint src",
-    "migrate:generate": "drizzle-kit generate",
-    "migrate:up": "drizzle-kit migrate"
+    "lint": "eslint src"
   },
   "dependencies": {
     "@instigenie/errors": "workspace:*",

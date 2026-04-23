@@ -40,6 +40,7 @@ import type {
 import { z } from "zod";
 import { ConflictError, NotFoundError } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { inspectionsRepo } from "./inspections.repository.js";
@@ -323,6 +324,43 @@ export class QcInspectionsService {
       });
       if (!updated) throw new NotFoundError("qc inspection");
       const findings = await inspectionsRepo.listFindings(client, id);
+
+      // Track 1 emit #9 (automate.md): on PASS, broadcast a lean inspection
+      // event. NOTE: the existing worker handlers `inventory.recordStockIn` /
+      // `finance.draftPurchaseInvoice` (qc_inward.passed) and
+      // `inventory.recordFinishedGoods` / `finance.notifyValuation` /
+      // `crm.notifySales` (qc_final.passed) require richly-joined payloads
+      // (vendor name, unit price, warehouse, recipient user IDs) that need
+      // joins across grn_lines → grns → purchase_orders → vendors and
+      // work_orders → products. Emitting the legacy event names here with a
+      // partial payload would cause those handlers to fail on NOT NULL /
+      // missing field errors and retry-loop.
+      //
+      // Phase 1 compromise: emit the lean `qc_inspection.passed` event with
+      // just aggregate pointers. Phase 2 owns either (a) upgrading the legacy
+      // handlers to do their own joins from inspectionId, or (b) adding an
+      // API-side payload assembler and renaming this emit to the legacy
+      // names. Tracked in automate.md Part D.
+      if (input.verdict === "PASS") {
+        await enqueueOutbox(client, {
+          aggregateType: "qc_inspection",
+          aggregateId: id,
+          eventType: "qc_inspection.passed",
+          payload: {
+            orgId: updated.orgId,
+            inspectionId: id,
+            inspectionNumber: updated.inspectionNumber,
+            kind: updated.kind,
+            sourceType: updated.sourceType,
+            sourceId: updated.sourceId,
+            grnLineId: updated.grnLineId,
+            workOrderId: updated.workOrderId,
+            wipStageId: updated.wipStageId,
+          },
+          idempotencyKey: `qc_inspection.passed:${id}`,
+        });
+      }
+
       return { ...updated, findings };
     });
   }

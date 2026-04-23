@@ -31,6 +31,14 @@ import {
   whatsappNotify,
 } from "./delivery-challan-confirmed.js";
 import { enqueuePdfRender } from "./qc-cert-issued.js";
+// Track 1 Phase 2 handlers (automate.md)
+import { reserveForSo } from "./sales-order-confirmed.js";
+import {
+  draftSalesInvoice,
+  releaseReservations,
+} from "./sales-order-dispatched.js";
+import { openTicket as openQuotationApprovalTicket } from "./quotation-approval-requested.js";
+import { observeSettlement } from "./payment-received.js";
 import type { HandlerEntry } from "./types.js";
 
 export const HANDLER_CATALOGUE: HandlerEntry[] = [
@@ -98,6 +106,44 @@ export const HANDLER_CATALOGUE: HandlerEntry[] = [
     handlerName: "crm.whatsappNotify",
     handler: whatsappNotify as unknown as HandlerEntry["handler"],
   },
+
+  // ─── Track 1 Phase 2 (automate.md) ────────────────────────────────────
+  // sales_order.confirmed → inventory.reserveForSo
+  {
+    eventType: "sales_order.confirmed",
+    handlerName: "inventory.reserveForSo",
+    handler: reserveForSo as unknown as HandlerEntry["handler"],
+  },
+
+  // sales_order.dispatched → finance (draft SI) + inventory (release reservations)
+  // Order matters lightly: drafting the invoice first means observers that
+  // poll finance see the AR entry before the reservation disappears.
+  {
+    eventType: "sales_order.dispatched",
+    handlerName: "finance.draftSalesInvoice",
+    handler: draftSalesInvoice as unknown as HandlerEntry["handler"],
+  },
+  {
+    eventType: "sales_order.dispatched",
+    handlerName: "inventory.releaseReservations",
+    handler: releaseReservations as unknown as HandlerEntry["handler"],
+  },
+
+  // quotation.submitted_for_approval → approvals.openTicket
+  {
+    eventType: "quotation.submitted_for_approval",
+    handlerName: "approvals.openQuotationTicket",
+    handler: openQuotationApprovalTicket as unknown as HandlerEntry["handler"],
+  },
+
+  // payment.received → finance.observeSettlement (read-only shell — see file
+  // header; the real apply-to-ledger + maybe-settle logic can't land until
+  // the schema gap in sales_invoices.status is closed in Track 2).
+  {
+    eventType: "payment.received",
+    handlerName: "finance.observeSettlement",
+    handler: observeSettlement as unknown as HandlerEntry["handler"],
+  },
 ];
 
 export { runHandler, runHandlersForEvent } from "./runner.js";
@@ -118,4 +164,14 @@ export type {
   QcFinalPassedPayload,
   QcCertIssuedPayload,
   DeliveryChallanConfirmedPayload,
+  // Track 1 Phase 1 payloads (automate.md)
+  LeadConvertedPayload,
+  DealStageChangedPayload,
+  QuotationApprovalRequestedPayload,
+  SalesOrderConfirmedPayload,
+  SalesOrderDispatchedPayload,
+  PoIssuedPayload,
+  GrnPostedPayload,
+  WoStageChangedPayload,
+  PaymentReceivedPayload,
 } from "./types.js";

@@ -3,13 +3,14 @@
  *
  * ARCHITECTURE.md §3.3. Matches ops/sql/init/09-approvals.sql.
  *
- * The six chains (per-org, seeded):
+ * The seven chains (per-org, seeded):
  *   work_order           PM → FIN (>=5L) → MGMT (>=20L)
  *   purchase_order       PM → FIN → MGMT (>=10L)
  *   deal_discount        SALES_MANAGER → FINANCE   (only when pct > 15)
  *   raw_material_issue   PM confirmation           (no threshold)
  *   device_qc_final      QC_INSPECTOR + e-sig      (no threshold)
  *   invoice              FINANCE → MGMT (>=20L)
+ *   quotation            SALES_MANAGER → FINANCE (>=20L)   (Track 1)
  */
 
 import { z } from "zod";
@@ -26,6 +27,9 @@ export const APPROVAL_ENTITY_TYPES = [
   "raw_material_issue",
   "device_qc_final",
   "invoice",
+  // Track 1 Phase 2 (automate.md) — quotation submit-for-approval flow.
+  // Chain seeded in ops/sql/init/20-quotation-approvals.sql.
+  "quotation",
 ] as const;
 export const ApprovalEntityTypeSchema = z.enum(APPROVAL_ENTITY_TYPES);
 export type ApprovalEntityType = z.infer<typeof ApprovalEntityTypeSchema>;

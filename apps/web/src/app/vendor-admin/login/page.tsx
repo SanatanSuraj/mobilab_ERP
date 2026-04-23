@@ -160,7 +160,8 @@ function LoginForm() {
 
             <p className="text-[11px] text-slate-500 leading-snug pt-1">
               Dev seeds (password <code>instigenie_dev_2026</code>):{" "}
-              <code>ops@instigenie.in</code>, <code>support@instigenie.in</code>
+              <code>vendor@instigenie.local</code>,{" "}
+              <code>vendor2@instigenie.local</code>
             </p>
           </CardContent>
         </Card>

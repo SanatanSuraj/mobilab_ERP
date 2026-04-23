@@ -248,6 +248,103 @@ const EXPECTED_TICKET_TRANSITIONS: Record<
 // ─── Test fixtures / helpers ────────────────────────────────────────────────
 
 /**
+ * The shared product_code used by gate-46's CLOSED_WON precondition
+ * seeding. A single product + active BOM is reused across every test
+ * that walks a deal into CLOSED_WON; per-deal uniqueness lives on the
+ * quotation itself (one ACCEPTED quote per deal). The row is tagged
+ * with the 'GATE46-' prefix so beforeEach can garbage-collect it.
+ */
+const GATE46_PRODUCT_CODE = "GATE46-PRODUCT";
+
+/**
+ * Idempotently seed the product + ACTIVE BOM that the CLOSED_WON
+ * precondition resolves through. Track 1 Phase 2 made CLOSED_WON fail
+ * fast when the deal has no linked ACCEPTED quotation whose primary
+ * line resolves to a product with an active BOM (see
+ * apps/api/src/modules/crm/deals.service.ts). Before this gate can
+ * exercise the stage graph's CLOSED_WON edges it has to stand up that
+ * chain. Returns the (productId, bomId) pair so the per-deal
+ * quotation insert can reuse them.
+ */
+async function ensureGate46WinProduct(
+  pool: pg.Pool,
+): Promise<{ productId: string; bomId: string }> {
+  return withOrg(pool, DEV_ORG_ID, async (client) => {
+    // Upsert the product. product_code is UNIQUE on (org, lower(code))
+    // when deleted_at IS NULL — we use that as the idempotency key.
+    const { rows: prodRows } = await client.query<{
+      id: string;
+      active_bom_id: string | null;
+    }>(
+      `INSERT INTO products (org_id, product_code, name, family, uom)
+       VALUES ($1, $2, 'gate-46 test product', 'INSTRUMENT', 'PCS')
+       ON CONFLICT (org_id, lower(product_code)) WHERE deleted_at IS NULL
+         DO UPDATE SET updated_at = now()
+       RETURNING id, active_bom_id`,
+      [DEV_ORG_ID, GATE46_PRODUCT_CODE],
+    );
+    const product = prodRows[0]!;
+
+    if (product.active_bom_id) {
+      return { productId: product.id, bomId: product.active_bom_id };
+    }
+
+    // No active BOM yet — create one and point products.active_bom_id at
+    // it. Done in one txn so the partial unique on (org, product) WHERE
+    // status='ACTIVE' is respected.
+    const { rows: bomRows } = await client.query<{ id: string }>(
+      `INSERT INTO bom_versions
+         (org_id, product_id, version_label, status)
+       VALUES ($1, $2, 'v1-gate46', 'ACTIVE')
+       RETURNING id`,
+      [DEV_ORG_ID, product.id],
+    );
+    const bomId = bomRows[0]!.id;
+    await client.query(
+      `UPDATE products SET active_bom_id = $2 WHERE id = $1`,
+      [product.id, bomId],
+    );
+    return { productId: product.id, bomId };
+  });
+}
+
+/**
+ * Seed the ACCEPTED quotation + primary line that the CLOSED_WON
+ * transition reads to build the deal.won outbox payload. One quotation
+ * per deal. quotation_number is tagged with the gate-46 prefix so the
+ * beforeEach cleanup sweeps it away; the unique index on
+ * (org, quotation_number) tolerates rerun-in-the-same-test by using a
+ * random suffix.
+ */
+async function seedGate46AcceptedQuotation(
+  pool: pg.Pool,
+  dealId: string,
+): Promise<void> {
+  await ensureGate46WinProduct(pool);
+  await withOrg(pool, DEV_ORG_ID, async (client) => {
+    const suffix = Math.random().toString(36).slice(2, 10);
+    const quotationNumber = `GATE46-Q-${suffix}`;
+    const { rows: qRows } = await client.query<{ id: string }>(
+      `INSERT INTO quotations
+         (org_id, quotation_number, deal_id, company, contact_name,
+          status, subtotal, tax_amount, grand_total)
+       VALUES ($1, $2, $3, 'gate-46 customer', 'gate-46 contact',
+               'ACCEPTED', 1000, 0, 1000)
+       RETURNING id`,
+      [DEV_ORG_ID, quotationNumber, dealId],
+    );
+    const quotationId = qRows[0]!.id;
+    await client.query(
+      `INSERT INTO quotation_line_items
+         (org_id, quotation_id, product_code, product_name,
+          quantity, unit_price, line_total)
+       VALUES ($1, $2, $3, 'gate-46 product', 1, 1000, 1000)`,
+      [DEV_ORG_ID, quotationId, GATE46_PRODUCT_CODE],
+    );
+  });
+}
+
+/**
  * Build a DISCOVERY deal, then walk the stage graph using
  * EXPECTED_DEAL_TRANSITIONS to reach `target`. BFS over the matrix so
  * reachability is driven by the same source of truth we're testing — no
@@ -256,8 +353,14 @@ const EXPECTED_TICKET_TRANSITIONS: Record<
  * For CLOSED_LOST waypoints we supply a placeholder lostReason so the
  * service's ValidationError path doesn't fire; for every other stage the
  * reason is unused.
+ *
+ * Track 1 Phase 2: right before the CLOSED_WON step we seed the
+ * ACCEPTED quotation + line + product + ACTIVE BOM that the service
+ * now requires (see `ensureGate46WinProduct` / `seedGate46AcceptedQuotation`).
+ * The seed is scoped per deal so concurrent tests don't collide.
  */
 async function advanceDealToStage(
+  pool: pg.Pool,
   deals: DealsServiceLike,
   target: DealStage,
   tag: string,
@@ -291,6 +394,9 @@ async function advanceDealToStage(
   // path[0] === "DISCOVERY"; start walking from index 1.
   for (let i = 1; i < path.length; i++) {
     const next = path[i]!;
+    if (next === "CLOSED_WON") {
+      await seedGate46AcceptedQuotation(pool, current.id);
+    }
     const res = await deals.transitionStage(req, current.id, {
       stage: next,
       expectedVersion: current.version,
@@ -397,8 +503,23 @@ describe("gate-46: CRM deal + ticket state-machine transition matrix", () => {
 
   // Scoped cleanup. gate-46 fixtures are addressable by the gate-46 prefix
   // tag so we never touch rows owned by gate-8 / gate-25 / gate-26.
+  //
+  // Track 1 Phase 2 CLOSED_WON precondition seeding adds three more
+  // fixture classes: quotations linked to gate-46 deals, a shared
+  // GATE46-PRODUCT row, and its ACTIVE BOM. Quotations cascade-delete
+  // their line items so we only need to target the header. Product +
+  // BOM survive across tests (one per run; seeded on demand) — cleaning
+  // them here would force ensureGate46WinProduct to re-insert the
+  // product every test and fight the partial-unique index when the
+  // delete hasn't committed. Instead, the product + BOM are idempotent
+  // across test files and only the quotations are per-deal.
   beforeEach(async () => {
     await withOrg(pool, DEV_ORG_ID, async (client) => {
+      await client.query(
+        `DELETE FROM quotations
+          WHERE quotation_number LIKE 'GATE46-Q-%'
+             OR deal_id IN (SELECT id FROM deals WHERE company LIKE 'gate-46 %')`,
+      );
       await client.query(
         `DELETE FROM deals WHERE company LIKE 'gate-46 %'`,
       );
@@ -426,10 +547,20 @@ describe("gate-46: CRM deal + ticket state-machine transition matrix", () => {
         if (allowed) {
           it(`accepts valid edge ${label}`, async () => {
             const seeded = await advanceDealToStage(
+              pool,
               deals,
               from,
               `deal-valid-${from}-to-${to}`,
             );
+            // Track 1 Phase 2: valid edges that land ON CLOSED_WON need
+            // the same ACCEPTED-quotation + active-BOM precondition the
+            // path-walk seeds on intermediate CLOSED_WON hops. The walk
+            // itself skips that step when `from === NEGOTIATION` because
+            // the walk stops AT NEGOTIATION; the final hop is driven by
+            // this outer transitionStage() call.
+            if (to === "CLOSED_WON") {
+              await seedGate46AcceptedQuotation(pool, seeded.id);
+            }
             const moved = await deals.transitionStage(
               makeRequest(),
               seeded.id,
@@ -448,6 +579,7 @@ describe("gate-46: CRM deal + ticket state-machine transition matrix", () => {
         } else {
           it(`rejects invalid edge ${label} with StateTransitionError`, async () => {
             const seeded = await advanceDealToStage(
+              pool,
               deals,
               from,
               `deal-invalid-${from}-to-${to}`,
@@ -473,6 +605,7 @@ describe("gate-46: CRM deal + ticket state-machine transition matrix", () => {
       for (const to of DEAL_STAGES) {
         if (to === "CLOSED_WON") continue;
         const seeded = await advanceDealToStage(
+          pool,
           deals,
           "CLOSED_WON",
           `deal-terminal-won-${to}`,
@@ -492,6 +625,7 @@ describe("gate-46: CRM deal + ticket state-machine transition matrix", () => {
       for (const to of DEAL_STAGES) {
         if (to === "CLOSED_LOST") continue;
         const seeded = await advanceDealToStage(
+          pool,
           deals,
           "CLOSED_LOST",
           `deal-terminal-lost-${to}`,
@@ -512,6 +646,7 @@ describe("gate-46: CRM deal + ticket state-machine transition matrix", () => {
       // Pre-requisite state: the deepest non-terminal stage is NEGOTIATION.
       // Seed that and try to close-lost without a reason.
       const seeded = await advanceDealToStage(
+        pool,
         deals,
         "NEGOTIATION",
         "deal-closelost-no-reason",

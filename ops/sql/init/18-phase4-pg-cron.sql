@@ -287,10 +287,29 @@ SELECT cron.schedule(
 --    immutability invariant); only the cold table gets DELETE.
 --
 -- Both grants are idempotent (GRANT is a no-op if already granted).
+--
+-- Role-existence guard: `instigenie_app` is created in
+-- ops/sql/seed/99-app-role.sql, which runs AFTER this file in the
+-- canonical init→triggers→rls→seed ordering (00-apply-all.sh /
+-- apply-to-running.sh). On a fresh bootstrap the role doesn't exist
+-- yet, so unconditional GRANTs / CREATE POLICY ... TO instigenie_app
+-- abort initdb. Mirror 15-audit-hashchain.sql's pattern: skip
+-- gracefully when the role is absent — seed/99-app-role.sql itself
+-- performs `GRANT … ON ALL TABLES IN SCHEMA public TO instigenie_app`
+-- after role creation, which catches every object the role file can
+-- see. The cron/audit-archive grants below are the extras that the
+-- generic grant block doesn't reach, and they get (re-)applied on the
+-- post-seed pass via apply-to-running.sh / manual `pnpm db:migrate`.
 
-GRANT USAGE ON SCHEMA cron TO instigenie_app;
-GRANT SELECT ON cron.job TO instigenie_app;
-GRANT SELECT ON cron.job_run_details TO instigenie_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
+    EXECUTE 'GRANT USAGE ON SCHEMA cron TO instigenie_app';
+    EXECUTE 'GRANT SELECT ON cron.job TO instigenie_app';
+    EXECUTE 'GRANT SELECT ON cron.job_run_details TO instigenie_app';
+  END IF;
+END
+$$;
 
 -- pg_cron ships cron.job with an RLS policy that restricts rows to
 -- `username = CURRENT_USER`. Our schedules are registered by the
@@ -302,6 +321,11 @@ GRANT SELECT ON cron.job_run_details TO instigenie_app;
 -- UPDATE grant), so the app can look but not tamper.
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
+    -- Role created later; skip. Post-seed migrate pass re-runs this
+    -- file and the policies land then.
+    RETURN;
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
      WHERE schemaname = 'cron'
@@ -325,5 +349,11 @@ BEGIN
 END
 $$;
 
-GRANT SELECT, INSERT, DELETE ON audit.log_archive TO instigenie_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON audit.archive_runs TO instigenie_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
+    EXECUTE 'GRANT SELECT, INSERT, DELETE ON audit.log_archive TO instigenie_app';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON audit.archive_runs TO instigenie_app';
+  END IF;
+END
+$$;

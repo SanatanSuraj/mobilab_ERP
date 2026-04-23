@@ -39,6 +39,7 @@ import {
   type VoidPayment,
 } from "@instigenie/contracts";
 import { m, moneyToPg, ZERO } from "@instigenie/money";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { paymentsRepo } from "./payments.repository.js";
@@ -318,6 +319,39 @@ export class PaymentsService {
       // Refresh to pick up any updates (amount_paid rollups don't affect
       // payment row, but getById returns a consistent view).
       const refreshed = await paymentsRepo.getById(client, payment.id);
+
+      // Track 1 emit #11 (automate.md): payment.received fires for both
+      // CUSTOMER_RECEIPT (inward, positive amount) and VENDOR_PAYMENT
+      // (outward, sign negated). The payload's `amount` is signed so
+      // downstream GL posters (Track 3 Phase 3.2) can key debits/credits by
+      // sign without peeking at paymentType.
+      //
+      // Idempotency: payment id is unique per record; void/unvoid cycles
+      // produce separate payment events only if the service were to re-emit
+      // on void (it doesn't — void has its own state). For Phase 1, one
+      // event per payment create is the contract.
+      const signedAmount =
+        input.paymentType === "CUSTOMER_RECEIPT"
+          ? input.amount
+          : `-${input.amount}`;
+      await enqueueOutbox(client, {
+        aggregateType: "payment",
+        aggregateId: payment.id,
+        eventType: "payment.received",
+        payload: {
+          orgId: user.orgId,
+          paymentId: payment.id,
+          paymentNumber: payment.paymentNumber,
+          customerId: input.customerId ?? null,
+          vendorId: input.vendorId ?? null,
+          amount: signedAmount,
+          currency: input.currency ?? "INR",
+          appliedInvoiceIds: (input.appliedTo ?? []).map((a) => a.invoiceId),
+          actorId: user.id,
+        },
+        idempotencyKey: `payment.received:${payment.id}`,
+      });
+
       return refreshed!;
     });
   }

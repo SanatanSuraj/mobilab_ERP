@@ -6,6 +6,12 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype' && pnpm dev"],
       "port": 3000
+    },
+    {
+      "name": "web-only",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype' && pnpm --filter @instigenie/web dev"],
+      "port": 3000
     }
   ]
 }

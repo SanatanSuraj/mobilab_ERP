@@ -1,4 +1,4 @@
--- Seed the 6 default approval chains for the Instigenie Dev org.
+-- Seed the 7 default approval chains for the Instigenie Dev org.
 -- ARCHITECTURE.md §3.3. The production onboarding flow should seed
 -- equivalent defaults when a new tenant is created; for now this dev-only
 -- seed gives the gate test and the UI something real to talk to.
@@ -26,6 +26,13 @@
 --   invoice
 --     default (<20L)   : Finance
 --     >=20L            : Finance → Management
+--
+--   quotation                       (automate.md Track 1 Phase 2)
+--     default (<20L)   : Sales Manager
+--     >=20L            : Sales Manager → Finance
+--     The worker handler `quotation-approval-requested.ts` resolves this
+--     chain on every quotation.submitted_for_approval outbox delivery —
+--     if the seed hasn't run the handler logs + returns gracefully.
 
 DO $$
 DECLARE
@@ -98,7 +105,22 @@ BEGIN
      'Invoice Issue — senior tier (>=20L)', 'Adds Management.',
      2000000, NULL,
      '[{"stepNumber":1,"roleId":"FINANCE","requiresESignature":false},
-       {"stepNumber":2,"roleId":"MANAGEMENT","requiresESignature":false}]'::jsonb)
+       {"stepNumber":2,"roleId":"MANAGEMENT","requiresESignature":false}]'::jsonb),
+
+    -- ── quotation (automate.md Track 1) ───────────────────────────────────
+    -- Mirrors the existing invoice chain shape but starts at Sales because
+    -- the quote author is a sales rep — their manager is the first gate.
+    -- Finance joins above 20L (same cutoff as invoice chains, for consistency
+    -- with ARCHITECTURE.md §3.3 money bands).
+    ('00000000-0000-0000-0000-0000000ac601', v_org_id, 'quotation',
+     'Quotation Approval — standard (<20L)', 'Sales Manager sign-off.',
+     NULL, 2000000,
+     '[{"stepNumber":1,"roleId":"SALES_MANAGER","requiresESignature":false}]'::jsonb),
+    ('00000000-0000-0000-0000-0000000ac602', v_org_id, 'quotation',
+     'Quotation Approval — senior tier (>=20L)', 'Adds Finance as the gate after Sales.',
+     2000000, NULL,
+     '[{"stepNumber":1,"roleId":"SALES_MANAGER","requiresESignature":false},
+       {"stepNumber":2,"roleId":"FINANCE","requiresESignature":false}]'::jsonb)
   ON CONFLICT (id) DO UPDATE
     SET name        = EXCLUDED.name,
         description = EXCLUDED.description,

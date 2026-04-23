@@ -36,6 +36,7 @@ import {
   ValidationError,
 } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { grnsRepo } from "./grns.repository.js";
@@ -339,6 +340,35 @@ export class GrnsService {
       }
 
       const freshLines = await grnsRepo.listLines(client, grnId);
+
+      // Track 1 emit #8 (automate.md): grn.posted — signals downstream that
+      // material has physically arrived and stock_ledger has the IN rows.
+      // Consumers (Phase 2): qc_inward scheduler, Track 2 F3 GRN accounting
+      // (stock_ledger already written here; F3 adds the vendor_ledger side).
+      // idempotencyKey has no `v` suffix because markPosted is a one-way
+      // DRAFT → POSTED transition — re-running it is blocked by the status
+      // guard above, so one event per grnId is sufficient.
+      await enqueueOutbox(client, {
+        aggregateType: "grn",
+        aggregateId: grnId,
+        eventType: "grn.posted",
+        payload: {
+          orgId: user.orgId,
+          grnId,
+          grnNumber: posted.grnNumber,
+          poId: posted.poId ?? null,
+          vendorId: po.vendorId ?? null,
+          lines: freshLines.map((ln) => ({
+            itemId: ln.itemId,
+            quantity: ln.quantity,
+            uom: ln.uom,
+            warehouseId: posted.warehouseId,
+          })),
+          actorId: user.id,
+        },
+        idempotencyKey: `grn.posted:${grnId}`,
+      });
+
       return { ...posted, lines: freshLines };
     });
   }

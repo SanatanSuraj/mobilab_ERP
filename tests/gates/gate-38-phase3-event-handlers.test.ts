@@ -613,11 +613,13 @@ describe("Gate 38.4 — delivery_challan.confirmed fans out to inv + EWB + WA", 
 // ─── Catalogue wiring — single lookup table, no duplicates ──────────────
 
 describe("Gate 38.5 — HANDLER_CATALOGUE shape", () => {
-  test("exposes the §3.1 + §4.1 handlers with unique names in declared order", () => {
-    // 10 × Phase 3 §3.1 + 1 × Phase 4 §4.1 (compliance.enqueuePdfRender).
-    // Order matches the array in apps/worker/src/handlers/index.ts, which
-    // is the order fan-out runs in — production side-effects before
-    // compliance fan-out to the pdf-render queue.
+  test("exposes the §3.1 + §4.1 + Track 1 Phase 2 handlers with unique names in declared order", () => {
+    // Phase 3 §3.1 + Phase 4 §4.1 (compliance.enqueuePdfRender) + Track 1
+    // Phase 2 fan-out (automate.md). Order matches the array in
+    // apps/worker/src/handlers/index.ts, which is the order fan-out runs
+    // in — production side-effects before compliance fan-out to the
+    // pdf-render queue, with Track 1 entries appended after the original
+    // Phase 3/4 rows.
     const expected = [
       ["deal.won", "production.createWorkOrder"],
       ["deal.won", "procurement.createMrpIndent"],
@@ -630,6 +632,12 @@ describe("Gate 38.5 — HANDLER_CATALOGUE shape", () => {
       ["delivery_challan.confirmed", "inventory.recordDispatch"],
       ["delivery_challan.confirmed", "finance.generateEwb"],
       ["delivery_challan.confirmed", "crm.whatsappNotify"],
+      // ── Track 1 Phase 2 (automate.md) ──
+      ["sales_order.confirmed", "inventory.reserveForSo"],
+      ["sales_order.dispatched", "finance.draftSalesInvoice"],
+      ["sales_order.dispatched", "inventory.releaseReservations"],
+      ["quotation.submitted_for_approval", "approvals.openQuotationTicket"],
+      ["payment.received", "finance.observeSettlement"],
     ];
     const actual = HANDLER_CATALOGUE.map((e) => [e.eventType, e.handlerName]);
     expect(actual).toEqual(expected);

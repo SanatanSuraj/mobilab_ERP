@@ -223,3 +223,117 @@ export interface DeliveryChallanConfirmedPayload {
   customerName?: string;
   salesOrderId?: string;
 }
+
+// ─── Track 1 Phase 1 event payloads (see automate.md) ────────────────────
+//
+// Each interface below is emitted by a service method in apps/api/src/modules/.
+// Handlers may not exist yet (that's Phase 2); for now the outbox row is
+// written so downstream modules have something to subscribe to later. Keep
+// payloads minimal — consumers can join on the aggregate id for more fields.
+
+export interface LeadConvertedPayload {
+  orgId: string;
+  leadId: string;
+  accountId: string;
+  dealId: string;
+  /** User who initiated the convert action. */
+  convertedBy?: string | null;
+}
+
+export interface DealStageChangedPayload {
+  orgId: string;
+  dealId: string;
+  dealNumber: string;
+  fromStage: string;
+  toStage: string;
+  /** Only set when toStage === CLOSED_LOST. */
+  lostReason?: string | null;
+  actorId?: string | null;
+}
+
+export interface QuotationApprovalRequestedPayload {
+  orgId: string;
+  quotationId: string;
+  quotationNumber: string;
+  quotationVersion: number;
+  submittedBy?: string | null;
+}
+
+export interface SalesOrderConfirmedPayload {
+  orgId: string;
+  salesOrderId: string;
+  salesOrderNumber: string;
+  customerId: string;
+  /** Optional snapshot so downstream can reserve without re-reading. */
+  lines?: Array<{
+    itemId: string;
+    quantity: string;
+    uom: string;
+  }>;
+  actorId?: string | null;
+}
+
+export interface SalesOrderDispatchedPayload {
+  orgId: string;
+  salesOrderId: string;
+  salesOrderNumber: string;
+  customerId: string;
+  actorId?: string | null;
+}
+
+export interface PoIssuedPayload {
+  orgId: string;
+  poId: string;
+  poNumber: string;
+  vendorId: string;
+  /** Total order value (sum of line amounts incl. tax). String for precision. */
+  totalValue: string;
+  currency: string;
+  /** Optional line snapshot for downstream ATP/advance handlers. */
+  lines?: Array<{
+    itemId: string;
+    quantity: string;
+    uom: string;
+    unitPrice: string;
+  }>;
+  actorId?: string | null;
+}
+
+export interface GrnPostedPayload {
+  orgId: string;
+  grnId: string;
+  grnNumber: string;
+  /** Optional when GRN is issued without a PO (e.g. consignment). */
+  poId?: string | null;
+  vendorId?: string | null;
+  lines?: Array<{
+    itemId: string;
+    quantity: string;
+    uom: string;
+    warehouseId: string;
+  }>;
+  actorId?: string | null;
+}
+
+export interface WoStageChangedPayload {
+  orgId: string;
+  workOrderId: string;
+  workOrderPid: string;
+  fromStage: string;
+  toStage: string;
+  actorId?: string | null;
+}
+
+export interface PaymentReceivedPayload {
+  orgId: string;
+  paymentId: string;
+  paymentNumber: string;
+  /** Exactly one of customerId / vendorId is set per payment direction. */
+  customerId?: string | null;
+  vendorId?: string | null;
+  /** Signed amount: positive = inward (receipt), negative = outward (payout). */
+  amount: string;
+  currency: string;
+  appliedInvoiceIds?: string[];
+  actorId?: string | null;
+}

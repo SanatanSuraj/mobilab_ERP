@@ -47,6 +47,7 @@ import {
   StateTransitionError,
 } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import {
@@ -238,6 +239,7 @@ export class SalesOrdersService {
     id: string,
     input: TransitionSalesOrderStatus,
   ): Promise<SalesOrder> {
+    const user = requireUser(req);
     return withRequest(req, this.pool, async (client) => {
       const cur = await salesOrdersRepo.getById(client, id);
       if (!cur) throw new NotFoundError("sales order");
@@ -261,6 +263,51 @@ export class SalesOrdersService {
         throw new ConflictError(
           "sales order was modified by someone else",
         );
+      }
+
+      // Track 1 emits #5 + #6 (automate.md).
+      //
+      // CONFIRMED → sales_order.confirmed  — Phase 2 consumers:
+      //   - inventory.reserveForSo  (hard-reserves stock against stock_summary)
+      //   - finance.creditCheck     (Track 2 F6)
+      //   - inventory.checkAtp      (Track 2 F1)
+      //
+      // DISPATCHED → sales_order.dispatched — Phase 2 consumers:
+      //   - finance.draftSalesInvoice (auto-raise invoice, unblocks manual row #26)
+      //   - inventory.commitReservation (flip ALLOCATED → DISPATCHED)
+      //
+      // customerId derives from account_id (SO.account_id IS the customer).
+      // It can be null when the order was drafted without an account bound;
+      // the field is `customerId ?? null` in the payload so downstream can
+      // gate on it. Both emits use v<version> idempotency to dedupe retries.
+      if (input.status === "CONFIRMED") {
+        await enqueueOutbox(client, {
+          aggregateType: "sales_order",
+          aggregateId: id,
+          eventType: "sales_order.confirmed",
+          payload: {
+            orgId: result.orgId,
+            salesOrderId: id,
+            salesOrderNumber: result.orderNumber,
+            customerId: result.accountId,
+            actorId: user.id,
+          },
+          idempotencyKey: `sales_order.confirmed:${id}:v${result.version}`,
+        });
+      } else if (input.status === "DISPATCHED") {
+        await enqueueOutbox(client, {
+          aggregateType: "sales_order",
+          aggregateId: id,
+          eventType: "sales_order.dispatched",
+          payload: {
+            orgId: result.orgId,
+            salesOrderId: id,
+            salesOrderNumber: result.orderNumber,
+            customerId: result.accountId,
+            actorId: user.id,
+          },
+          idempotencyKey: `sales_order.dispatched:${id}:v${result.version}`,
+        });
       }
       return result;
     });

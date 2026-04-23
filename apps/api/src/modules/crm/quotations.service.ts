@@ -252,6 +252,7 @@ export class QuotationsService {
     id: string,
     input: TransitionQuotationStatus,
   ): Promise<Quotation> {
+    const user = requireUser(req);
     return withRequest(req, this.pool, async (client) => {
       const cur = await quotationsRepo.getById(client, id);
       if (!cur) throw new NotFoundError("quotation");
@@ -292,6 +293,25 @@ export class QuotationsService {
             quotationVersion: result.version,
           },
           idempotencyKey: `quotation.sent:${id}:v${result.version}`,
+        });
+      }
+      // Track 1 emit #4 (automate.md): transitioning INTO AWAITING_APPROVAL
+      // is the signal for the approvals module to open a ticket. Today the
+      // approvals flow is triggered manually via the UI; publishing the
+      // event unblocks the Phase 2 handler that opens tickets automatically.
+      if (input.status === "AWAITING_APPROVAL") {
+        await enqueueOutbox(client, {
+          aggregateType: "quotation",
+          aggregateId: id,
+          eventType: "quotation.submitted_for_approval",
+          payload: {
+            orgId: result.orgId,
+            quotationId: id,
+            quotationNumber: result.quotationNumber,
+            quotationVersion: result.version,
+            submittedBy: user.id,
+          },
+          idempotencyKey: `quotation.submitted_for_approval:${id}:v${result.version}`,
         });
       }
       return result;

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # Bootstrap applier for docker-entrypoint-initdb.d.
 #
@@ -14,6 +14,11 @@
 #
 # Within each directory, files are applied in lexicographic order so filename
 # prefixes (00-, 01-, 02-…) control execution order.
+#
+# SHEBANG NOTE: uses bash, not /bin/sh. The debian postgres image's /bin/sh
+# is dash, which does not support `set -o pipefail` — the script failed on
+# line 18 with "Illegal option -o pipefail" on fresh initdb, leaving the
+# cluster with no application schema and no roles. Keep as bash.
 
 set -euo pipefail
 
