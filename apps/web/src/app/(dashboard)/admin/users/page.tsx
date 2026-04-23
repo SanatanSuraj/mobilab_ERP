@@ -187,7 +187,7 @@ export default function UsersRolesPage() {
             Manage system users and their access permissions. All permissions enforced at API layer.
           </p>
         </div>
-        <Button onClick={() => toast.info("Invite user — coming in Phase 1 backend.")}>
+        <Button onClick={() => toast.info("User invitations aren't wired yet — seed accounts via ops/sql/seed/03-dev-org-users.sql and pnpm db:seed.")}>
           <UserPlus className="h-4 w-4 mr-2" />
           Invite User
         </Button>
