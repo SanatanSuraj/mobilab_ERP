@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): /accounting/payments uses the legacy prototype invoice model.
+// The real receipt/payment workflow lives in the Finance backend — see the
+// existing useApiCreateCustomerReceipt + useApiPostSalesInvoice hooks used
+// from /finance/sales-invoices/[id]. This page should either:
+//   (a) redirect to /finance/sales-invoices (which already gates post/receive
+//       via expectedVersion), or
+//   (b) be rewritten against useApiSalesInvoices + useApiCreateCustomerReceipt
+//       with the legacy `Invoice` shape mapped from SalesInvoice.
+// Mock import left in place until the routing/IA decision is made.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

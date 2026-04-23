@@ -1,0 +1,20 @@
+                                Table "audit.log"
+   Column   |           Type           | Collation | Nullable |      Default      
+------------+--------------------------+-----------+----------+-------------------
+ id         | uuid                     |           | not null | gen_random_uuid()
+ org_id     | uuid                     |           | not null | 
+ table_name | text                     |           | not null | 
+ row_id     | uuid                     |           |          | 
+ action     | text                     |           | not null | 
+ actor      | uuid                     |           |          | 
+ before     | jsonb                    |           |          | 
+ after      | jsonb                    |           |          | 
+ changed_at | timestamp with time zone |           | not null | now()
+ trace_id   | text                     |           |          | 
+Indexes:
+    "log_pkey" PRIMARY KEY, btree (id)
+    "audit_log_changed_at_idx" btree (changed_at)
+    "audit_log_org_table_idx" btree (org_id, table_name)
+Check constraints:
+    "log_action_check" CHECK (action = ANY (ARRAY['INSERT'::text, 'UPDATE'::text, 'DELETE'::text]))
+

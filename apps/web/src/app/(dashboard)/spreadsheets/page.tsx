@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): /spreadsheets is a prototype pivot/export surface that
+// materializes bulk rows from deals / products / invoices. Before wiring to
+// real data, pick one of:
+//   (a) remove this page (legacy demo), or
+//   (b) rewrite client-side over useApiDeals + useApiItems + useApiSalesInvoices
+//       (all of which already exist), with paging handled by the hooks.
+// Mock imports left in place until the IA decision is made.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { SpreadsheetGrid } from "@/components/shared/spreadsheet-grid";

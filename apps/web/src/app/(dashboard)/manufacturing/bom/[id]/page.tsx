@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): /manufacturing/bom/[id] reads the prototype `BOM` + `BOMLine`
+// shape with client-side `estimateLineCost` heuristics. The backend exposes
+// useApiBom + useApiBomLines, but the rolled-up totalCost is not yet
+// returned. Expected enhancement:
+//   GET /production/boms/:id?include=lines,totalCost
+// Mock imports left in place until the detail route returns rolled-up costing
+// or this page is rewritten over useApiBom + useApiBomLines with client-side
+// cost roll-up.
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/shared/status-badge";

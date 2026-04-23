@@ -1,5 +1,12 @@
 "use client";
 
+// TODO(phase-5): Procurement dashboard aggregates across indents / POs /
+// inward / QC — the backend exposes useApiIndents / useApiPurchaseOrders /
+// useApiGrns but there is no dedicated overview route. Expected:
+//   GET /procurement/overview - counts + SLA breach totals in one call
+// Or rewrite client-side over useApiIndents + useApiPurchaseOrders +
+// useApiGrns. Mock imports left in place until one of the above lands.
+
 import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

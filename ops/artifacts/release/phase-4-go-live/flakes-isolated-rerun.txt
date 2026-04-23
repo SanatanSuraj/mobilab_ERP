@@ -1,0 +1,20 @@
+
+ FAIL  tests/gates/gate-43-phase4-esig-critical-actions.test.ts > gate-43 (arch phase 4.2c / §9.5): critical-action e-signatures > 43.C stock CUSTOMER_ISSUE > 43.C.4 correct password → ledger posted; signature_hash reproducible
+ShortageError: insufficient stock for issue
+ ❯ apps/api/src/modules/inventory/stock.service.ts:241:17
+    239|         const onHand = cur ? parseQty(cur.onHand) : 0;
+    240|         if (onHand + qty < 0) {
+    241|           throw new ShortageError("insufficient stock for issue", {
+       |                 ^
+    242|             itemId: input.itemId,
+    243|             warehouseId: input.warehouseId,
+ ❯ Module.withOrg packages/db/src/with-org.ts:40:20
+ ❯ tests/gates/gate-43-phase4-esig-critical-actions.test.ts:526:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 18 passed (20)
+   Start at  15:07:54
+   Duration  1.54s (transform 434ms, setup 0ms, collect 1.69s, tests 833ms, environment 0ms, prepare 201ms)
+

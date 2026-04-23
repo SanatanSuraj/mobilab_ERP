@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Reorder alerts module has no backend routes yet. Expected
+// routes:
+//   GET  /inventory/reorder-alerts - compute/return active reorder alerts
+//   POST /inventory/reorder-alerts/:id/suppress
+//   POST /inventory/reorder-alerts/:id/create-indent - fan-out to procurement
+// Mock imports left in place until the reorder slice ships in
+// apps/api/src/modules/inventory.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

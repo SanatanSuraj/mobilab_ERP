@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Scrap / COPQ (Cost of Poor Quality) tracking has no backend
+// routes yet. Expected routes:
+//   GET  /mfg/scrap-entries?from=&to=&rootCause=
+//   POST /mfg/scrap-entries - log a scrap event with root-cause + quantity
+//   GET  /mfg/copq-records?period=YYYY-MM
+// Mock imports left in place until the scrap/COPQ slice ships in
+// apps/api/src/modules/mfg.
+
 import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

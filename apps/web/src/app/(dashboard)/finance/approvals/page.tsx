@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): /finance/approvals shows purchase-order approvals. PO
+// approvals belong in procurement — useApiPurchaseOrders + approval hooks
+// already exist there. This page should either:
+//   (a) redirect to /procurement/approvals (already migrated), or
+//   (b) be rewritten as a finance-centric view over useApiPurchaseOrders
+//       filtered by `approvalLevel in (finance, management)`.
+// Mock imports left in place until the routing/IA decision is made.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): OEE (Overall Equipment Effectiveness) tracking has no backend
+// routes yet. Expected routes:
+//   GET  /mfg/oee-records?line=&from=&to=
+//   GET  /mfg/downtime-entries?line=&from=&to=
+//   POST /mfg/oee-records - log availability / performance / quality per shift
+//   POST /mfg/downtime-entries - log downtime with reason code
+// Mock imports left in place until the OEE slice ships in
+// apps/api/src/modules/mfg.
+
 import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

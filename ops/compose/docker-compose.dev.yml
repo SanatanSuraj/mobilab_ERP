@@ -18,7 +18,14 @@ name: instigenie-dev
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # Custom build (see ops/postgres/Dockerfile) layers pg_cron onto
+    # postgres:16-bookworm. pg_cron is needed by Phase 4.2 for daily
+    # hashchain verification + audit archival; it requires the bookworm
+    # base because alpine doesn't ship postgresql-16-cron.
+    build:
+      context: ../postgres
+      dockerfile: Dockerfile
+    image: instigenie/postgres:16-pgcron
     container_name: instigenie-postgres
     restart: unless-stopped
     environment:
@@ -43,6 +50,8 @@ services:
       - ../sql/seed:/docker-entrypoint-initdb.d/04-seed:ro
     command: >
       postgres
+      -c shared_preload_libraries=pg_cron
+      -c cron.database_name=instigenie
       -c max_connections=200
       -c shared_buffers=256MB
       -c effective_cache_size=768MB

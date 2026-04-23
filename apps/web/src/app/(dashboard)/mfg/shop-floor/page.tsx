@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Shop-floor execution (line-level stage logs, scan-in/scan-out)
+// has no backend routes yet. Expected routes:
+//   GET  /mfg/lines/:line/active-work - current WOs on a line
+//   POST /mfg/stage-logs - scan event at a stage
+//   GET  /mfg/stage-logs?workOrderId= - audit trail for a WO
+// Mock imports left in place until the shop-floor slice ships in
+// apps/api/src/modules/mfg.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Inward entries (gate-in records that precede GRN) have no
+// backend routes yet. Expected routes:
+//   GET  /procurement/inward-entries
+//   POST /procurement/inward-entries - record gate-in against a PO
+//   POST /procurement/inward-entries/:id/convert-to-grn
+// Mock imports left in place until the inward slice ships in
+// apps/api/src/modules/procurement.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

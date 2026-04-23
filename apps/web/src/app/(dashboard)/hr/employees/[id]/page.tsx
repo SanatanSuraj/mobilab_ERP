@@ -1,5 +1,10 @@
 "use client";
 
+// TODO(phase-5): HR module has no backend routes yet. Expected routes:
+//   GET /hr/employees/:id - fetch employee detail + activity feed
+//   GET /hr/leaves?employeeId=:id - fetch employee leave history
+// Mock imports left in place until the HR module ships in apps/api/src/modules/hr.
+
 import { useParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActivityFeed } from "@/components/shared/activity-feed";

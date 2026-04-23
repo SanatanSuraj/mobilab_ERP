@@ -1,5 +1,9 @@
 "use client";
 
+// TODO(phase-5): Projects module has no backend routes yet. Expected routes:
+//   GET /projects/:id - fetch project detail with tasks + activity feed
+// Mock imports left in place until the Projects module ships in apps/api/src/modules/projects.
+
 import { useParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActivityFeed } from "@/components/shared/activity-feed";

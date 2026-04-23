@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): /manufacturing/work-orders reads the `EnhancedWorkOrder`
+// shape which combines WO header + wipStages + mfgProducts metadata.
+// useApiWorkOrders already exists, but the enhanced helpers
+// (getCompletedStages, getWOProgress, isWOOverdue) rely on fields not yet
+// returned by the header list. Expected enhancement:
+//   GET /production/work-orders?include=wipStages,product  - to match the
+//   `EnhancedWorkOrder` shape used here.
+// Mock imports left in place until the list route returns the composed shape.
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";

@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): /accounting/* uses the legacy prototype invoice/ledger model.
+// The real data lives in the Finance backend (see /finance/sales-invoices and
+// /finance/vendor-ledger pages, which already consume useApiSalesInvoices /
+// useApiCustomerLedger / useApiVendorLedger). This page should either:
+//   (a) redirect to /finance/sales-invoices, or
+//   (b) be rewritten against the finance-api hooks with the legacy
+//       `Invoice` shape mapped from SalesInvoice.
+// Mock import left in place until the routing/IA decision is made.
+
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

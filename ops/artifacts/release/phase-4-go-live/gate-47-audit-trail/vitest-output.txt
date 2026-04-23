@@ -1,0 +1,10 @@
+
+ RUN  v2.1.9 /Users/sanatansuraj/Desktop/crm _prototype/crm-prototype
+
+ ✓ tests/gates/gate-47-audit-trail-count.test.ts (7 tests) 134ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  15:07:38
+   Duration  916ms (transform 172ms, setup 0ms, collect 550ms, tests 134ms, environment 0ms, prepare 30ms)
+

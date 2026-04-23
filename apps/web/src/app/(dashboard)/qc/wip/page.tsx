@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): In-process (WIP) QC inspections have no dedicated backend
+// routes yet. The generic useApiQcInspections returns inspections across all
+// stages — the WIP-specific `WIPInspection` shape (per-line checkpoints) is
+// not yet modeled. Expected routes:
+//   GET  /qc/wip-inspections?line=&status=
+//   POST /qc/wip-inspections/:id/checkpoints/:checkpointId - record reading
+//   POST /qc/wip-inspections/:id/complete
+// Mock imports left in place until the WIP slice ships in
+// apps/api/src/modules/qc.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

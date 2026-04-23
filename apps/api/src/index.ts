@@ -86,6 +86,8 @@ import { NotificationsService } from "./modules/notifications/notifications.serv
 import { registerNotificationsRoutes } from "./modules/notifications/routes.js";
 import { ApprovalsService } from "./modules/approvals/approvals.service.js";
 import { registerApprovalsRoutes } from "./modules/approvals/routes.js";
+import { AdminAuditService } from "./modules/admin-audit/service.js";
+import { registerAdminAuditRoutes } from "./modules/admin-audit/routes.js";
 import { EsignatureService } from "./modules/esignature/service.js";
 import { VendorAuthService, VendorAdminService } from "@instigenie/vendor-admin";
 import { registerVendorRoutes } from "./modules/vendor/routes.js";
@@ -443,6 +445,19 @@ async function main(): Promise<void> {
 
   await registerApprovalsRoutes(app, {
     approvals: approvalsService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+  });
+
+  // Phase 4 §4.2 — tenant-facing admin audit dashboard at /admin/audit/*.
+  // Reads audit.log (RLS-scoped), joins users for actor-name hydration,
+  // gated behind `admin:audit:read`.
+  const adminAuditService = new AdminAuditService(pool);
+  await registerAdminAuditRoutes(app, {
+    service: adminAuditService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,

@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): /manufacturing/bom list page currently reads the prototype
+// `boms` mock. The backend already exposes useApiBoms / useApiCreateBom /
+// useApiActivateBom — this page can migrate to those hooks, but the legacy
+// `BOM` shape here includes computed costing (estimateLineCost) that the
+// backend currently doesn't return. Expected enhancement:
+//   GET /production/boms?include=totalCost - include rolled-up cost.
+// Mock imports left in place until the list route returns the composed shape
+// or this page is rewritten over useApiBoms with client-side costing.
+
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";

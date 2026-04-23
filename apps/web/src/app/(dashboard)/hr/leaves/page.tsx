@@ -1,5 +1,12 @@
 "use client";
 
+// TODO(phase-5): HR module has no backend routes yet. Expected routes:
+//   GET /hr/leaves - list + filter leave requests
+//   POST /hr/leaves - submit leave request
+//   POST /hr/leaves/:id/approve - approve a leave request
+//   POST /hr/leaves/:id/reject - reject a leave request
+// Mock imports left in place until the HR module ships in apps/api/src/modules/hr.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

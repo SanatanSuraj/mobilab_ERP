@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): Inventory stock adjustments module has no backend routes yet.
+// Expected routes:
+//   GET  /inventory/stock-adjustments
+//   POST /inventory/stock-adjustments (DRAFT)
+//   POST /inventory/stock-adjustments/:id/submit
+//   POST /inventory/stock-adjustments/:id/approve
+//   POST /inventory/stock-adjustments/:id/post (writes stock_ledger rows)
+// Mock imports left in place until the stock-adjustments slice ships in
+// apps/api/src/modules/inventory.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

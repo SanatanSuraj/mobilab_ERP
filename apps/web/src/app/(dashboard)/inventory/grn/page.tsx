@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Goods Receipt Note (GRN) lives under Procurement but this
+// prototype page reads from inventory-mock. The procurement backend exposes
+// useApiGrns / useApiGrn (see useProcurementApi), but those shapes differ
+// from the legacy `Grn` type used here. Choose one:
+//   (a) redirect /inventory/grn → /procurement/inward (already migrated), or
+//   (b) rewrite this page against useApiGrns with a shape adapter.
+// Mock imports left in place until the routing/IA decision is made.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

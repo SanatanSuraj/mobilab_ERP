@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): QC dashboard aggregates across incoming / WIP / NCR / CAPA /
+// equipment. useApiQcInspections + useApiQcCerts exist, but the specialized
+// incoming/WIP/NCR/CAPA/equipment entities and rollups have no backend route
+// yet. Expected:
+//   GET /qc/overview - single-call aggregates for all dashboard KPIs
+// Mock imports left in place until the overview route ships in
+// apps/api/src/modules/qc (or until the specialized slices ship and the
+// dashboard is rewritten over them).
+
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";
 import { StatusBadge } from "@/components/shared/status-badge";

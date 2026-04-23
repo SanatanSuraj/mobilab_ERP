@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Serial number tracking has no backend routes yet. Expected
+// routes:
+//   GET  /inventory/serials - list serials with item/warehouse/status filters
+//   GET  /inventory/serials/:id - serial detail + movement history
+//   POST /inventory/serials/:id/status - transition serial state
+// Mock imports left in place until the serials slice ships in
+// apps/api/src/modules/inventory.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

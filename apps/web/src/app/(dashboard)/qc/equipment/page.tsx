@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): QC equipment calibration tracking has no backend routes yet.
+// Expected routes:
+//   GET  /qc/equipment?status=&dueWithin=
+//   GET  /qc/equipment/:id - equipment + calibration history
+//   POST /qc/equipment/:id/calibrations - log a calibration event
+//   POST /qc/equipment/:id/quarantine - mark out of service
+// Mock imports left in place until the equipment slice ships in
+// apps/api/src/modules/qc.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

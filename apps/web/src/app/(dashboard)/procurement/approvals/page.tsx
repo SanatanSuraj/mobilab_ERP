@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): PO approvals workflow has no backend routes yet.
+// useApiPurchaseOrders exists for reads, but approve/reject transitions are
+// still mock. Expected routes (use expectedVersion for optimistic locking):
+//   POST /procurement/purchase-orders/:id/approve
+//   POST /procurement/purchase-orders/:id/reject
+// Mock imports left in place until the approval workflow ships in
+// apps/api/src/modules/procurement.
+
 import { useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";

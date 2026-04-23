@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Material Requirements Planning (MRP) has no backend route
+// yet. The MRP calculation must run server-side for correctness — it reads
+// WOs + BOMs + on-hand stock + open indents to compute shortages. Expected:
+//   GET /production/mrp?horizon=30d - returns MRPLine[] per WO
+//   POST /production/mrp/:woId/create-indents - fan-out to procurement
+// Mock imports left in place until the MRP slice ships in
+// apps/api/src/modules/production.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

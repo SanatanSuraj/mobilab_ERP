@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Projects module has no backend routes yet. Expected routes:
+//   GET /projects - list projects with filters
+//   GET /projects/:id - fetch project detail with tasks + activity
+//   GET /projects/:id/tasks - list tasks (kanban board source)
+//   POST /projects/:id/tasks - create task
+//   PATCH /projects/:id/tasks/:taskId - update task status
+// Mock imports left in place until the Projects module ships in apps/api/src/modules/projects.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

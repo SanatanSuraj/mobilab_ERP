@@ -1,0 +1,6 @@
+                                                                              List of functions
+ Schema |  Name  | Result data type | Argument data types | Type | Volatility | Parallel |   Owner    | Security | Access privileges | Language | Internal name | Description 
+--------+--------+------------------+---------------------+------+------------+----------+------------+----------+-------------------+----------+---------------+-------------
+ audit  | tg_log | trigger          |                     | func | volatile   | unsafe   | instigenie | definer  |                   | plpgsql  |               | 
+(1 row)
+

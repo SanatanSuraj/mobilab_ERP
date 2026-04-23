@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): Procurement analytics has no dedicated backend aggregation
+// yet. useApiPurchaseOrders / useApiGrns / useApiVendors already exist but
+// vendor scorecards, spend-by-category, on-time-delivery rollups need
+// server-side aggregation. Expected routes:
+//   GET /procurement/reports/vendor-scorecards
+//   GET /procurement/reports/spend-summary?from=&to=&groupBy=category
+//   GET /procurement/reports/on-time-delivery
+// Mock imports left in place until the reporting slice ships in
+// apps/api/src/modules/procurement.
+
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";

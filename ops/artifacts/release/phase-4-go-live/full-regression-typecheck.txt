@@ -1,0 +1,33 @@
+Scope: 17 of 18 workspace projects
+packages/cache typecheck$ tsc --noEmit -p tsconfig.json
+packages/contracts typecheck$ tsc --noEmit -p tsconfig.json
+packages/money typecheck$ tsc --noEmit -p tsconfig.json
+packages/errors typecheck$ tsc --noEmit -p tsconfig.json
+packages/money typecheck: Done
+packages/observability typecheck$ tsc --noEmit -p tsconfig.json
+packages/errors typecheck: Done
+packages/queue typecheck$ tsc --noEmit -p tsconfig.json
+packages/cache typecheck: Done
+packages/storage typecheck$ tsc --noEmit -p tsconfig.json
+packages/contracts typecheck: Done
+packages/queue typecheck: Done
+packages/observability typecheck: Done
+packages/storage typecheck: Done
+apps/web typecheck$ tsc --noEmit
+packages/db typecheck$ tsc --noEmit -p tsconfig.json
+packages/resilience typecheck$ tsc --noEmit -p tsconfig.json
+packages/vendor-admin typecheck$ tsc --noEmit -p tsconfig.json
+packages/resilience typecheck: Done
+packages/vendor-admin typecheck: Done
+packages/db typecheck: Done
+apps/web typecheck: Done
+packages/quotas typecheck$ tsc --noEmit -p tsconfig.json
+apps/listen-notify typecheck$ tsc --noEmit -p tsconfig.json
+packages/quotas typecheck: Done
+apps/listen-notify typecheck: Done
+apps/api typecheck$ tsc --noEmit -p tsconfig.json
+apps/api typecheck: Done
+apps/worker typecheck$ tsc --noEmit -p tsconfig.json
+apps/worker typecheck: Done
+tests/gates typecheck$ tsc --noEmit -p tsconfig.json
+tests/gates typecheck: Done

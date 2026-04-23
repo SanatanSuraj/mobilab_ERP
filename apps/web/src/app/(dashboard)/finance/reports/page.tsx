@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): Financial reports (P&L, ageing) have no dedicated backend
+// aggregation yet. useApiSalesInvoices / useApiPurchaseInvoices /
+// useApiCustomerLedger / useApiVendorLedger exist, but ageing / P&L must be
+// computed server-side for correctness. Expected routes:
+//   GET /finance/reports/pl?from=&to=
+//   GET /finance/reports/receivables-ageing?asOf=
+//   GET /finance/reports/payables-ageing?asOf=
+// Mock imports left in place until the reporting slice ships in
+// apps/api/src/modules/finance.
+
 import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

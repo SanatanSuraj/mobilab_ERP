@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): /manufacturing/work-orders/[id] reads the `EnhancedWorkOrder`
+// shape (WO + wipStages + QC gate + rework tracking + mobicase device IDs).
+// useApiWorkOrder + useApiWipStages + useApiAdvanceWipStage already exist,
+// but QC-gate linkage (wipStage.qcInspectionId) and rework-limit flags are
+// not yet returned. Expected:
+//   GET /production/work-orders/:id - return wipStages with qcInspectionId +
+//     reworkCount + reworkLimitExceeded flag.
+//   POST /production/work-orders/:id/wip-stages/:stageId/rework
+// Mock imports left in place until the detail route returns the enhanced shape.
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";

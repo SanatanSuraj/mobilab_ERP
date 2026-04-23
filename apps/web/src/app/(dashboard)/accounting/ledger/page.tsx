@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): /accounting/ledger uses the legacy prototype ledger model.
+// The real journal data lives in the Finance backend (posted sales invoices
+// and vendor bills feed the general ledger). The backend does not yet expose a
+// GET /finance/ledger-entries list route — it currently serves per-party views
+// via useApiCustomerLedger / useApiVendorLedger. Expected route once added:
+//   GET /finance/ledger-entries?from=&to=&account=
+// Mock import left in place until either the backend ships the list route or
+// this page is removed in favour of the per-party ledger pages.
+
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import {

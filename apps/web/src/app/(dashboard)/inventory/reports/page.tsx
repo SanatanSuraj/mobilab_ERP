@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Inventory reports page aggregates over items + batches +
+// stock summaries. useApiItems and useApiStockSummary already exist, but
+// batches have no list route yet, and there is no dedicated reporting
+// aggregation. Expected options:
+//   - rewrite over useApiItems + useApiStockSummary once batches list ships
+//   - or add GET /inventory/reports/stock-value + /inventory/reports/aging
+// Mock imports left in place until one of the above lands.
+
 import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

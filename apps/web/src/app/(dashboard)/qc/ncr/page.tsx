@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): Non-Conformance Records (NCRs) have no backend routes yet.
+// Expected routes:
+//   GET  /qc/ncrs?status=&severity=&source=
+//   POST /qc/ncrs - open NCR (often auto-opened by failed incoming/WIP/FQC)
+//   POST /qc/ncrs/:id/disposition - rework / scrap / accept-as-is / return
+//   POST /qc/ncrs/:id/close - requires CAPA linkage for CRITICAL/MAJOR
+// Mock imports left in place until the NCR slice ships in
+// apps/api/src/modules/qc.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

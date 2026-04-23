@@ -1,5 +1,16 @@
 "use client";
 
+// TODO(phase-5): QC reports aggregate across incoming / WIP / final / NCR /
+// CAPA / equipment calibration. useApiQcInspections + useApiQcCerts exist for
+// generic inspection data, but the specialized incoming/WIP/final breakdowns
+// and NCR/CAPA rollups have no backend routes yet. Expected:
+//   GET /qc/reports/pass-rate?stage=INCOMING|WIP|FINAL&period=
+//   GET /qc/reports/ncr-trend?period=
+//   GET /qc/reports/capa-cycle-time?period=
+//   GET /qc/reports/calibration-status
+// Mock imports left in place until the reporting slice ships in
+// apps/api/src/modules/qc.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

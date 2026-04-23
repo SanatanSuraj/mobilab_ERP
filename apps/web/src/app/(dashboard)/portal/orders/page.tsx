@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): /portal/orders is the customer-facing order history view.
+// The backend exposes useApiSalesOrders for internal CRM use, but there is
+// no customer-portal authenticated route scoped to the logged-in customer.
+// Expected route:
+//   GET /portal/orders - scoped to the customer's own accountId (session)
+// Mock imports left in place until the portal auth + scoping ships in
+// apps/api/src/modules/portal (or until useApiSalesOrders adds a
+// customer-scoped filter).
+
 import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

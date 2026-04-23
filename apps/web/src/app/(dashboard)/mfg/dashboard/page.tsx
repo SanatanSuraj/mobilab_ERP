@@ -1,5 +1,11 @@
 "use client";
 
+// TODO(phase-5): Instigenie Mobicase dashboard has no backend route yet. It
+// aggregates mobi WOs + OEE + scrap + device IDs. Expected:
+//   GET /mfg/overview - counts + OEE avg + scrap total in one call
+// Mock imports left in place until the mobicase slice ships in
+// apps/api/src/modules/mfg.
+
 import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): Corrective / Preventive Action (CAPA) records have no backend
+// routes yet. Expected routes:
+//   GET  /qc/capas?status=&type=
+//   POST /qc/capas - open CAPA (often linked from an NCR)
+//   POST /qc/capas/:id/plan - record action plan + owner + due date
+//   POST /qc/capas/:id/verify - effectiveness verification
+//   POST /qc/capas/:id/close
+// Mock imports left in place until the CAPA slice ships in
+// apps/api/src/modules/qc.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

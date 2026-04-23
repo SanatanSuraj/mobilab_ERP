@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): Manufacturing reports (WO throughput, cycle time, yield)
+// have no dedicated backend aggregation yet. useApiWorkOrders / useApiBoms
+// exist but cycle-time and yield rollups need server-side aggregation.
+// Expected routes:
+//   GET /production/reports/throughput?from=&to=
+//   GET /production/reports/yield?productId=&period=
+//   GET /production/reports/cycle-time?stage=
+// Mock imports left in place until the reporting slice ships in
+// apps/api/src/modules/production.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

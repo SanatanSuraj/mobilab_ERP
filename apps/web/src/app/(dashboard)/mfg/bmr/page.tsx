@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): Batch Manufacturing Record (BMR) - the GMP compliance record
+// for each batch - has no backend routes yet. Expected routes:
+//   GET  /mfg/bmr?workOrderId=&status=
+//   GET  /mfg/bmr/:id - full BMR with sections + approvals
+//   POST /mfg/bmr/:id/sections/:sectionId - record section data
+//   POST /mfg/bmr/:id/lock - immutable once locked
+//   POST /mfg/bmr/:id/approve - multi-role sign-off
+// Mock imports left in place until the BMR slice ships in
+// apps/api/src/modules/mfg.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): Stock transfer module has no backend routes yet. Expected
+// routes:
+//   GET  /inventory/stock-transfers
+//   POST /inventory/stock-transfers (DRAFT)
+//   POST /inventory/stock-transfers/:id/dispatch (posts OUT ledger rows)
+//   POST /inventory/stock-transfers/:id/receive  (posts IN ledger rows)
+// Mock imports left in place until the stock-transfers slice ships in
+// apps/api/src/modules/inventory.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

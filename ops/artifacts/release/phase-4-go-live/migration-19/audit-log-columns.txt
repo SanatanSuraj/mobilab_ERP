@@ -1,0 +1,14 @@
+ column_name |        data_type         
+-------------+--------------------------
+ id          | uuid
+ org_id      | uuid
+ table_name  | text
+ row_id      | uuid
+ action      | text
+ actor       | uuid
+ before      | jsonb
+ after       | jsonb
+ changed_at  | timestamp with time zone
+ trace_id    | text
+(10 rows)
+

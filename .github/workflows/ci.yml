@@ -33,6 +33,17 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # ARCHITECTURE.md §2.4 Gate 9 — schema drift guard.
+      # Dedicated re-spawn of `tsc --noEmit` per consumer of
+      # @instigenie/contracts (apps/api, apps/web, apps/worker) so a
+      # CI failure at THIS step points at "FE/BE disagree on a zod
+      # contract", distinct from a generic typecheck regression.
+      # Does not duplicate the full test suite — just the one gate.
+      - name: Gate 9 — Schema drift (FE + BE build from shared contracts)
+        # `pnpm --filter` runs `exec` inside tests/gates, so the path is
+        # relative to that dir (not the repo root).
+        run: pnpm --filter @instigenie/gates exec vitest run gate-9-schema-drift.test.ts
+
       - name: Lint
         run: pnpm lint
 

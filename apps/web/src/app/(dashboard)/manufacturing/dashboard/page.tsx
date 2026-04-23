@@ -1,5 +1,12 @@
 "use client";
 
+// TODO(phase-5): Manufacturing dashboard aggregates WOs + ECNs. useApiWorkOrders
+// exists but the dashboard also reads ECNs which have no backend route yet.
+// Expected:
+//   GET /production/overview - WO counts, ECN open count, overdue counts
+// Or rewrite over useApiWorkOrders once ECN routes ship. Mock imports left in
+// place until then.
+
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";

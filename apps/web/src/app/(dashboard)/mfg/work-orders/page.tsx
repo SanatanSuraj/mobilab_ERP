@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): Instigenie Mobicase work orders (distinct from the generic
+// /production/work-orders) have no backend routes yet. Expected routes:
+//   GET  /mfg/work-orders?status=&product=
+//   GET  /mfg/work-orders/:id - mobi WO + device IDs + stage logs + scrap
+//   POST /mfg/work-orders - create against a mobicase product code
+//   POST /mfg/work-orders/:id/status - transition WO state
+// Mock imports left in place until the mobi WO slice ships in
+// apps/api/src/modules/mfg.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

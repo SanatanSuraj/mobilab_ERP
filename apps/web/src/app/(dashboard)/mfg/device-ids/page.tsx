@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): Instigenie Mobicase device-ID tracking has no backend routes
+// yet. Expected routes (scoped to the mobicase manufacturing domain):
+//   GET  /mfg/device-ids?status=&workOrderId=&type=
+//   GET  /mfg/device-ids/:id - device detail + stage log trail
+//   POST /mfg/device-ids/:id/transition - advance stage / mark scrap
+// Mock imports left in place until the mobicase slice ships in
+// apps/api/src/modules/mfg (distinct from generic /production).
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

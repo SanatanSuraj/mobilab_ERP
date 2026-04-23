@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): Final-batch QC (FQC) has no dedicated backend route yet.
+// Specialized from generic QC because it locks a batch for dispatch and
+// issues the Certificate of Analysis (CoA). Expected routes:
+//   GET  /qc/final-batch-qcs?status=
+//   POST /qc/final-batch-qcs/:id/complete - triggers CoA generation
+//   POST /qc/final-batch-qcs/:id/release  - frees the batch for dispatch
+// Mock imports left in place until the FQC slice ships in
+// apps/api/src/modules/qc.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

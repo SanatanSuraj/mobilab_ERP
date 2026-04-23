@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): Return-to-vendor (RTV) module has no backend routes yet.
+// Expected routes:
+//   GET  /procurement/rtvs - list return-to-vendor headers
+//   POST /procurement/rtvs (DRAFT) - create from a GRN
+//   POST /procurement/rtvs/:id/dispatch (fan-out to stock_ledger OUT row)
+//   POST /procurement/rtvs/:id/credit-note - attach vendor credit note
+// Mock imports left in place until the RTV slice ships in
+// apps/api/src/modules/procurement.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

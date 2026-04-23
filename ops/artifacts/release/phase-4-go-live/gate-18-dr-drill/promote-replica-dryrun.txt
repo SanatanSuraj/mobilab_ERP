@@ -1,0 +1,39 @@
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"run","status":"start","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"dry_run=1 confirm_dr=0"}
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"sanity_check_local","status":"start","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"verify ssh and date are installed on the operator host"}
+==> [sanity_check_local] verify ssh and date are installed on the operator host
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"sanity_check_local","status":"ok","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"ssh and date available"}
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"sanity_check_hosts","status":"start","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"confirm ssh reaches replica and primary hosts"}
+==> [sanity_check_hosts] confirm ssh reaches replica and primary hosts
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"sanity_check_hosts","status":"ok","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"dry-run skipped"}
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"detect_already_promoted","status":"start","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"check pg_is_in_recovery() on replica"}
+==> [detect_already_promoted] check pg_is_in_recovery() on replica
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"detect_already_promoted","status":"ok","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"dry-run; assuming promotion required"}
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"capture_replication_state","status":"start","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"snapshot replication lag + slot state for incident ticket"}
+==> [capture_replication_state] snapshot replication lag + slot state for incident ticket
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"capture_replication_state","status":"ok","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"replica_lag_seconds=DRY_RUN_UNKNOWN primary_slots=DRY_RUN_UNKNOWN"}
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"promote_replica","status":"start","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"run pg_ctl promote on localhost (IRREVERSIBLE)"}
+==> [promote_replica] run pg_ctl promote on localhost (IRREVERSIBLE)
+==>   (dry-run) ssh sanatansuraj@localhost sudo -u postgres pg_ctl promote -D "$PGDATA"
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"promote_replica","status":"ok","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"pg_ctl promote succeeded"}
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"wait_for_writable","status":"start","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"poll pg_is_in_recovery() until false (timeout 120s)"}
+==> [wait_for_writable] poll pg_is_in_recovery() until false (timeout 120s)
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"wait_for_writable","status":"ok","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"dry-run skipped"}
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"report_next_steps","status":"start","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"emit the human-owned follow-up checklist"}
+==> [report_next_steps] emit the human-owned follow-up checklist
+
+Manual follow-ups owned by the operator (NOT done by this script):
+  1. Rotate DATABASE_URL + DATABASE_DIRECT_URL in every app deployment
+     to point at localhost. Expect ~30s of 5xx during pool rotation.
+  2. Confirm outbox drain — watch erp_outbox_pending_age_max_seconds on
+     Grafana; it should drop back below 30s within 2 minutes.
+  3. Provision a replacement replica from the latest pg_basebackup. Do
+     NOT let localhost rejoin as a primary — rebuild it.
+  4. Close the incident ticket with: INCIDENT_ID=dr-20260423T091723Z,
+     measured RTO (minutes between freeze and first successful write),
+     link to this script's stdout (incident log).
+  5. If this was the Gate 18 drill: append the RTO to
+     ops/runbook-drills/gate-21-failure-injection.md and to
+     docs/runbooks/pre-launch-checklist.md Gate 18 sign-off row.
+
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"report_next_steps","status":"ok","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"printed manual follow-up list"}
+{"ts":"2026-04-23T09:17:23Z","incident_id":"dr-20260423T091723Z","script":"promote-replica","step":"run","status":"ok","dry_run":true,"replica_host":"localhost","primary_host":"localhost","detail":"promotion procedure complete"}

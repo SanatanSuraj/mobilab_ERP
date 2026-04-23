@@ -1,5 +1,14 @@
 "use client";
 
+// TODO(phase-5): E-Way bills module has no backend routes yet. Expected
+// routes:
+//   GET  /finance/eway-bills - list bills with status filter
+//   POST /finance/eway-bills - generate bill (calls external e-way portal)
+//   POST /finance/eway-bills/:id/cancel
+//   POST /finance/eway-bills/:id/extend
+// Mock imports left in place until the e-way slice ships in
+// apps/api/src/modules/finance.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

@@ -317,7 +317,7 @@ describe("gate-32: portal isolation + RLS + audience block", () => {
         userId: DEV_CUSTOMER_USER,
         portalCustomerId: DEV_ACCOUNT_A,
       });
-      const result = await service.listTickets(req, { page: 1, limit: 50 });
+      const result = await service.listTickets(req, { page: 1, limit: 50, sortDir: "desc" });
       const numbers = result.data.map((t) => t.ticketNumber);
       expect(numbers).toEqual(
         expect.arrayContaining(["GATE32-A-1", "GATE32-A-2"]),
@@ -332,7 +332,7 @@ describe("gate-32: portal isolation + RLS + audience block", () => {
         userId: DEV_USER_B_ID,
         portalCustomerId: DEV_ACCOUNT_B,
       });
-      const result = await service.listTickets(req, { page: 1, limit: 50 });
+      const result = await service.listTickets(req, { page: 1, limit: 50, sortDir: "desc" });
       const numbers = result.data.map((t) => t.ticketNumber);
       expect(numbers).toContain("GATE32-B-1");
       expect(numbers).not.toContain("GATE32-A-1");
@@ -470,7 +470,7 @@ describe("gate-32: portal isolation + RLS + audience block", () => {
         userId: DEV_USER_B_ID,
         portalCustomerId: DEV_ACCOUNT_B,
       });
-      const visibleToB = await service.listTickets(reqB, { page: 1, limit: 50 });
+      const visibleToB = await service.listTickets(reqB, { page: 1, limit: 50, sortDir: "desc" });
       expect(visibleToB.data.map((t) => t.id)).not.toContain(created.id);
 
       // Cleanup: wipe the row we just inserted so the beforeEach seed
@@ -524,7 +524,7 @@ describe("gate-32: portal isolation + RLS + audience block", () => {
         portalCustomerId: DEV_ACCOUNT_A,
       });
       // Find A's ticket
-      const list = await service.listTickets(req, { page: 1, limit: 50 });
+      const list = await service.listTickets(req, { page: 1, limit: 50, sortDir: "desc" });
       const ticket = list.data.find((t) => t.ticketNumber === "GATE32-A-1");
       expect(ticket).toBeDefined();
 
@@ -541,7 +541,7 @@ describe("gate-32: portal isolation + RLS + audience block", () => {
         userId: DEV_CUSTOMER_USER,
         portalCustomerId: DEV_ACCOUNT_A,
       });
-      const list = await service.listTickets(req, { page: 1, limit: 50 });
+      const list = await service.listTickets(req, { page: 1, limit: 50, sortDir: "desc" });
       const ticket = list.data.find((t) => t.ticketNumber === "GATE32-A-2")!;
 
       // Internal session (withOrg) seeds one INTERNAL note and one

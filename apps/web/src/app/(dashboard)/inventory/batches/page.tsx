@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): Inventory batch/lot tracking has no backend routes yet.
+// Expected routes:
+//   GET  /inventory/batches - list batches with item/warehouse filters + expiry
+//   GET  /inventory/batches/:id
+//   POST /inventory/batches/:id/quarantine
+//   POST /inventory/batches/:id/release
+// Mock imports left in place until the batches slice ships in
+// apps/api/src/modules/inventory (the header inv_batch table already exists
+// in the schema — only the API routes need to ship).
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

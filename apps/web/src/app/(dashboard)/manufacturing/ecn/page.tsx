@@ -1,5 +1,16 @@
 "use client";
 
+// TODO(phase-5): Engineering Change Notices (ECN) module has no backend
+// routes yet. Expected routes:
+//   GET  /production/ecns - list ECNs
+//   POST /production/ecns (DRAFT)
+//   POST /production/ecns/:id/submit
+//   POST /production/ecns/:id/approve - multi-step approval workflow
+//   POST /production/ecns/:id/reject
+//   POST /production/ecns/:id/close   - apply to BOM / WO versions
+// Mock imports left in place until the ECN slice ships in
+// apps/api/src/modules/production.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

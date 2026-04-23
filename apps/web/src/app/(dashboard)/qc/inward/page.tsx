@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): Incoming (IQC) inspections have no dedicated backend route
+// yet — they need the AQL-sampling workflow on top of generic QC. Expected:
+//   GET  /qc/incoming-inspections?status=
+//   POST /qc/incoming-inspections/:id/aql-measurements
+//   POST /qc/incoming-inspections/:id/pass   (auto-issue GRN QC done)
+//   POST /qc/incoming-inspections/:id/fail   (auto-open NCR)
+//   POST /qc/incoming-inspections/:id/countersign
+// Mock imports left in place until the IQC slice ships in
+// apps/api/src/modules/qc.
+
 import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";

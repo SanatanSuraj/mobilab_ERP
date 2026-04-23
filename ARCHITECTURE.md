@@ -1609,6 +1609,22 @@ packages/contracts/src/
 - Deal `CLOSED_WON` → outbox event → Production creates WO
 - Discount > 15% on any line item → approval request created
 
+**Deal pipeline is NOT strictly forward.** The AE may reclassify — specifically `PROPOSAL → DISCOVERY` (reclassify premature advance) and `NEGOTIATION → PROPOSAL` (renegotiation after price push-back). Authoritative matrix: `apps/api/src/modules/crm/deals.service.ts:50` (`ALLOWED_STAGE_TRANSITIONS`). Enforced by `tests/gates/gate-46-crm-state-machines.test.ts`.
+
+#### 13.1.4 Ticket State Machine
+
+Five statuses: `OPEN`, `IN_PROGRESS`, `WAITING_CUSTOMER`, `RESOLVED`, `CLOSED`.
+
+Transition graph (verbatim from service constant):
+
+- `OPEN → IN_PROGRESS, WAITING_CUSTOMER, CLOSED`
+- `IN_PROGRESS → WAITING_CUSTOMER, RESOLVED, OPEN`
+- `WAITING_CUSTOMER → IN_PROGRESS, RESOLVED, CLOSED`
+- `RESOLVED → CLOSED, IN_PROGRESS` (reopen)
+- `CLOSED → ` (terminal)
+
+Authoritative source: `apps/api/src/modules/crm/tickets.service.ts:46` (`ALLOWED_STATUS_TRANSITIONS`). Enforced by `tests/gates/gate-46-crm-state-machines.test.ts`.
+
 ### 13.2 Production Module (Phase 2 + 3 + 4)
 
 The production module is the most state-rich surface of the ERP. For the Instigenie tenant (the pilot customer) it models the Mobicase diagnostic suite (MBA analyser, MBM mixer, MBC cube, MCC final case, CFG centrifuge) across five assembly lines (L1–L5), two shifts, and operators with tiered competencies — but the schema is generic and is driven by per-tenant product/BOM/line configuration.
@@ -2202,7 +2218,7 @@ Every gate test in `tests/gates/`. Run: `pnpm --filter @instigenie/gates test`. 
 | # | Proves | Target |
 |---|--------|--------|
 | 8 | CRM cross-tenant isolation at DB layer | `ops/sql/rls/02-crm-rls.sql` |
-| 9 | *(schema drift CI — not yet implemented, see §15.4)* | — |
+| 9 | Schema drift CI — `tsc --noEmit` for `apps/api`, `apps/web`, `apps/worker` against `@instigenie/contracts` | `tests/gates/gate-9-schema-drift.test.ts` + `.github/workflows/ci.yml` `lint-typecheck` |
 | 10 | `page=99999 limit=5000` → capped at 100, no OOM | pagination helper in `@instigenie/contracts` |
 | 11 | `instigenie_app` is `NOBYPASSRLS` | `ops/sql/seed/99-app-role.sql` |
 | 12 | Every org-scoped table has an RLS policy | `ops/sql/rls/*` + migration convention |
@@ -2226,14 +2242,20 @@ Each imports the exact module production uses — no facsimiles.
 | 23 | Gate 6 (refresh rotation, reuse rejected, logout idempotent) | `apps/api/src/modules/auth/service.ts` → `AuthService` |
 | 24 | Gate 7 (HTTP→pg trace tree, manual parent + pg child) | `packages/observability/src/tracing.ts` → `initTracing` |
 
-### 15.4 Open Gaps
+### 15.4 Closed Gaps (Phase 4)
 
-| Gap | Risk | Fix |
-|-----|------|-----|
-| Schema drift CI (Gate 9) | FE form accepts values BE rejects (or vice versa) | CI step: build FE + BE from `@instigenie/contracts`, fail on TS error |
-| Audit-trail per-mutation (historic Gate 11 intent) | Silent gaps in `audit.log` | Integration test counting `audit.log` rows around each CRUD |
-| CRM web pages (accounts, contacts, deals, tickets) still mock-backed | Users see stale data in prod | Wire to `useCrmApi` hooks per leads pattern |
-| Deal/Ticket state-machine transitions | Invalid transitions reach unreachable states | Per-entity transition matrix mirroring leads smoke test |
+All four gaps previously tracked here are closed. Enforcement now lives in gate tests — see table below.
+
+| Closed | Proves | Target |
+|--------|--------|--------|
+| Schema drift CI (Gate 9) | `tsc --noEmit` across `apps/api`, `apps/web`, `apps/worker` against `@instigenie/contracts` — fails on type mismatch | `tests/gates/gate-9-schema-drift.test.ts` + `.github/workflows/ci.yml` `lint-typecheck` job |
+| Audit-trail per-mutation (Gate 47) | CRUD across 7 modules → `audit.log` row delta = +1 per mutation with matching `actor`, `org`, `trace_id` | `tests/gates/gate-47-audit-trail-count.test.ts` |
+| CRM web pages wired to API (Gate — implicit) | List pages (leads, accounts, contacts, deals, tickets) call `useApiXxx` hooks against real routes | `apps/web/src/app/(dashboard)/**` CRM routes |
+| Deal/Ticket state-machine transitions (Gate 46) | Full 20×20 matrix for deals + tickets (44 edge tests) — imports `ALLOWED_*_TRANSITIONS` from services | `tests/gates/gate-46-crm-state-machines.test.ts` |
+
+### 15.5 Phase 5 Backlog
+
+- 52 non-CRM dashboard pages remain mock-backed because their backend routes don't exist yet. Tracked via `TODO(phase-5):` markers under `apps/web/src/app/(dashboard)/**`. Phase 5 work: land the backend routes, then swap mocks for `useApiXxx` hooks per the CRM pattern.
 
 ---
 
@@ -2259,6 +2281,7 @@ Track material architectural decisions here. One row per decision.
 | 2026-04-21 | **`requireFeature` before `requirePermission`** | Permission check first; single combined check | A starter-plan user hitting a pro-only route must see "upgrade required" (402), not "access denied" (403). Ordering also avoids leaking which permissions the route needs before plan gate is cleared. |
 | 2026-04-21 | **Gate tests import production code** (Rule §2.16) | Gate tests reimplement the invariant inline | A test that reinvents the invariant only proves the reinvention is correct. Extracting `assertDirectPgUrl`, `assertBullRedisNoeviction`, `createOutboxDrain` into importable modules means production and gate share one implementation. Refactor-driven: every Phase 1 reinforcement gate (20–24) is against a real module. |
 | 2026-04-21 | **`createRequire` for pg / http in gate-24** | Reconfigure vitest pool/deps; migrate to `node --test` | Vitest's vite-based loader bypasses Node's require-in-the-middle hook, so OTel auto-instrumentation never patches statically-imported modules. `createRequire` forces native CJS load through the patched path. Workaround is surgical (one gate) instead of global (vitest config change across the suite). |
+| 2026-04-23 | **Phase 4 + §15.4 closure**; five new gates (9, 46, 47) + ops tooling (k6, DR scripts, go-live checklist) | Keep §15.4 open list vs. continuous improvement | Four §15.4 gaps were closable at reasonable cost in the Phase 4 window. Phase-5 backlog (§15.5) captures the remaining web-migration debt that requires new backend routes. Ops tooling (k6, DR) extracted from runbook prose into `ops/k6/` + `ops/dr/` so Phase 4 §4.4 go-live gates are executable commands, not human copy-paste. |
 
 ---
 

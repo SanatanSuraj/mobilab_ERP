@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): /accounting/invoices/[id] uses the legacy prototype invoice model.
+// The real per-invoice data lives in the Finance backend (see
+// /finance/sales-invoices/[id], which consumes useApiSalesInvoice and already
+// supports post/void/payment workflows). This page should either redirect to
+// /finance/sales-invoices/[id] or be rewritten against the finance-api hooks
+// with the legacy `Invoice` shape mapped from SalesInvoice.
+// Mock import left in place until the routing/IA decision is made.
+
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";

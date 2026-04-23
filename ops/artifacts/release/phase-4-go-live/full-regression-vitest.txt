@@ -1,0 +1,145 @@
+
+ RUN  v2.1.9 /Users/sanatansuraj/Desktop/crm _prototype/crm-prototype
+
+ ✓ tests/gates/gate-38-phase3-event-handlers.test.ts (5 tests) 175ms
+(node:88464) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+stdout | tests/gates/gate-33-phase3-stock-correctness-load.test.ts > gate-33 (arch phase 3.8): stock correctness under load > 1. 100 concurrent reservations, demand well below supply > every reservation succeeds and invariants hold per item
+[gate-33] 100 concurrent reservations completed in 263ms
+
+ ✓ tests/gates/gate-40-phase4-compliance-hashchain.test.ts (11 tests) 829ms
+ ✓ tests/gates/gate-32-phase3-portal-isolation.test.ts (16 tests) 878ms
+ ✓ tests/gates/gate-31-phase3-notifications-dispatch.test.ts (21 tests) 1032ms
+ ❯ tests/gates/gate-43-phase4-esig-critical-actions.test.ts (19 tests | 2 failed) 1252ms
+   × gate-43 (arch phase 4.2c / §9.5): critical-action e-signatures > 43.C stock CUSTOMER_ISSUE > 43.C.2 wrong password → UnauthorizedError 23ms
+     → expected ShortageError: insufficient stock for iss… { …(3) } to be an instance of UnauthorizedError
+   × gate-43 (arch phase 4.2c / §9.5): critical-action e-signatures > 43.C stock CUSTOMER_ISSUE > 43.C.4 correct password → ledger posted; signature_hash reproducible 18ms
+     → insufficient stock for issue
+ ✓ tests/gates/gate-25-phase2-modules-tenant-isolation.test.ts (4 tests) 422ms
+ ✓ tests/gates/gate-47-audit-trail-count.test.ts (7 tests) 819ms
+stdout | tests/gates/gate-33-phase3-stock-correctness-load.test.ts > gate-33 (arch phase 3.8): stock correctness under load > 3. hot-item contention — 100 reservers on a single item > retry loop absorbs lock-not-available under max contention
+[gate-33] 100 reservers on single item serialised in 633ms
+
+(node:88581) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ tests/gates/gate-33-phase3-stock-correctness-load.test.ts (3 tests) 2495ms
+   ✓ gate-33 (arch phase 3.8): stock correctness under load > 2. oversubscription — demand deliberately exceeds supply > excess requests fail with ShortageError; no double-booking 994ms
+   ✓ gate-33 (arch phase 3.8): stock correctness under load > 3. hot-item contention — 100 reservers on a single item > retry loop absorbs lock-not-available under max contention 899ms
+ ✓ tests/gates/gate-46-crm-state-machines.test.ts (44 tests) 2633ms
+ ✓ tests/gates/gate-28-phase3-approvals.test.ts (15 tests) 638ms
+ ✓ tests/gates/gate-30-phase3-external-apis.test.ts (12 tests) 372ms
+(node:88577) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ tests/gates/gate-26-crm-quotations-sales-orders.test.ts (20 tests) 859ms
+ ✓ tests/gates/gate-44-phase4-docs-pdf.test.ts (5 tests) 1785ms
+   ✓ Gate 44.1 — sales_invoice PDF render > renders SI → MinIO at sales-invoices/…, sets pdf_minio_key, run COMPLETED 467ms
+   ✓ Gate 44.2 — purchase_order PDF render > renders PO → MinIO at purchase-orders/…, sets pdf_minio_key, run COMPLETED 435ms
+   ✓ Gate 44.4 — grn PDF render > renders GRN → MinIO at grns/…, sets grns.pdf_minio_key, run COMPLETED 356ms
+ ✓ tests/gates/gate-27-phase3-stock-reservations.test.ts (8 tests) 1375ms
+   ✓ gate-27 (arch phase 3.2): stock reservations > 4. concurrency torture — zero drift under contention > 40 concurrent reservers on a capped pool: no drift, no deadlock 383ms
+   ✓ gate-27 (arch phase 3.2): stock reservations > 5. mrpReserveAll — deadlock-free canonical ordering > 10 concurrent bulk reserves on 4 items in random order: all complete 351ms
+(node:88651) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ tests/gates/gate-41-phase4-audit-hashchain.test.ts (5 tests) 803ms
+ ✓ tests/gates/gate-37-phase3-approval-immutability.test.ts (4 tests) 679ms
+   ✓ gate-37 (arch phase 3.8): approval post-terminal immutability > 1. APPROVED freezes the request > rejects every subsequent mutation with ConflictError (409) and leaves the audit log untouched 399ms
+ ✓ tests/gates/gate-45-phase4-pg-cron.test.ts (6 tests) 716ms
+   ✓ Gate 45.4 — phase4_watchdog_hashchain: stale scheduler > inserts a synthetic FAILED row when last COMPLETED is > 26h old 480ms
+ ✓ tests/gates/gate-36-phase3-breaker-kill-recover.test.ts (2 tests) 1587ms
+   ✓ gate-36 (arch phase 3.8): circuit breaker kill-and-recover > full lifecycle: CLOSED → OPEN → HALF_OPEN → CLOSED 771ms
+   ✓ gate-36 (arch phase 3.8): circuit breaker kill-and-recover > breaker re-opens if the HALF_OPEN probe fails 770ms
+(node:88732) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ tests/gates/gate-29-phase3-caching.test.ts (17 tests) 313ms
+ ✓ tests/gates/gate-18-vendor-audit-log.test.ts (6 tests) 358ms
+(node:88742) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ tests/gates/gate-42-phase4-esignature.test.ts (7 tests) 980ms
+   ✓ gate-42 (arch phase 4.2): electronic signature flow > 42.5 non-e-sig steps advance without a password even with esignature injected 303ms
+(node:88736) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ tests/gates/gate-14-tenant-lifecycle-schema.test.ts (8 tests) 119ms
+ ✓ tests/gates/gate-8-crm-tenant-isolation.test.ts (4 tests) 256ms
+ ✓ tests/gates/gate-16-feature-flags.test.ts (10 tests) 439ms
+ ✓ tests/gates/gate-19-vendor-bypassrls.test.ts (9 tests) 171ms
+ ✓ tests/gates/gate-22-arch3-outbox-e2e.test.ts (3 tests) 407ms
+ ✓ tests/gates/gate-17-quota-enforcement.test.ts (9 tests) 730ms
+ ✓ tests/gates/gate-39-phase4-qc-cert-pdf.test.ts (4 tests) 1505ms
+   ✓ Gate 39.1 — pdf-render end-to-end > renders QC cert → MinIO → pdf_minio_key + pdf_render_runs COMPLETED 550ms
+   ✓ Gate 39.2 — idempotent redelivery short-circuit > second invocation returns ALREADY_COMPLETED, no re-upload 471ms
+   ✓ Gate 39.3 — transient failure retry path > throws → FAILED row; next attempt succeeds and flips to COMPLETED 323ms
+ ✓ tests/gates/gate-23-arch6-auth-rotation.test.ts (5 tests) 420ms
+ ❯ tests/gates/gate-35-phase3-deadlock-free-mrp.test.ts (1 test | 1 failed) 1718ms
+   × gate-35 (arch phase 3.8): deadlock-free MRP > 20 concurrent MRP runs on 8 overlapping components never deadlock 1079ms
+     → lock_not_available (55P03) leaked past retry loop: error: could not obtain lock on row in relation "stock_summary"
+ ✓ tests/gates/gate-15-tenant-status-guard.test.ts (7 tests) 139ms
+ ✓ tests/gates/gate-12-rls-coverage.test.ts (5 tests) 68ms
+ ✓ tests/gates/gate-24-arch7-otel-trace.test.ts (2 tests) 138ms
+ ✓ tests/gates/gate-13-rls-with-check.test.ts (4 tests) 68ms
+ ✓ tests/gates/gate-10-pagination.test.ts (8 tests) 14ms
+ ✓ tests/gates/gate-11-nobypassrls.test.ts (4 tests) 63ms
+ ✓ tests/gates/gate-5-rls.test.ts (3 tests) 59ms
+ ✓ tests/gates/gate-21-arch4-noeviction.test.ts (4 tests) 89ms
+ ✓ tests/gates/gate-7-bootstrap.test.ts (5 tests) 66ms
+ ✓ tests/gates/gate-20-arch5-pgbouncer-bypass.test.ts (8 tests) 5ms
+ ✓ tests/gates/gate-1-number-ban.test.ts (4 tests) 4ms
+ ✓ tests/gates/gate-6-rbac.test.ts (5 tests) 66ms
+ ✓ tests/gates/gate-3-idempotency.test.ts (2 tests) 88ms
+ ✓ tests/gates/gate-2-decimal.test.ts (3 tests) 44ms
+ ✓ tests/gates/gate-4-notify.test.ts (1 test) 560ms
+   ✓ gate-4: outbox NOTIFY fires on insert > fires a notification with the row id in the payload 511ms
+ ✓ tests/gates/gate-9-schema-drift.test.ts (3 tests) 4473ms
+   ✓ gate-9: @instigenie/contracts satisfies FE + BE + worker > apps/api typechecks against the shared zod contracts 1708ms
+   ✓ gate-9: @instigenie/contracts satisfies FE + BE + worker > apps/web typechecks against the shared zod contracts 1738ms
+   ✓ gate-9: @instigenie/contracts satisfies FE + BE + worker > apps/worker typechecks against the shared zod contracts 1025ms
+stdout | tests/gates/gate-34-phase3-event-latency-slo.test.ts > gate-34 (arch phase 3.8): event latency SLO > 50 deal.won events: p95 < 5000ms, p99 < 10000ms
+[gate-34] 50 events: p50=11ms p95=46ms p99=148ms min=5ms max=148ms mean=16ms
+
+ ✓ tests/gates/gate-34-phase3-event-latency-slo.test.ts (1 test) 10318ms
+   ✓ gate-34 (arch phase 3.8): event latency SLO > 50 deal.won events: p95 < 5000ms, p99 < 10000ms 10258ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/gates/gate-35-phase3-deadlock-free-mrp.test.ts > gate-35 (arch phase 3.8): deadlock-free MRP > 20 concurrent MRP runs on 8 overlapping components never deadlock
+Error: lock_not_available (55P03) leaked past retry loop: error: could not obtain lock on row in relation "stock_summary"
+ ❯ tests/gates/gate-35-phase3-deadlock-free-mrp.test.ts:335:17
+    333|         }
+    334|         if (code === "55P03") {
+    335|           throw new Error(
+       |                 ^
+    336|             `lock_not_available (55P03) leaked past retry loop: ${Stri…
+    337|           );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  tests/gates/gate-43-phase4-esig-critical-actions.test.ts > gate-43 (arch phase 4.2c / §9.5): critical-action e-signatures > 43.C stock CUSTOMER_ISSUE > 43.C.2 wrong password → UnauthorizedError
+AssertionError: expected ShortageError: insufficient stock for iss… { …(3) } to be an instance of UnauthorizedError
+ ❯ tests/gates/gate-43-phase4-esig-critical-actions.test.ts:502:7
+    500| 
+    501|     it("43.C.2 wrong password → UnauthorizedError", async () => {
+    502|       await expect(
+       |       ^
+    503|         stockWithEsig.postEntry(qcRequest(), {
+    504|           ...baseRelease,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  tests/gates/gate-43-phase4-esig-critical-actions.test.ts > gate-43 (arch phase 4.2c / §9.5): critical-action e-signatures > 43.C stock CUSTOMER_ISSUE > 43.C.4 correct password → ledger posted; signature_hash reproducible
+ShortageError: insufficient stock for issue
+ ❯ apps/api/src/modules/inventory/stock.service.ts:241:17
+    239|         const onHand = cur ? parseQty(cur.onHand) : 0;
+    240|         if (onHand + qty < 0) {
+    241|           throw new ShortageError("insufficient stock for issue", {
+       |                 ^
+    242|             itemId: input.itemId,
+    243|             warehouseId: input.warehouseId,
+ ❯ Module.withOrg packages/db/src/with-org.ts:40:20
+ ❯ tests/gates/gate-43-phase4-esig-critical-actions.test.ts:526:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+ Test Files  2 failed | 45 passed (47)
+      Tests  3 failed | 356 passed (359)
+   Start at  15:06:05
+   Duration  16.11s (transform 2.61s, setup 0ms, collect 35.07s, tests 43.03s, environment 6ms, prepare 3.14s)
+

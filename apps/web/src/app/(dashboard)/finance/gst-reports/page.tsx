@@ -1,5 +1,13 @@
 "use client";
 
+// TODO(phase-5): GST reports (GSTR-1 outward, ITC inward) have no backend
+// routes yet. Expected routes:
+//   GET /finance/gst/gstr1?period=YYYY-MM  - outward supplies
+//   GET /finance/gst/itc?period=YYYY-MM    - input tax credit
+//   POST /finance/gst/gstr1/export         - generate JSON for portal upload
+// Mock imports left in place until the GST slice ships in
+// apps/api/src/modules/finance.
+
 import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";

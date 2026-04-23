@@ -1,5 +1,15 @@
 "use client";
 
+// TODO(phase-5): /crm/reports aggregates across deals / leads / accounts. The
+// backend exposes useApiDeals / useApiLeads / useApiAccounts but does NOT yet
+// expose a dedicated reporting aggregation. Expected routes:
+//   GET /crm/reports/pipeline     - pipeline funnel aggregates
+//   GET /crm/reports/lead-funnel  - lead-stage conversion aggregates
+//   GET /crm/reports/account-segments - ARR / deal count by account tier
+// Alternatively this page can compute client-side over useApiDeals +
+// useApiLeads + useApiAccounts results. Mock imports left in place until the
+// reporting slice ships or the page is rewritten over existing list hooks.
+
 import { useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

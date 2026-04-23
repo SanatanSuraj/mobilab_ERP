@@ -1,5 +1,11 @@
 "use client";
 
+// TODO(phase-5): /manufacturing/wip renders a kanban over `EnhancedWorkOrder`
+// by status. useApiWorkOrders already exists but does not include the
+// per-WO wipStages + computed progress (see enhanced helpers below).
+// Expected enhancement: GET /production/work-orders?include=wipStages.
+// Mock imports left in place until the list route returns the composed shape.
+
 import { useMemo } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";
