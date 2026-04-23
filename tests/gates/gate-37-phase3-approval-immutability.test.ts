@@ -88,7 +88,7 @@ function makeRequest(role: keyof typeof USERS): ServiceReq {
     user: {
       id: USERS[role],
       orgId: DEV_ORG_ID,
-      email: `${role.toLowerCase()}@mobilab.local`,
+      email: `${role.toLowerCase()}@instigenie.local`,
       roles: [role] as Role[],
       permissions: perms,
       audience: AUDIENCE.internal,

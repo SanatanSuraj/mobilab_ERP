@@ -199,7 +199,7 @@ const statusStyles: Record<string, string> = {
   CRITICAL: "bg-red-50 text-red-700 border-red-200",
 
   // Manufacturing - Product Family
-  MOBILAB_INSTRUMENT: "bg-blue-50 text-blue-700 border-blue-200",
+  INSTIGENIE_INSTRUMENT: "bg-blue-50 text-blue-700 border-blue-200",
   CBL_DEVICE: "bg-purple-50 text-purple-700 border-purple-200",
   REAGENT: "bg-teal-50 text-teal-700 border-teal-200",
 

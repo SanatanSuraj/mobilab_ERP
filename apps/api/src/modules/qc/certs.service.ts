@@ -1,12 +1,15 @@
 /**
  * QC certificates service.
  *
- * Scope (Phase 2):
+ * Scope (Phase 2 + Phase 4 §4.2 extensions):
  *   - list / getById / getByInspectionId  — read
  *   - issue() — snapshots the linked PASSED FINAL_QC inspection into an
  *               immutable cert row. Auto-generates QCC-YYYY-NNNN, binds
  *               product_name / wo_pid / device_serials at issuance time so
- *               the cert survives edits to upstream rows.
+ *               the cert survives edits to upstream rows. Additionally
+ *               (Phase 4 §4.2) computes the SHA-256 forward-linked chain
+ *               hash for the new row under a per-org advisory lock so
+ *               concurrent issuers cannot fork the chain.
  *   - recall() — soft-delete. Phase 2 only, no formal "revoked" state.
  *
  * Invariants enforced here:
@@ -15,10 +18,15 @@
  *     `qc_certs_one_per_inspection` is the belt; this is the braces)
  *   - cert_number is auto-assigned via qc_number_sequences if caller
  *     didn't supply one
+ *   - signature_hash = sha256(prev_hash || "|" || canonical_json(content)),
+ *     with GENESIS sentinel for the first cert per org. The chain-head
+ *     read is serialised by a per-org pg_advisory_xact_lock so two
+ *     concurrent issuances cannot both observe the same head and race
+ *     to produce forked children.
  *
  * Explicitly NOT in Phase 2:
- *   - pdf generation / signing / minio upload   (pdfMinioKey stays null)
- *   - signature_hash crypto                    (signatureHash stays null)
+ *   - pdf generation / signing / minio upload   (handled by Phase 4 §4.1
+ *     worker-pdf pipeline via qc_cert.issued outbox event)
  */
 
 import type pg from "pg";
@@ -31,11 +39,13 @@ import type {
 import { z } from "zod";
 import { ConflictError, NotFoundError } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
+import { enqueueOutbox } from "@instigenie/db";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { certsRepo } from "./certs.repository.js";
 import { inspectionsRepo } from "./inspections.repository.js";
 import { nextQcNumber } from "./numbering.js";
+import { computeCertHash } from "./cert-hash.js";
 import { requireUser } from "../../context/request-context.js";
 
 type QcCertListQuery = z.infer<typeof QcCertListQuerySchema>;
@@ -191,8 +201,60 @@ export class QcCertsService {
       const certNumber =
         input.certNumber ?? (await nextQcNumber(client, user.orgId, "QCC"));
 
+      // ─── Phase 4 §4.2: hash-chain head + advisory lock ──────────────────
+      // Take a per-org advisory lock keyed on the string
+      // `qc_cert_chain:<orgId>` so two concurrent issuers cannot both read
+      // the same chain head and emit forked children. Released at commit
+      // (pg_advisory_xact_lock, not the session variant) so the lock
+      // lifetime exactly matches this tx.
+      //
+      // `withRequest` runs this callback inside a transaction with RLS
+      // already scoped to the requester's org, so the SELECT below sees
+      // only this org's chain.
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
+        [`qc_cert_chain:${user.orgId}`],
+      );
+      // Order by issued_at, not created_at: `created_at DEFAULT now()`
+      // captures the transaction-start time, but under the advisory lock
+      // the true chain order is the order in which rows were INSERTED
+      // post-lock-acquire. The service stamps issued_at explicitly with
+      // `new Date()` *after* taking the lock (see below), so two
+      // concurrent issuers will have issued_at values that monotonically
+      // increase with lock acquire order. verifyQcCertChain uses the
+      // same ordering.
+      const {
+        rows: [head],
+      } = await client.query<{ signature_hash: string | null }>(
+        `SELECT signature_hash
+           FROM qc_certs
+          WHERE org_id = $1 AND deleted_at IS NULL
+          ORDER BY issued_at DESC, id DESC
+          LIMIT 1`,
+        [user.orgId],
+      );
+
+      // Canonicalise issuedAt in JS so the hash input and the stored column
+      // cannot drift by sub-millisecond rounding (pg truncates to µs).
+      const issuedAt = new Date();
+      const notes = input.notes ?? null;
+      const signatureHash = computeCertHash(head?.signature_hash ?? null, {
+        certNumber,
+        inspectionId: inspection.id,
+        workOrderId: inspection.workOrderId,
+        productId: inspection.productId,
+        productName,
+        woPid,
+        deviceSerials,
+        signedBy,
+        signedByName,
+        notes,
+        issuedAt: issuedAt.toISOString(),
+      });
+
+      let cert: QcCert;
       try {
-        return await certsRepo.create(client, user.orgId, {
+        cert = await certsRepo.create(client, user.orgId, {
           certNumber,
           inspectionId: inspection.id,
           workOrderId: inspection.workOrderId,
@@ -202,8 +264,9 @@ export class QcCertsService {
           deviceSerials,
           signedBy,
           signedByName,
-          signatureHash: null,
-          notes: input.notes ?? null,
+          signatureHash,
+          issuedAt,
+          notes,
         });
       } catch (err) {
         // 23505 on qc_certs_one_per_inspection or cert_number unique index.
@@ -219,6 +282,28 @@ export class QcCertsService {
         }
         throw err;
       }
+
+      // Phase 4 §4.1 — emit qc_cert.issued so the worker-pdf pipeline can
+      // render the certificate PDF and upload it to MinIO. Lives inside
+      // the same withRequest txn as the INSERT above, so either both
+      // commit or neither — no orphaned cert rows without a render job
+      // and no render jobs for certs that never made it to disk.
+      await enqueueOutbox(client, {
+        aggregateType: "qc_cert",
+        aggregateId: cert.id,
+        eventType: "qc_cert.issued",
+        payload: {
+          orgId: cert.orgId,
+          certId: cert.id,
+          certNumber: cert.certNumber,
+          inspectionId: cert.inspectionId,
+          workOrderId: cert.workOrderId,
+          productId: cert.productId,
+        },
+        idempotencyKey: `qc_cert.issued:${cert.id}`,
+      });
+
+      return cert;
     });
   }
 

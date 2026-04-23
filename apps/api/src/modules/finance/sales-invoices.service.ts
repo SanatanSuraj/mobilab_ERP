@@ -32,7 +32,12 @@ import type pg from "pg";
 import type { PoolClient } from "pg";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ConflictError, NotFoundError } from "@instigenie/errors";
+import {
+  ConflictError,
+  NotFoundError,
+  UnauthorizedError,
+  ValidationError,
+} from "@instigenie/errors";
 import {
   paginated,
   type CancelSalesInvoice,
@@ -53,6 +58,7 @@ import { salesInvoicesRepo } from "./sales-invoices.repository.js";
 import { customerLedgerRepo } from "./customer-ledger.repository.js";
 import { nextFinanceNumber } from "./numbering.js";
 import { requireUser } from "../../context/request-context.js";
+import type { EsignatureService } from "../esignature/service.js";
 
 type SalesInvoiceListQuery = z.infer<typeof SalesInvoiceListQuerySchema>;
 
@@ -181,8 +187,40 @@ async function recomputeAndPersistHeaderTotals(
 
 // ─── Service ─────────────────────────────────────────────────────────────────
 
+export interface SalesInvoicesServiceDeps {
+  pool: pg.Pool;
+  /**
+   * Phase 4 §9.5 — re-entered password + HMAC-SHA256 hash for invoice
+   * POST. Optional so the pre-§4.2c bare-pool construction still
+   * compiles; when absent, post() degrades to the legacy (unsigned)
+   * path. When PRESENT, post() REQUIRES eSignaturePassword +
+   * eSignatureReason and rejects missing fields with ValidationError
+   * before touching the DB.
+   */
+  esignature?: EsignatureService;
+}
+
+function isSalesInvoicesServiceDeps(
+  x: SalesInvoicesServiceDeps | pg.Pool,
+): x is SalesInvoicesServiceDeps {
+  return typeof x === "object" && x !== null && "pool" in x;
+}
+
 export class SalesInvoicesService {
-  constructor(private readonly pool: pg.Pool) {}
+  private readonly pool: pg.Pool;
+  private readonly esignature: EsignatureService | null;
+
+  // Two accepted shapes so existing Phase 2 tests that pre-date §4.2c
+  // and construct `new SalesInvoicesService(pool)` still work.
+  constructor(poolOrDeps: pg.Pool | SalesInvoicesServiceDeps) {
+    if (isSalesInvoicesServiceDeps(poolOrDeps)) {
+      this.pool = poolOrDeps.pool;
+      this.esignature = poolOrDeps.esignature ?? null;
+    } else {
+      this.pool = poolOrDeps;
+      this.esignature = null;
+    }
+  }
 
   async list(
     req: FastifyRequest,
@@ -316,9 +354,13 @@ export class SalesInvoicesService {
 
   /**
    * Post a DRAFT invoice. Validates preconditions, then transactionally:
-   *   1. Recompute header totals (belt + braces in case lines are stale).
-   *   2. markPosted on the header.
-   *   3. Append an INVOICE row to customer_ledger (debit = grandTotal).
+   *   1. (§9.5) Verify the re-entered password + HMAC a signature hash
+   *      if the service was wired with an EsignatureService. Fails
+   *      closed on missing fields, wrong password, or missing identity.
+   *   2. Recompute header totals (belt + braces in case lines are stale).
+   *   3. markPosted on the header (persists posted_at + signature_hash
+   *      atomically — the hash binds to the exact timestamptz stored).
+   *   4. Append an INVOICE row to customer_ledger (debit = grandTotal).
    */
   async post(
     req: FastifyRequest,
@@ -326,6 +368,50 @@ export class SalesInvoicesService {
     input: PostSalesInvoice,
   ): Promise<SalesInvoiceWithLines> {
     const user = requireUser(req);
+
+    // Phase 4 §9.5 — "Invoice issue" is a critical action and is
+    // UNCONDITIONALLY subject to password re-entry. Unlike stock.postEntry
+    // (which has non-critical txn types that legitimately bypass e-sig),
+    // every sales-invoice POST is §9.5-critical by definition.
+    //
+    // Rule layering (mirrors StockService.postEntry and §42.6
+    // ApprovalsService):
+    //   - deps MISSING (misconfigured server)  → ValidationError (fail closed)
+    //   - deps present + missing fields        → ValidationError
+    //   - deps present + missing identity      → UnauthorizedError
+    //
+    // All checks run BEFORE withRequest() opens a DB tx so a bad payload
+    // doesn't even reserve an advisory-lock slot.
+    if (!this.esignature) {
+      throw new ValidationError(
+        "invoice POST is a critical action and server is not configured for electronic signatures",
+      );
+    }
+    if (!input.eSignaturePassword) {
+      throw new ValidationError(
+        "eSignaturePassword is required to post an invoice",
+      );
+    }
+    if (!input.eSignatureReason) {
+      throw new ValidationError(
+        "eSignatureReason is required to post an invoice",
+      );
+    }
+    if (!user.identityId) {
+      // Pre-§4.2 tokens have no `idn` claim; vendor-admin sessions
+      // don't correspond to a tenant-user password row at all.
+      throw new UnauthorizedError(
+        "e-signature requires a tenant-user session",
+      );
+    }
+    // Capture narrowed locals so TypeScript keeps the non-null narrowing
+    // across the withRequest callback closure (the class-field narrowing
+    // would otherwise be widened back to `EsignatureService | null`).
+    const esig = this.esignature;
+    const userIdentityId = user.identityId;
+    const eSigPassword = input.eSignaturePassword;
+    const eSigReason = input.eSignatureReason;
+
     return withRequest(req, this.pool, async (client) => {
       const cur = await salesInvoicesRepo.getById(client, id);
       if (!cur) throw new NotFoundError("sales invoice");
@@ -351,11 +437,24 @@ export class SalesInvoicesService {
         );
       }
 
+      // Authoritative actedAt: either caller-supplied (rare — only used
+      // by back-dated migrations) or server-generated. Either way we
+      // bind the HMAC to the SAME string that lands on posted_at so an
+      // auditor can recompute deterministically.
+      const postedAtIso = input.postedAt ?? new Date().toISOString();
+      const { hash: signatureHash } = await esig.verifyAndHash({
+        userIdentityId,
+        password: eSigPassword,
+        reason: eSigReason,
+        actedAt: postedAtIso,
+      });
+
       const posted = await salesInvoicesRepo.markPosted(
         client,
         id,
         user.id,
-        input.postedAt ?? null,
+        postedAtIso,
+        signatureHash,
       );
       if (!posted) {
         // Race: status changed between getById and markPosted.

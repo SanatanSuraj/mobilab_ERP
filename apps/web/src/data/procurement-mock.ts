@@ -1,5 +1,5 @@
 // ─── Procurement Module Mock Data ────────────────────────────────────────────
-// Company: Mobilab Instruments (medical diagnostics)
+// Company: Instigenie Instruments (medical diagnostics)
 
 export type VendorStatus = "ACTIVE" | "ON_PROBATION" | "BLACKLISTED" | "INACTIVE";
 export type VendorCategory =

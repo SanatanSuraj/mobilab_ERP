@@ -86,7 +86,7 @@ export default function WorkOrdersPage() {
           <Badge
             variant="outline"
             className={
-              wo.productFamily === "MOBILAB_INSTRUMENT"
+              wo.productFamily === "INSTIGENIE_INSTRUMENT"
                 ? "bg-blue-50 text-blue-700 border-blue-200 text-xs"
                 : wo.productFamily === "CBL_DEVICE"
                 ? "bg-purple-50 text-purple-700 border-purple-200 text-xs"
@@ -296,7 +296,7 @@ export default function WorkOrdersPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">All Families</SelectItem>
-                <SelectItem value="MOBILAB_INSTRUMENT">Mobilab Instrument</SelectItem>
+                <SelectItem value="INSTIGENIE_INSTRUMENT">Instigenie Instrument</SelectItem>
                 <SelectItem value="CBL_DEVICE">CBL Device</SelectItem>
                 <SelectItem value="REAGENT">Reagent</SelectItem>
               </SelectContent>

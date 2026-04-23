@@ -77,12 +77,12 @@ export default function ManufacturingDashboardPage() {
   );
 
   const familyColors: Record<string, string> = {
-    MOBILAB_INSTRUMENT: "bg-blue-500",
+    INSTIGENIE_INSTRUMENT: "bg-blue-500",
     CBL_DEVICE: "bg-purple-500",
     REAGENT: "bg-teal-500",
   };
   const familyLabels: Record<string, string> = {
-    MOBILAB_INSTRUMENT: "Mobilab Instrument",
+    INSTIGENIE_INSTRUMENT: "Instigenie Instrument",
     CBL_DEVICE: "CBL Device",
     REAGENT: "Reagent",
   };
@@ -242,7 +242,7 @@ export default function ManufacturingDashboardPage() {
                     <Badge
                       variant="outline"
                       className={
-                        wo.productFamily === "MOBILAB_INSTRUMENT"
+                        wo.productFamily === "INSTIGENIE_INSTRUMENT"
                           ? "bg-blue-50 text-blue-700 border-blue-200 text-xs"
                           : wo.productFamily === "CBL_DEVICE"
                           ? "bg-purple-50 text-purple-700 border-purple-200 text-xs"

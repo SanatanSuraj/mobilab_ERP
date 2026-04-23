@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useUpdateComponentIds } from "@/hooks/useMfg";
-import type { MobiDeviceID } from "@/data/mobilab-mock";
+import type { MobiDeviceID } from "@/data/instigenie-mock";
 
 interface Props {
   open: boolean;

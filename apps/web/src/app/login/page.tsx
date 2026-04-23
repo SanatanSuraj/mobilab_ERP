@@ -5,8 +5,8 @@
  *
  * This page existed when auth was entirely mock. The real login surface is
  * now at /auth/login (see apps/web/src/app/auth/login/page.tsx). To avoid
- * users typing real credentials (admin@mobilab.local / instigenie_dev_2026)
- * into the old mock form — which only validates against @mobilab.in emails
+ * users typing real credentials (admin@instigenie.local / instigenie_dev_2026)
+ * into the old mock form — which only validates against @instigenie.in emails
  * with password "demo1234" and would show a misleading error — this page
  * now:
  *

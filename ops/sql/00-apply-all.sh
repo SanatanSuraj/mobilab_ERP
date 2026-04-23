@@ -45,6 +45,23 @@ apply_dir() {
 
 apply_dir /docker-entrypoint-initdb.d/01-init     "init"
 apply_dir /docker-entrypoint-initdb.d/02-triggers "triggers"
+
+# Roles must exist before RLS because several RLS scripts GRANT EXECUTE /
+# GRANT SELECT to instigenie_app and instigenie_vendor (see
+# ops/sql/rls/03-auth-cross-tenant.sql). We pull the role-creation files
+# out of 04-seed early so those GRANTs resolve. The same files live in
+# 04-seed so a plain directory scan still finds them on re-runs; ON CONFLICT /
+# IF NOT EXISTS in the role DDL makes the second apply a no-op.
+for role_file in \
+  /docker-entrypoint-initdb.d/04-seed/99-app-role.sql \
+  /docker-entrypoint-initdb.d/04-seed/98-vendor-role.sql ; do
+  if [ -f "$role_file" ]; then
+    echo "[init] roles: applying $role_file"
+    psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+         --set ON_ERROR_STOP=1 --no-psqlrc --quiet -f "$role_file"
+  fi
+done
+
 apply_dir /docker-entrypoint-initdb.d/03-rls      "rls"
 apply_dir /docker-entrypoint-initdb.d/04-seed     "seed"
 

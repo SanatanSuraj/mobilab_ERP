@@ -10,18 +10,26 @@
  *   - Graceful drain on SIGTERM is the worker's responsibility.
  */
 
-import { Queue, Worker, QueueEvents, type Processor, type WorkerOptions } from "bullmq";
+import { Queue, Worker, QueueEvents, type Processor, type WorkerOptions, type JobsOptions } from "bullmq";
 import { createBullConnection } from "./connection.js";
 import type { QueueName } from "./queue-names.js";
 
 export interface MakeQueueOptions {
   redisUrl: string;
+  /**
+   * Per-queue job option overrides. Deep-merged onto DEFAULT_JOB_OPTS so
+   * callers only need to specify the fields that diverge — e.g. the
+   * `pdf-render` queue (ARCHITECTURE.md §4.1) overrides `attempts: 3`
+   * and `backoff: { type: 'fixed', delay: 60_000 }` while inheriting the
+   * 1h/1000 retain-complete and 14d retain-failed retention defaults.
+   */
+  defaultJobOptions?: JobsOptions;
 }
 
-const DEFAULT_JOB_OPTS = {
+const DEFAULT_JOB_OPTS: JobsOptions = {
   attempts: 5,
   backoff: {
-    type: "exponential" as const,
+    type: "exponential",
     delay: 2_000,
   },
   removeOnComplete: { age: 3600, count: 1000 },
@@ -35,7 +43,10 @@ export function makeQueue<T = unknown>(
   const connection = createBullConnection(opts.redisUrl);
   return new Queue<T>(name, {
     connection,
-    defaultJobOptions: DEFAULT_JOB_OPTS,
+    defaultJobOptions: {
+      ...DEFAULT_JOB_OPTS,
+      ...(opts.defaultJobOptions ?? {}),
+    },
   });
 }
 

@@ -17,4 +17,6 @@ export {
   outboxDepth,
   jobsProcessedTotal,
   jobDurationMs,
+  auditChainBreakTotal,
+  auditChainRunDurationMs,
 } from "./metrics.js";

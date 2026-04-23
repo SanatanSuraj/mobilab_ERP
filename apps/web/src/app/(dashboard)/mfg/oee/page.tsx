@@ -16,7 +16,7 @@ import {
   DowntimeEntry,
   COPQRecord,
   AssemblyLine,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import {
   Activity,
   TrendingUp,

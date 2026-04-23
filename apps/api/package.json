@@ -10,11 +10,16 @@
     "./auth/tokens": "./src/modules/auth/tokens.ts",
     "./crm/quotations": "./src/modules/crm/quotations.service.ts",
     "./crm/sales-orders": "./src/modules/crm/sales-orders.service.ts",
+    "./finance/sales-invoices": "./src/modules/finance/sales-invoices.service.ts",
     "./inventory/reservations": "./src/modules/inventory/reservations.service.ts",
+    "./inventory/stock": "./src/modules/inventory/stock.service.ts",
     "./approvals": "./src/modules/approvals/approvals.service.ts",
+    "./esignature": "./src/modules/esignature/service.ts",
     "./external": "./src/modules/external/index.ts",
     "./notifications": "./src/modules/notifications/index.ts",
-    "./portal": "./src/modules/portal/index.ts"
+    "./portal": "./src/modules/portal/index.ts",
+    "./qc/cert-hash": "./src/modules/qc/cert-hash.ts",
+    "./qc/certs.service": "./src/modules/qc/certs.service.ts"
   },
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env src/index.ts",

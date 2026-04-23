@@ -36,7 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLogStageCompletion } from "@/hooks/useMfg";
-import { mobiOperators, type LineStageTemplate, type MobiDeviceID } from "@/data/mobilab-mock";
+import { mobiOperators, type LineStageTemplate, type MobiDeviceID } from "@/data/instigenie-mock";
 
 const FIXTURE_IDS = [
   "FIXTURE-QCA-001",

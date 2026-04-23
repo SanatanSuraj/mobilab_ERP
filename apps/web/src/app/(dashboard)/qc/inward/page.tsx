@@ -322,7 +322,7 @@ export default function InwardInspectionPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Incoming RM QC — AQL Inspections"
-        description="AQL-based incoming raw material inspection — Mobilab Guwahati Plant | ISO 13485"
+        description="AQL-based incoming raw material inspection — Instigenie Guwahati Plant | ISO 13485"
       />
 
       {/* Filter Bar */}

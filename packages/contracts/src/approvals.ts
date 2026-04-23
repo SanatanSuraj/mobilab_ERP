@@ -227,12 +227,25 @@ export const ApprovalActPayloadSchema = z.object({
   action: z.enum(["APPROVE", "REJECT"]),
   comment: z.string().trim().max(2000).optional(),
   /**
-   * Payload the user agreed to when signing. Hashed with user_id + timestamp
-   * and stored on the step — the raw value is never persisted.
+   * The textual statement the user agreed to when signing ("Final QC
+   * pass — serial ABC123"). Hashed with user_identity_id + actedAt +
+   * server pepper (HMAC-SHA256) and stored on the step — the raw
+   * value is not persisted. Required when the step has
+   * requires_e_signature = true.
+   */
+  eSignaturePayload: z.string().trim().min(1).max(4000).optional(),
+  /**
+   * Phase 4 §4.2 / §9.5 — the user's current password, re-entered at
+   * the moment of signing. Server bcrypt.compares against
+   * user_identities.password_hash; on mismatch the whole act() call
+   * is rejected with 401 before any state change. NEVER logged,
+   * NEVER persisted, NEVER returned in any response. The 256-char
+   * ceiling just bounds the wire payload — bcrypt truncates beyond
+   * 72 chars so anything longer is signal-of-attack regardless.
    *
    * Required when the step has requires_e_signature = true.
    */
-  eSignaturePayload: z.string().trim().min(1).max(4000).optional(),
+  eSignaturePassword: z.string().min(1).max(256).optional(),
 });
 export type ApprovalActPayload = z.infer<typeof ApprovalActPayloadSchema>;
 

@@ -105,7 +105,7 @@ function makeRequest(): ServiceReq {
     user: {
       id: DEV_USER_ID,
       orgId: DEV_ORG_ID,
-      email: "stores@mobilab.local",
+      email: "stores@instigenie.local",
       roles: ["STORES"] as Role[],
       permissions: new Set<Permission>(),
       audience: AUDIENCE.internal,

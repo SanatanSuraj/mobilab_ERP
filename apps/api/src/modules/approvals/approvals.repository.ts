@@ -633,6 +633,14 @@ export const approvalsRepo = {
   /**
    * Record the step decision. Sets status=APPROVED|REJECTED, acted_by/at/
    * comment/hash. Returns the updated step.
+   *
+   * actedAt is passed from the caller rather than defaulted to now()
+   * because the §4.2 e-signature hash is HMAC'd against the exact same
+   * ISO-8601 string the step row persists. If we defaulted to now() in
+   * SQL, the hash would be computed against Node-clock and verified
+   * against Postgres-clock — a small skew would render every signature
+   * non-reproducible for auditors. Passing the caller's value once
+   * threads the same timestamp through both.
    */
   async updateStepDecision(
     client: PoolClient,
@@ -640,6 +648,7 @@ export const approvalsRepo = {
     input: {
       status: "APPROVED" | "REJECTED";
       actedBy: string;
+      actedAt: string; // ISO-8601 from ApprovalsService.act()
       comment: string | null;
       eSignatureHash: string | null;
     },
@@ -648,12 +657,19 @@ export const approvalsRepo = {
       `UPDATE approval_steps
           SET status = $2,
               acted_by = $3,
-              acted_at = now(),
-              comment = $4,
-              e_signature_hash = $5
+              acted_at = $4::timestamptz,
+              comment = $5,
+              e_signature_hash = $6
         WHERE id = $1
         RETURNING ${STEP_COLS}`,
-      [stepId, input.status, input.actedBy, input.comment, input.eSignatureHash],
+      [
+        stepId,
+        input.status,
+        input.actedBy,
+        input.actedAt,
+        input.comment,
+        input.eSignatureHash,
+      ],
     );
     return rowToStep(rows[0]!);
   },

@@ -18,7 +18,7 @@ import {
   getWOProgress,
   isFinishedDeviceCode,
   isModuleCode,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import { formatCurrency, formatDate, currentMonthPrefix } from "@/lib/format";
 
 export function ProductionDashboard() {

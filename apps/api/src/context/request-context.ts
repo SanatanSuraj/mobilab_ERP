@@ -16,6 +16,17 @@ export interface RequestUser {
   roles: Role[];
   permissions: Set<Permission>;
   audience: Audience;
+  /**
+   * user_identities.id — the global credential row behind this session.
+   * Null when the token predates the Phase 4 §4.2 e-signature flow
+   * (access tokens minted before the `idn` claim was added) or when the
+   * session is vendor-admin (not tied to a tenant user identity).
+   *
+   * Required by EsignatureService to look up password_hash; handlers
+   * that gate critical actions behind a password re-entry MUST verify
+   * this is non-null before calling verifyAndHash.
+   */
+  identityId: string | null;
   capabilities?: {
     permittedLines: string[];
     tier?: "T1" | "T2" | "T3";

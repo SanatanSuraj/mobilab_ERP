@@ -56,18 +56,18 @@ type MockUser = {
 };
 
 const MOCK_USERS: MockUser[] = [
-  { id: "u1", name: "Chetan (HOD)", email: "chetan@mobilab.in", role: "PRODUCTION_MANAGER", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u2", name: "Shubham", email: "shubham@mobilab.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u3", name: "Sanju", email: "sanju@mobilab.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-17" },
-  { id: "u4", name: "Jatin", email: "jatin@mobilab.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u5", name: "Rishabh", email: "rishabh@mobilab.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-16" },
-  { id: "u6", name: "Binsu", email: "binsu@mobilab.in", role: "QC_INSPECTOR", department: "Quality", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u7", name: "Saurabh", email: "saurabh@mobilab.in", role: "STORES", department: "Warehouse", status: "ACTIVE", lastLogin: "2026-04-15" },
-  { id: "u8", name: "Minakshi", email: "minakshi@mobilab.in", role: "STORES", department: "Warehouse", status: "ACTIVE", lastLogin: "2026-04-14" },
-  { id: "u9", name: "Priya Sharma", email: "priya@mobilab.in", role: "SALES_REP", department: "Sales", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u10", name: "Anita Das", email: "anita@mobilab.in", role: "FINANCE", department: "Finance", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u11", name: "QC Manager", email: "qcmgr@mobilab.in", role: "QC_MANAGER", department: "Quality", status: "ACTIVE", lastLogin: "2026-04-17" },
-  { id: "u12", name: "Management User", email: "mgmt@mobilab.in", role: "MANAGEMENT", department: "Management", status: "ACTIVE", lastLogin: "2026-04-18" },
+  { id: "u1", name: "Chetan (HOD)", email: "chetan@instigenie.in", role: "PRODUCTION_MANAGER", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
+  { id: "u2", name: "Shubham", email: "shubham@instigenie.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
+  { id: "u3", name: "Sanju", email: "sanju@instigenie.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-17" },
+  { id: "u4", name: "Jatin", email: "jatin@instigenie.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
+  { id: "u5", name: "Rishabh", email: "rishabh@instigenie.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-16" },
+  { id: "u6", name: "Binsu", email: "binsu@instigenie.in", role: "QC_INSPECTOR", department: "Quality", status: "ACTIVE", lastLogin: "2026-04-18" },
+  { id: "u7", name: "Saurabh", email: "saurabh@instigenie.in", role: "STORES", department: "Warehouse", status: "ACTIVE", lastLogin: "2026-04-15" },
+  { id: "u8", name: "Minakshi", email: "minakshi@instigenie.in", role: "STORES", department: "Warehouse", status: "ACTIVE", lastLogin: "2026-04-14" },
+  { id: "u9", name: "Priya Sharma", email: "priya@instigenie.in", role: "SALES_REP", department: "Sales", status: "ACTIVE", lastLogin: "2026-04-18" },
+  { id: "u10", name: "Anita Das", email: "anita@instigenie.in", role: "FINANCE", department: "Finance", status: "ACTIVE", lastLogin: "2026-04-18" },
+  { id: "u11", name: "QC Manager", email: "qcmgr@instigenie.in", role: "QC_MANAGER", department: "Quality", status: "ACTIVE", lastLogin: "2026-04-17" },
+  { id: "u12", name: "Management User", email: "mgmt@instigenie.in", role: "MANAGEMENT", department: "Management", status: "ACTIVE", lastLogin: "2026-04-18" },
 ];
 
 const ROLE_COLORS: Partial<Record<UserRole, string>> = {

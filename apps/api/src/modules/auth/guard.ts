@@ -62,6 +62,9 @@ export function createAuthGuard(opts: AuthGuardOptions) {
       roles,
       permissions: perms,
       audience: claims.aud,
+      // `idn` is optional on JwtClaimsSchema — missing on pre-§4.2 tokens.
+      // EsignatureService guards for null at the moment of use.
+      identityId: claims.idn ?? null,
       capabilities: claims.capabilities,
     };
     req.user = user;

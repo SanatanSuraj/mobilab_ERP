@@ -39,7 +39,7 @@
  *   F. The portal customer hook (`createPortalCustomerHook`) rejects a
  *      portal token when the pivot row is missing, with 401.
  *
- * The tests run against the dev `mobilab-postgres` with real SQL. No
+ * The tests run against the dev `instigenie-postgres` with real SQL. No
  * Fastify server is started — the audience-block path is validated by
  * gate-6 (token/audience verifier) and the rate-limit path is wired at
  * boot (we document the wiring below but don't hammer the limiter here;
@@ -105,7 +105,7 @@ function makeReq(args: {
     user: {
       id: args.userId,
       orgId: args.orgId,
-      email: "customer@mobilab.local",
+      email: "customer@instigenie.local",
       roles: ["CUSTOMER"] as Role[],
       permissions: new Set<Permission>(),
       audience: AUDIENCE.portal,
@@ -122,7 +122,7 @@ async function ensureFixtures(pool: pg.Pool): Promise<void> {
     `INSERT INTO user_identities (id, email, password_hash, status)
      VALUES ($1, $2, 'x', 'ACTIVE')
      ON CONFLICT (id) DO NOTHING`,
-    [DEV_IDENTITY_B, "gate32b@mobilab.local"],
+    [DEV_IDENTITY_B, "gate32b@instigenie.local"],
   );
 
   // ── Fixture A/B in the DEV tenant ────────────────────────────────────
@@ -142,7 +142,7 @@ async function ensureFixtures(pool: pg.Pool): Promise<void> {
       `INSERT INTO users (id, org_id, identity_id, email, name, capabilities, is_active)
        VALUES ($1, $2, $3, $4, $5, '{"permittedLines":[], "canPCBRework": false, "canOCAssembly": false}'::jsonb, true)
        ON CONFLICT (id) DO NOTHING`,
-      [DEV_USER_B_ID, DEV_ORG_ID, DEV_IDENTITY_B, "gate32b@mobilab.local", "Gate 32 Portal B"],
+      [DEV_USER_B_ID, DEV_ORG_ID, DEV_IDENTITY_B, "gate32b@instigenie.local", "Gate 32 Portal B"],
     );
     await client.query(
       `INSERT INTO user_roles (user_id, role_id, org_id)
@@ -170,7 +170,7 @@ async function ensureFixtures(pool: pg.Pool): Promise<void> {
     `INSERT INTO user_identities (id, email, password_hash, status)
      VALUES ($1, $2, 'x', 'ACTIVE')
      ON CONFLICT (id) DO NOTHING`,
-    [OTHER_IDENTITY, "gate32other@mobilab.local"],
+    [OTHER_IDENTITY, "gate32other@instigenie.local"],
   );
 
   await withOrg(pool, OTHER_ORG_ID, async (client) => {
@@ -188,7 +188,7 @@ async function ensureFixtures(pool: pg.Pool): Promise<void> {
     );
     await client.query(
       `INSERT INTO users (id, org_id, identity_id, email, name, capabilities, is_active)
-       VALUES ($1, $2, $3, 'other-portal@mobilab.local', 'Other Portal', '{"permittedLines":[], "canPCBRework": false, "canOCAssembly": false}'::jsonb, true)
+       VALUES ($1, $2, $3, 'other-portal@instigenie.local', 'Other Portal', '{"permittedLines":[], "canPCBRework": false, "canOCAssembly": false}'::jsonb, true)
        ON CONFLICT (id) DO NOTHING`,
       [OTHER_PORTAL_USER, OTHER_ORG_ID, OTHER_IDENTITY],
     );
@@ -572,14 +572,14 @@ describe("gate-32: portal isolation + RLS + audience block", () => {
       const identityId = "00000000-0000-0000-0000-00000032f002";
       await pool.query(
         `INSERT INTO user_identities (id, email, password_hash, status)
-         VALUES ($1, 'gate32unlinked@mobilab.local', 'x', 'ACTIVE')
+         VALUES ($1, 'gate32unlinked@instigenie.local', 'x', 'ACTIVE')
          ON CONFLICT (id) DO NOTHING`,
         [identityId],
       );
       await withOrg(pool, DEV_ORG_ID, async (client) => {
         await client.query(
           `INSERT INTO users (id, org_id, identity_id, email, name, capabilities, is_active)
-           VALUES ($1, $2, $3, 'gate32unlinked@mobilab.local', 'Unlinked', '{"permittedLines":[], "canPCBRework": false, "canOCAssembly": false}'::jsonb, true)
+           VALUES ($1, $2, $3, 'gate32unlinked@instigenie.local', 'Unlinked', '{"permittedLines":[], "canPCBRework": false, "canOCAssembly": false}'::jsonb, true)
            ON CONFLICT (id) DO NOTHING`,
           [userId, DEV_ORG_ID, identityId],
         );
@@ -608,7 +608,7 @@ describe("gate-32: portal isolation + RLS + audience block", () => {
         user: {
           id: DEV_INTERNAL_USER,
           orgId: DEV_ORG_ID,
-          email: "admin@mobilab.local",
+          email: "admin@instigenie.local",
           roles: ["SUPER_ADMIN"] as Role[],
           permissions: new Set<Permission>(),
           audience: AUDIENCE.internal,

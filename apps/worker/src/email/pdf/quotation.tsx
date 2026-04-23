@@ -9,7 +9,7 @@
  * Buffer, so callers never touch React/renderer types.
  */
 
-import React, { type ReactElement } from "react";
+import { type ReactElement } from "react";
 import {
   Document,
   Page,

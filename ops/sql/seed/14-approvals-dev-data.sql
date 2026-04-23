@@ -1,4 +1,4 @@
--- Seed the 6 default approval chains for the Mobilab Dev org.
+-- Seed the 6 default approval chains for the Instigenie Dev org.
 -- ARCHITECTURE.md §3.3. The production onboarding flow should seed
 -- equivalent defaults when a new tenant is created; for now this dev-only
 -- seed gives the gate test and the UI something real to talk to.

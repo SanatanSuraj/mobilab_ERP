@@ -21,16 +21,16 @@ export interface User {
 }
 
 export const users: User[] = [
-  { id: "u1", name: "Chetan (HOD)", email: "chetan@mobilab.in", avatar: "CH", role: "Production Manager", department: "Manufacturing" },
-  { id: "u2", name: "Priya Sharma", email: "priya@mobilab.in", avatar: "PS", role: "Sales Rep", department: "Sales" },
-  { id: "u3", name: "Shubham (T1)", email: "shubham@mobilab.in", avatar: "SH", role: "Production Technician", department: "Manufacturing" },
-  { id: "u4", name: "Sanju (T1)", email: "sanju@mobilab.in", avatar: "SJ", role: "QC Inspector", department: "Quality" },
-  { id: "u5", name: "Jatin (T1)", email: "jatin@mobilab.in", avatar: "JT", role: "Production Technician", department: "Manufacturing" },
-  { id: "u6", name: "Anita Das", email: "anita@mobilab.in", avatar: "AD", role: "Finance Lead", department: "Accounting" },
-  { id: "u7", name: "Rishabh (T1)", email: "rishabh@mobilab.in", avatar: "RT", role: "Stores Technician", department: "Stores" },
-  { id: "u8", name: "Binsu (T2)", email: "binsu@mobilab.in", avatar: "BT", role: "Production Technician", department: "Manufacturing" },
-  { id: "u9", name: "Saurabh (T3)", email: "saurabh@mobilab.in", avatar: "ST", role: "QC Technician", department: "Quality" },
-  { id: "u10", name: "Minakshi (T3)", email: "minakshi@mobilab.in", avatar: "MT", role: "Production Technician", department: "Manufacturing" },
+  { id: "u1", name: "Chetan (HOD)", email: "chetan@instigenie.in", avatar: "CH", role: "Production Manager", department: "Manufacturing" },
+  { id: "u2", name: "Priya Sharma", email: "priya@instigenie.in", avatar: "PS", role: "Sales Rep", department: "Sales" },
+  { id: "u3", name: "Shubham (T1)", email: "shubham@instigenie.in", avatar: "SH", role: "Production Technician", department: "Manufacturing" },
+  { id: "u4", name: "Sanju (T1)", email: "sanju@instigenie.in", avatar: "SJ", role: "QC Inspector", department: "Quality" },
+  { id: "u5", name: "Jatin (T1)", email: "jatin@instigenie.in", avatar: "JT", role: "Production Technician", department: "Manufacturing" },
+  { id: "u6", name: "Anita Das", email: "anita@instigenie.in", avatar: "AD", role: "Finance Lead", department: "Accounting" },
+  { id: "u7", name: "Rishabh (T1)", email: "rishabh@instigenie.in", avatar: "RT", role: "Stores Technician", department: "Stores" },
+  { id: "u8", name: "Binsu (T2)", email: "binsu@instigenie.in", avatar: "BT", role: "Production Technician", department: "Manufacturing" },
+  { id: "u9", name: "Saurabh (T3)", email: "saurabh@instigenie.in", avatar: "ST", role: "QC Technician", department: "Quality" },
+  { id: "u10", name: "Minakshi (T3)", email: "minakshi@instigenie.in", avatar: "MT", role: "Production Technician", department: "Manufacturing" },
 ];
 
 // --- Products ---
@@ -316,16 +316,16 @@ export interface Employee {
 }
 
 export const employees: Employee[] = [
-  { id: "u1", name: "Chetan (HOD)", email: "chetan@mobilab.in", avatar: "CH", department: "Manufacturing", designation: "Production Manager", joinDate: "2020-03-15", phone: "+91 98765 00001", status: "active", leaveBalance: { casual: 8, sick: 5, earned: 12 } },
-  { id: "u2", name: "Priya Sharma", email: "priya@mobilab.in", avatar: "PS", department: "Sales", designation: "Sales Rep", joinDate: "2023-06-01", phone: "+91 98765 00002", status: "active", leaveBalance: { casual: 6, sick: 4, earned: 10 }, reportingTo: "u1" },
-  { id: "u3", name: "Shubham (T1)", email: "shubham@mobilab.in", avatar: "SH", department: "Manufacturing", designation: "Production Technician T1", joinDate: "2022-01-10", phone: "+91 98765 00003", status: "active", leaveBalance: { casual: 5, sick: 6, earned: 8 }, reportingTo: "u1" },
-  { id: "u4", name: "Sanju (T1)", email: "sanju@mobilab.in", avatar: "SJ", department: "Quality", designation: "QC Inspector T1", joinDate: "2022-08-20", phone: "+91 98765 00004", status: "active", leaveBalance: { casual: 7, sick: 5, earned: 11 }, reportingTo: "u1" },
-  { id: "u5", name: "Jatin (T1)", email: "jatin@mobilab.in", avatar: "JT", department: "Manufacturing", designation: "Production Technician T1", joinDate: "2023-02-14", phone: "+91 98765 00005", status: "on_leave", leaveBalance: { casual: 3, sick: 4, earned: 5 }, reportingTo: "u1" },
-  { id: "u6", name: "Anita Das", email: "anita@mobilab.in", avatar: "AD", department: "Accounting", designation: "Finance Lead", joinDate: "2021-07-01", phone: "+91 98765 00006", status: "active", leaveBalance: { casual: 9, sick: 6, earned: 14 } },
-  { id: "u7", name: "Rishabh (T1)", email: "rishabh@mobilab.in", avatar: "RT", department: "Stores", designation: "Stores Technician T1", joinDate: "2022-11-05", phone: "+91 98765 00007", status: "active", leaveBalance: { casual: 4, sick: 3, earned: 7 }, reportingTo: "u1" },
-  { id: "u8", name: "Binsu (T2)", email: "binsu@mobilab.in", avatar: "BT", department: "Manufacturing", designation: "Production Technician T2", joinDate: "2021-05-15", phone: "+91 98765 00008", status: "active", leaveBalance: { casual: 6, sick: 5, earned: 10 }, reportingTo: "u1" },
-  { id: "u9", name: "Saurabh (T3)", email: "saurabh@mobilab.in", avatar: "ST", department: "Quality", designation: "QC Technician T3", joinDate: "2023-09-01", phone: "+91 98765 00009", status: "active", leaveBalance: { casual: 5, sick: 4, earned: 6 }, reportingTo: "u4" },
-  { id: "u10", name: "Minakshi (T3)", email: "minakshi@mobilab.in", avatar: "MT", department: "Manufacturing", designation: "Production Technician T3", joinDate: "2024-01-10", phone: "+91 98765 00010", status: "active", leaveBalance: { casual: 6, sick: 3, earned: 4 }, reportingTo: "u1" },
+  { id: "u1", name: "Chetan (HOD)", email: "chetan@instigenie.in", avatar: "CH", department: "Manufacturing", designation: "Production Manager", joinDate: "2020-03-15", phone: "+91 98765 00001", status: "active", leaveBalance: { casual: 8, sick: 5, earned: 12 } },
+  { id: "u2", name: "Priya Sharma", email: "priya@instigenie.in", avatar: "PS", department: "Sales", designation: "Sales Rep", joinDate: "2023-06-01", phone: "+91 98765 00002", status: "active", leaveBalance: { casual: 6, sick: 4, earned: 10 }, reportingTo: "u1" },
+  { id: "u3", name: "Shubham (T1)", email: "shubham@instigenie.in", avatar: "SH", department: "Manufacturing", designation: "Production Technician T1", joinDate: "2022-01-10", phone: "+91 98765 00003", status: "active", leaveBalance: { casual: 5, sick: 6, earned: 8 }, reportingTo: "u1" },
+  { id: "u4", name: "Sanju (T1)", email: "sanju@instigenie.in", avatar: "SJ", department: "Quality", designation: "QC Inspector T1", joinDate: "2022-08-20", phone: "+91 98765 00004", status: "active", leaveBalance: { casual: 7, sick: 5, earned: 11 }, reportingTo: "u1" },
+  { id: "u5", name: "Jatin (T1)", email: "jatin@instigenie.in", avatar: "JT", department: "Manufacturing", designation: "Production Technician T1", joinDate: "2023-02-14", phone: "+91 98765 00005", status: "on_leave", leaveBalance: { casual: 3, sick: 4, earned: 5 }, reportingTo: "u1" },
+  { id: "u6", name: "Anita Das", email: "anita@instigenie.in", avatar: "AD", department: "Accounting", designation: "Finance Lead", joinDate: "2021-07-01", phone: "+91 98765 00006", status: "active", leaveBalance: { casual: 9, sick: 6, earned: 14 } },
+  { id: "u7", name: "Rishabh (T1)", email: "rishabh@instigenie.in", avatar: "RT", department: "Stores", designation: "Stores Technician T1", joinDate: "2022-11-05", phone: "+91 98765 00007", status: "active", leaveBalance: { casual: 4, sick: 3, earned: 7 }, reportingTo: "u1" },
+  { id: "u8", name: "Binsu (T2)", email: "binsu@instigenie.in", avatar: "BT", department: "Manufacturing", designation: "Production Technician T2", joinDate: "2021-05-15", phone: "+91 98765 00008", status: "active", leaveBalance: { casual: 6, sick: 5, earned: 10 }, reportingTo: "u1" },
+  { id: "u9", name: "Saurabh (T3)", email: "saurabh@instigenie.in", avatar: "ST", department: "Quality", designation: "QC Technician T3", joinDate: "2023-09-01", phone: "+91 98765 00009", status: "active", leaveBalance: { casual: 5, sick: 4, earned: 6 }, reportingTo: "u4" },
+  { id: "u10", name: "Minakshi (T3)", email: "minakshi@instigenie.in", avatar: "MT", department: "Manufacturing", designation: "Production Technician T3", joinDate: "2024-01-10", phone: "+91 98765 00010", status: "active", leaveBalance: { casual: 6, sick: 3, earned: 4 }, reportingTo: "u1" },
 ];
 
 // --- Leave Requests ---

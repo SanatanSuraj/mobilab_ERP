@@ -314,7 +314,7 @@ export default function WIPGateInspectionPage() {
     <div className="space-y-8 p-6">
       <PageHeader
         title="WIP Gate Inspections"
-        description="Per-stage gate inspections — Mobilab assembly lines L1–L5 | ISO 13485"
+        description="Per-stage gate inspections — Instigenie assembly lines L1–L5 | ISO 13485"
       />
 
       {/* KPI Row */}

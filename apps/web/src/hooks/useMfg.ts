@@ -12,7 +12,7 @@ import {
   type GenerateDevicesInput,
 } from "@/services/mfg.service";
 import { currentMonthPrefix } from "@/lib/format";
-import type { AssemblyLine } from "@/data/mobilab-mock";
+import type { AssemblyLine } from "@/data/instigenie-mock";
 
 export const mfgKeys = {
   all: ["mfg"] as const,

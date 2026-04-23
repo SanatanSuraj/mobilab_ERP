@@ -61,7 +61,7 @@ import {
 import { DEV_ORG_ID, makeTestPool, waitForPg } from "./_helpers.js";
 
 // Dev STORES user (role name matches the Role enum exactly).
-// Seed file 03-dev-org-users.sql: b00b / stores@mobilab.local.
+// Seed file 03-dev-org-users.sql: b00b / stores@instigenie.local.
 const DEV_USER_ID = "00000000-0000-0000-0000-00000000b00b";
 
 // Seed items + warehouse from 08-inventory-dev-data.sql.
@@ -81,7 +81,7 @@ function makeRequest(
     user: {
       id: userId,
       orgId,
-      email: "stores@mobilab.local",
+      email: "stores@instigenie.local",
       roles: ["STORES"] as Role[],
       permissions: new Set<Permission>(),
       audience: AUDIENCE.internal,

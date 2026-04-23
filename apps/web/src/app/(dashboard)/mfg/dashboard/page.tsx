@@ -22,7 +22,7 @@ import {
   isFinishedDeviceCode,
   isModule,
   isModuleCode,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import {
   AlertCircle,
   Activity,
@@ -81,7 +81,7 @@ export default function MfgDashboardPage() {
   return (
     <div className="space-y-8 p-6">
       <PageHeader
-        title="Manufacturing Dashboard — Mobilab"
+        title="Manufacturing Dashboard — Instigenie"
         description="Mobicase Diagnostic Suite | ISO 13485 | Guwahati Plant"
       />
 

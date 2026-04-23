@@ -10,7 +10,7 @@
 -- presence in an org is a `memberships` row plus a per-tenant `users` row.
 --
 -- UUID fixture conventions (hex-only):
---   a001  — Mobilab Dev organization
+--   a001  — Instigenie Dev organization
 --   b00x  — users (per-tenant profile)
 --   f00x  — user_identities (global identity, paired 1:1 with b00x in dev)
 --   900x  — memberships (paired 1:1 with b00x in dev)
@@ -26,39 +26,39 @@ BEGIN
   PERFORM set_config('app.current_org', v_org_id::text, true);
 
   INSERT INTO organizations (id, name)
-  VALUES (v_org_id, 'Mobilab Dev')
+  VALUES (v_org_id, 'Instigenie Dev')
   ON CONFLICT (id) DO NOTHING;
 
   -- ── Identities (global; no org_id, no RLS) ───────────────────────────────
   INSERT INTO user_identities (id, email, password_hash, email_verified_at) VALUES
-    ('00000000-0000-0000-0000-00000000f001', 'admin@mobilab.local',    v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f002', 'mgmt@mobilab.local',     v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f003', 'sales@mobilab.local',    v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f004', 'salesmgr@mobilab.local', v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f005', 'finance@mobilab.local',  v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f006', 'prod@mobilab.local',     v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f007', 'prodmgr@mobilab.local',  v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f008', 'rd@mobilab.local',       v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f009', 'qc@mobilab.local',       v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f00a', 'qcmgr@mobilab.local',    v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f00b', 'stores@mobilab.local',   v_pw, now()),
-    ('00000000-0000-0000-0000-00000000f00c', 'customer@mobilab.local', v_pw, now())
+    ('00000000-0000-0000-0000-00000000f001', 'admin@instigenie.local',    v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f002', 'mgmt@instigenie.local',     v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f003', 'sales@instigenie.local',    v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f004', 'salesmgr@instigenie.local', v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f005', 'finance@instigenie.local',  v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f006', 'prod@instigenie.local',     v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f007', 'prodmgr@instigenie.local',  v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f008', 'rd@instigenie.local',       v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f009', 'qc@instigenie.local',       v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f00a', 'qcmgr@instigenie.local',    v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f00b', 'stores@instigenie.local',   v_pw, now()),
+    ('00000000-0000-0000-0000-00000000f00c', 'customer@instigenie.local', v_pw, now())
   ON CONFLICT (id) DO NOTHING;
 
   -- ── Per-tenant user profiles ─────────────────────────────────────────────
   INSERT INTO users (id, org_id, identity_id, email, name, is_active) VALUES
-    ('00000000-0000-0000-0000-00000000b001', v_org_id, '00000000-0000-0000-0000-00000000f001', 'admin@mobilab.local',    'Dev Admin',              true),
-    ('00000000-0000-0000-0000-00000000b002', v_org_id, '00000000-0000-0000-0000-00000000f002', 'mgmt@mobilab.local',     'Dev Management',         true),
-    ('00000000-0000-0000-0000-00000000b003', v_org_id, '00000000-0000-0000-0000-00000000f003', 'sales@mobilab.local',    'Dev Sales Rep',          true),
-    ('00000000-0000-0000-0000-00000000b004', v_org_id, '00000000-0000-0000-0000-00000000f004', 'salesmgr@mobilab.local', 'Dev Sales Manager',      true),
-    ('00000000-0000-0000-0000-00000000b005', v_org_id, '00000000-0000-0000-0000-00000000f005', 'finance@mobilab.local',  'Dev Finance',            true),
-    ('00000000-0000-0000-0000-00000000b006', v_org_id, '00000000-0000-0000-0000-00000000f006', 'prod@mobilab.local',     'Dev Production',         true),
-    ('00000000-0000-0000-0000-00000000b007', v_org_id, '00000000-0000-0000-0000-00000000f007', 'prodmgr@mobilab.local',  'Dev Production Manager', true),
-    ('00000000-0000-0000-0000-00000000b008', v_org_id, '00000000-0000-0000-0000-00000000f008', 'rd@mobilab.local',       'Dev R&D',                true),
-    ('00000000-0000-0000-0000-00000000b009', v_org_id, '00000000-0000-0000-0000-00000000f009', 'qc@mobilab.local',       'Dev QC Inspector',       true),
-    ('00000000-0000-0000-0000-00000000b00a', v_org_id, '00000000-0000-0000-0000-00000000f00a', 'qcmgr@mobilab.local',    'Dev QC Manager',         true),
-    ('00000000-0000-0000-0000-00000000b00b', v_org_id, '00000000-0000-0000-0000-00000000f00b', 'stores@mobilab.local',   'Dev Stores',             true),
-    ('00000000-0000-0000-0000-00000000b00c', v_org_id, '00000000-0000-0000-0000-00000000f00c', 'customer@mobilab.local', 'Dev Customer (Portal)',  true)
+    ('00000000-0000-0000-0000-00000000b001', v_org_id, '00000000-0000-0000-0000-00000000f001', 'admin@instigenie.local',    'Dev Admin',              true),
+    ('00000000-0000-0000-0000-00000000b002', v_org_id, '00000000-0000-0000-0000-00000000f002', 'mgmt@instigenie.local',     'Dev Management',         true),
+    ('00000000-0000-0000-0000-00000000b003', v_org_id, '00000000-0000-0000-0000-00000000f003', 'sales@instigenie.local',    'Dev Sales Rep',          true),
+    ('00000000-0000-0000-0000-00000000b004', v_org_id, '00000000-0000-0000-0000-00000000f004', 'salesmgr@instigenie.local', 'Dev Sales Manager',      true),
+    ('00000000-0000-0000-0000-00000000b005', v_org_id, '00000000-0000-0000-0000-00000000f005', 'finance@instigenie.local',  'Dev Finance',            true),
+    ('00000000-0000-0000-0000-00000000b006', v_org_id, '00000000-0000-0000-0000-00000000f006', 'prod@instigenie.local',     'Dev Production',         true),
+    ('00000000-0000-0000-0000-00000000b007', v_org_id, '00000000-0000-0000-0000-00000000f007', 'prodmgr@instigenie.local',  'Dev Production Manager', true),
+    ('00000000-0000-0000-0000-00000000b008', v_org_id, '00000000-0000-0000-0000-00000000f008', 'rd@instigenie.local',       'Dev R&D',                true),
+    ('00000000-0000-0000-0000-00000000b009', v_org_id, '00000000-0000-0000-0000-00000000f009', 'qc@instigenie.local',       'Dev QC Inspector',       true),
+    ('00000000-0000-0000-0000-00000000b00a', v_org_id, '00000000-0000-0000-0000-00000000f00a', 'qcmgr@instigenie.local',    'Dev QC Manager',         true),
+    ('00000000-0000-0000-0000-00000000b00b', v_org_id, '00000000-0000-0000-0000-00000000f00b', 'stores@instigenie.local',   'Dev Stores',             true),
+    ('00000000-0000-0000-0000-00000000b00c', v_org_id, '00000000-0000-0000-0000-00000000f00c', 'customer@instigenie.local', 'Dev Customer (Portal)',  true)
   ON CONFLICT (id) DO NOTHING;
 
   -- ── Memberships (identity + org + user profile link) ─────────────────────

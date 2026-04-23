@@ -26,7 +26,7 @@ import {
   mobiStageLogs,
   isFinishedDeviceCode,
   type MobicaseProduct,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 
 // Extended local types to support QC gate and rework limit tracking
 type WIPStageEx = WIPStage & { qcInspectionId?: string };

@@ -15,7 +15,7 @@ import {
   ScrapEntry,
   ScrapRootCause,
   COPQRecord,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import {
   AlertTriangle,
   TrendingDown,

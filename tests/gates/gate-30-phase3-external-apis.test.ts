@@ -25,7 +25,7 @@
  *   5. WhatsApp without emailFallback parks the payload in the queue
  *      (no silent drop even in early bring-up).
  *
- * The tests run against the dev `mobilab-postgres` instance so the queue
+ * The tests run against the dev `instigenie-postgres` instance so the queue
  * repo writes are real. Transport is a fake — we never talk to NIC / GSTN
  * / WhatsApp.
  *

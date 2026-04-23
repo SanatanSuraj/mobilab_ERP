@@ -6,7 +6,9 @@
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./handlers": "./src/handlers/index.ts"
+    "./handlers": "./src/handlers/index.ts",
+    "./processors/pdf-render": "./src/processors/pdf-render.ts",
+    "./processors/audit-hashchain": "./src/processors/audit-hashchain.ts"
   },
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
@@ -17,12 +19,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@instigenie/api": "workspace:*",
     "@instigenie/contracts": "workspace:*",
     "@instigenie/db": "workspace:*",
     "@instigenie/errors": "workspace:*",
     "@instigenie/observability": "workspace:*",
     "@instigenie/queue": "workspace:*",
     "@instigenie/resilience": "workspace:*",
+    "@instigenie/storage": "workspace:*",
     "@react-pdf/renderer": "^4.0.0",
     "bullmq": "^5.28.1",
     "pg": "^8.13.1",

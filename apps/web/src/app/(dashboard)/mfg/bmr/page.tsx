@@ -29,7 +29,7 @@ import {
   BMR,
   BMRStatus,
   BMRSection,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import {
   CheckCircle2,
   XCircle,

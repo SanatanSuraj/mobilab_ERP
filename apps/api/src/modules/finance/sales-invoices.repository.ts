@@ -50,6 +50,7 @@ interface InvoiceRow {
   posted_by: string | null;
   cancelled_at: Date | null;
   cancelled_by: string | null;
+  signature_hash: string | null;
   version: number;
   created_by: string | null;
   created_at: Date;
@@ -88,6 +89,7 @@ function rowToInvoice(r: InvoiceRow): SalesInvoice {
     postedBy: r.posted_by,
     cancelledAt: r.cancelled_at ? r.cancelled_at.toISOString() : null,
     cancelledBy: r.cancelled_by,
+    signatureHash: r.signature_hash,
     version: r.version,
     createdBy: r.created_by,
     createdAt: r.created_at.toISOString(),
@@ -103,6 +105,7 @@ const SELECT_COLS = `id, org_id, invoice_number, status,
                      subtotal, tax_total, discount_total, grand_total, amount_paid,
                      notes, terms, place_of_supply,
                      posted_at, posted_by, cancelled_at, cancelled_by,
+                     signature_hash,
                      version, created_by, created_at, updated_at, deleted_at`;
 
 // ── Line ─────────────────────────────────────────────────────────────────────
@@ -360,15 +363,24 @@ export const salesInvoicesRepo = {
     id: string,
     postedBy: string | null,
     postedAt: string | null,
+    signatureHash: string | null,
   ): Promise<SalesInvoice | null> {
+    // Why `$2::timestamptz NOT NULL` with no COALESCE to now():
+    // the signature_hash binds to the exact postedAt value (Phase 4 §9.5).
+    // If the DB used now() while the service hashed against
+    // new Date().toISOString(), an auditor recomputing the HMAC would
+    // never reproduce the stored hex. Callers that don't need e-sig
+    // (backward-compat legacy pool-only construction) still supply an
+    // actedAt from the service layer — never null.
     const { rows } = await client.query<InvoiceRow>(
       `UPDATE sales_invoices
           SET status = 'POSTED',
-              posted_at = COALESCE($2::timestamptz, now()),
-              posted_by = $3
+              posted_at = $2::timestamptz,
+              posted_by = $3,
+              signature_hash = $4
         WHERE id = $1 AND status = 'DRAFT' AND deleted_at IS NULL
         RETURNING ${SELECT_COLS}`,
-      [id, postedAt, postedBy],
+      [id, postedAt, postedBy, signatureHash],
     );
     return rows[0] ? rowToInvoice(rows[0]) : null;
   },

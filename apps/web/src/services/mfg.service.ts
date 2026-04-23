@@ -29,7 +29,7 @@ import {
   type AssemblyLine,
   type DeviceIDStatus,
   type ShiftType,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 
 // ─── Mutable in-memory stores (seeded once) ───────────────────────────────────
 
@@ -141,7 +141,7 @@ export interface DeviceIDFilters {
 const DEVICE_CODES = ["MCC"] as const;
 
 export const mfgService = {
-  // ── Mobilab Work Orders (reads from mutable store) ───────────────────────
+  // ── Instigenie Work Orders (reads from mutable store) ───────────────────────
 
   async getMobiWorkOrders(filters?: WOFilters): Promise<MobiWorkOrder[]> {
     let result = [..._workOrders];

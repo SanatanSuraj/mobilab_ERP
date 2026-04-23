@@ -23,7 +23,6 @@
  *     cancel-permissioned role. Finalises status=CANCELLED.
  */
 
-import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
 import type { FastifyRequest } from "fastify";
 import type {
@@ -45,12 +44,14 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  UnauthorizedError,
   ValidationError,
 } from "@instigenie/errors";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { approvalsRepo } from "./approvals.repository.js";
 import { requireUser } from "../../context/request-context.js";
+import type { EsignatureService } from "../esignature/service.js";
 
 const REQUEST_SORTS: Record<string, string> = {
   createdAt: "created_at",
@@ -91,30 +92,47 @@ function pgCodeOf(err: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * SHA-256 hash of { payload, userId, actedAt, nonce }. We store only the hex
- * so auditors can verify by re-hashing the user's signed payload + recorded
- * actedAt; the nonce makes pre-image attacks impractical.
- */
-function computeESignatureHash(input: {
-  payload: string;
-  userId: string;
-  actedAt: string;
-  nonce: string;
-}): string {
-  const h = createHash("sha256");
-  h.update(input.payload);
-  h.update("\x00");
-  h.update(input.userId);
-  h.update("\x00");
-  h.update(input.actedAt);
-  h.update("\x00");
-  h.update(input.nonce);
-  return h.digest("hex");
+export interface ApprovalsServiceDeps {
+  pool: pg.Pool;
+  /**
+   * Phase 4 §4.2 — re-entered password + HMAC-SHA256 hash for any
+   * approval step with requires_e_signature = true. Optional so the
+   * Phase 3 gates that hand-roll the service without going through
+   * the bootstrap still compile; when absent, any act() call against
+   * a requires-e-signature step throws ValidationError before
+   * touching the DB, which is strictly safer than silently skipping.
+   */
+  esignature?: EsignatureService;
+}
+
+/** Type-guard for the overloaded constructor. pg.Pool has no `pool` own
+ *  key, so this discriminates cleanly without instanceof coupling. */
+function isApprovalsServiceDeps(
+  x: ApprovalsServiceDeps | pg.Pool,
+): x is ApprovalsServiceDeps {
+  return typeof x === "object" && x !== null && "pool" in x;
 }
 
 export class ApprovalsService {
-  constructor(private readonly pool: pg.Pool) {}
+  private readonly pool: pg.Pool;
+  private readonly esignature: EsignatureService | null;
+
+  // Two accepted shapes so Phase 3 gates (which pre-date §4.2 and hand
+  // the service a bare pool) keep compiling. Phase 4 callers pass a
+  // deps object so the EsignatureService can be injected.
+  //
+  // When the bare-pool form is used, `esignature` is null and any
+  // requires_e_signature step raises ValidationError before touching
+  // the DB — a strictly safer default than silently proceeding.
+  constructor(deps: ApprovalsServiceDeps | pg.Pool) {
+    if (isApprovalsServiceDeps(deps)) {
+      this.pool = deps.pool;
+      this.esignature = deps.esignature ?? null;
+    } else {
+      this.pool = deps;
+      this.esignature = null;
+    }
+  }
 
   // ── Chain definitions ─────────────────────────────────────────────────────
 
@@ -353,21 +371,55 @@ export class ApprovalsService {
           `this step requires role=${step.roleId}; you hold [${user.roles.join(", ")}]`,
         );
       }
-      if (step.requiresESignature && !payload.eSignaturePayload) {
-        throw new ValidationError(
-          "this step requires an e-signature — eSignaturePayload is required",
-        );
+      if (step.requiresESignature) {
+        if (!payload.eSignaturePayload) {
+          throw new ValidationError(
+            "this step requires an e-signature — eSignaturePayload is required",
+          );
+        }
+        if (!payload.eSignaturePassword) {
+          throw new ValidationError(
+            "this step requires an e-signature — eSignaturePassword is required",
+          );
+        }
+        if (!this.esignature) {
+          // Boot misconfiguration (EsignatureService not injected). Fail
+          // closed rather than silently persisting an unsigned step.
+          throw new ValidationError(
+            "this step requires an e-signature but the server is not configured for electronic signatures",
+          );
+        }
+        if (!user.identityId) {
+          // Session is vendor-admin or a pre-§4.2 token without the
+          // `idn` claim — cannot resolve the password_hash to compare
+          // against.
+          throw new UnauthorizedError(
+            "e-signature requires a tenant-user session; re-login and retry",
+          );
+        }
       }
 
       const actedAt = new Date().toISOString();
-      const eSignatureHash = payload.eSignaturePayload
-        ? computeESignatureHash({
-            payload: payload.eSignaturePayload,
-            userId: user.id,
-            actedAt,
-            nonce: randomUUID(),
-          })
-        : null;
+      let eSignatureHash: string | null = null;
+      if (
+        step.requiresESignature &&
+        payload.eSignaturePayload &&
+        payload.eSignaturePassword &&
+        this.esignature &&
+        user.identityId
+      ) {
+        // Password verification + HMAC-SHA256 live in EsignatureService
+        // so the §9.5 policy lives in exactly one file. Throws
+        // UnauthorizedError on bad password — propagates out of
+        // withRequest without advancing the step.
+        const { hash } = await this.esignature.verifyAndHash({
+          userIdentityId: user.identityId,
+          password: payload.eSignaturePassword,
+          reason: payload.eSignaturePayload,
+          actedAt,
+        });
+        eSignatureHash = hash;
+      }
 
       const newStatus: "APPROVED" | "REJECTED" =
         payload.action === "APPROVE" ? "APPROVED" : "REJECTED";
@@ -378,6 +430,11 @@ export class ApprovalsService {
         {
           status: newStatus,
           actedBy: user.id,
+          // Pass the same ISO-8601 string that went into the e-sig
+          // hash so auditors can recompute against a single consistent
+          // timestamp — see updateStepDecision's docstring for the
+          // rationale.
+          actedAt,
           comment: payload.comment ?? null,
           eSignatureHash,
         },

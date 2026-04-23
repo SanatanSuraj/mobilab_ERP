@@ -65,18 +65,18 @@ export type AuthUser = {
 
 /** Instigenie staff personas — one per role for dev/demo mode. */
 export const MOCK_USERS_BY_ROLE: Record<UserRole, AuthUser> = {
-  SUPER_ADMIN:        { id: "u0",  name: "Admin User",      email: "admin@mobilab.in",    avatar: "AU" },
-  MANAGEMENT:         { id: "u1",  name: "Chetan (HOD)",    email: "chetan@mobilab.in",   avatar: "CH" },
-  SALES_REP:          { id: "u2",  name: "Priya Sharma",    email: "priya@mobilab.in",    avatar: "PS" },
-  SALES_MANAGER:      { id: "u3",  name: "Rahul Mehta",     email: "rahul.m@mobilab.in",  avatar: "RM" },
-  FINANCE:            { id: "u4",  name: "Anita Das",       email: "anita@mobilab.in",    avatar: "AD" },
-  PRODUCTION:         { id: "u5",  name: "Shubham (T1)",    email: "shubham@mobilab.in",  avatar: "SH" },
-  PRODUCTION_MANAGER: { id: "u6",  name: "Chetan (HOD)",    email: "chetan@mobilab.in",   avatar: "CH" },
-  RD:                 { id: "u7",  name: "R&D Lead",        email: "rd@mobilab.in",       avatar: "RD" },
-  QC_INSPECTOR:       { id: "u8",  name: "Sanju (T1)",      email: "sanju@mobilab.in",    avatar: "SJ" },
-  QC_MANAGER:         { id: "u9",  name: "QC Manager",      email: "qc@mobilab.in",       avatar: "QM" },
-  STORES:             { id: "u10", name: "Stores Manager",  email: "stores@mobilab.in",   avatar: "SM" },
-  CUSTOMER:           { id: "u11", name: "Customer Portal", email: "portal@mobilab.in",   avatar: "CP" },
+  SUPER_ADMIN:        { id: "u0",  name: "Admin User",      email: "admin@instigenie.in",    avatar: "AU" },
+  MANAGEMENT:         { id: "u1",  name: "Chetan (HOD)",    email: "chetan@instigenie.in",   avatar: "CH" },
+  SALES_REP:          { id: "u2",  name: "Priya Sharma",    email: "priya@instigenie.in",    avatar: "PS" },
+  SALES_MANAGER:      { id: "u3",  name: "Rahul Mehta",     email: "rahul.m@instigenie.in",  avatar: "RM" },
+  FINANCE:            { id: "u4",  name: "Anita Das",       email: "anita@instigenie.in",    avatar: "AD" },
+  PRODUCTION:         { id: "u5",  name: "Shubham (T1)",    email: "shubham@instigenie.in",  avatar: "SH" },
+  PRODUCTION_MANAGER: { id: "u6",  name: "Chetan (HOD)",    email: "chetan@instigenie.in",   avatar: "CH" },
+  RD:                 { id: "u7",  name: "R&D Lead",        email: "rd@instigenie.in",       avatar: "RD" },
+  QC_INSPECTOR:       { id: "u8",  name: "Sanju (T1)",      email: "sanju@instigenie.in",    avatar: "SJ" },
+  QC_MANAGER:         { id: "u9",  name: "QC Manager",      email: "qc@instigenie.in",       avatar: "QM" },
+  STORES:             { id: "u10", name: "Stores Manager",  email: "stores@instigenie.in",   avatar: "SM" },
+  CUSTOMER:           { id: "u11", name: "Customer Portal", email: "portal@instigenie.in",   avatar: "CP" },
 };
 
 /**
@@ -158,7 +158,7 @@ export const MOCK_PERMISSIONS_BY_ROLE: Record<UserRole, Permission[]> = {
 };
 
 /** Default org for dev/demo — real value comes from JWT claims. */
-const MOCK_ORG_ID = "org_mobilab";
+const MOCK_ORG_ID = "org_instigenie";
 
 // ─── Store Shape ─────────────────────────────────────────────────────────────
 

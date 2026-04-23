@@ -19,7 +19,7 @@ import {
   type MobiStageLog,
   type LineStageTemplate,
   type MobiDeviceID,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import {
   AlertTriangle,
   Users,

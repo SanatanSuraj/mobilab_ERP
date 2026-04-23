@@ -258,6 +258,13 @@ export const StockLedgerEntrySchema = z.object({
   unitCost: decimalStr.nullable(),
   postedBy: uuid.nullable(),
   postedAt: z.string(),
+  /**
+   * Phase 4 §9.5 — HMAC-SHA256 captured when the txn represents a
+   * critical action (SCRAP = "stock write-off", CUSTOMER_ISSUE =
+   * "device release"). NULL for all other txn_types and for rows
+   * posted before Phase 4 §4.2c shipped.
+   */
+  signatureHash: z.string().nullable(),
   createdAt: z.string(),
 });
 export type StockLedgerEntry = z.infer<typeof StockLedgerEntrySchema>;
@@ -292,6 +299,16 @@ export const PostStockLedgerEntrySchema = z.object({
   serialNo: z.string().trim().max(64).optional(),
   reason: z.string().trim().max(500).optional(),
   unitCost: decimalStr.optional(),
+  /**
+   * Phase 4 §9.5 — password re-entry for critical-action txn_types.
+   * Required by the service when EsignatureService is wired AND
+   * txnType is in {SCRAP, CUSTOMER_ISSUE}; ignored otherwise. The
+   * server HMAC-SHA256s (eSignatureReason || userIdentityId ||
+   * postedAt) with ESIGNATURE_PEPPER and stores the hex on
+   * stock_ledger.signature_hash.
+   */
+  eSignaturePassword: z.string().min(1).max(256).optional(),
+  eSignatureReason: z.string().trim().min(1).max(500).optional(),
 });
 export type PostStockLedgerEntry = z.infer<typeof PostStockLedgerEntrySchema>;
 

@@ -21,9 +21,11 @@
  *
  *   4. Role guard — a FINANCE user acting on a PM step gets ForbiddenError.
  *
- *   5. E-signature — device_qc_final chain requires `requires_e_signature`;
- *      missing payload raises ValidationError, present payload produces a
- *      hex SHA-256 hash stored on the step.
+ *   5. E-signature required — device_qc_final chain has
+ *      `requires_e_signature=true`; missing payload raises
+ *      ValidationError. The full e-signature credential flow (password
+ *      re-entry + HMAC hash persistence) is covered by Gate 42
+ *      (Phase 4 §4.2); this gate only asserts the presence check.
  *
  *   6. Deal discount gate — creating a deal_discount with amount ≤ 15
  *      raises ValidationError (no chain needed for small discounts).
@@ -94,7 +96,7 @@ function makeRequest(role: keyof typeof USERS): ServiceReq {
     user: {
       id: USERS[role],
       orgId: DEV_ORG_ID,
-      email: `${role.toLowerCase()}@mobilab.local`,
+      email: `${role.toLowerCase()}@instigenie.local`,
       roles: [role] as Role[],
       permissions: perms,
       audience: AUDIENCE.internal,
@@ -112,7 +114,7 @@ function makeRequestWithoutCancel(role: keyof typeof USERS): ServiceReq {
     user: {
       id: USERS[role],
       orgId: DEV_ORG_ID,
-      email: `${role.toLowerCase()}@mobilab.local`,
+      email: `${role.toLowerCase()}@instigenie.local`,
       roles: [role] as Role[],
       permissions: perms,
       audience: AUDIENCE.internal,
@@ -361,7 +363,12 @@ describe("gate-28 (arch phase 3.3): approval workflows", () => {
       ).rejects.toBeInstanceOf(ValidationError);
     });
 
-    it("accepts act() with a payload and stores a SHA-256 hex hash", async () => {
+    it("rejects act() that carries a payload but no password (§4.2 tightened policy)", async () => {
+      // Phase 4 §4.2 requires BOTH eSignaturePayload (what the user
+      // attested to) AND eSignaturePassword (the re-entered credential).
+      // Gate 28 instantiates ApprovalsService without an
+      // EsignatureService, so every requires-e-signature branch here
+      // must reject — proving the guard fires before any DB write.
       const entityId = gate28EntityId("41");
       const detail = await approvals.createRequest(
         makeRequest("QC_INSPECTOR"),
@@ -371,21 +378,13 @@ describe("gate-28 (arch phase 3.3): approval workflows", () => {
           currency: "INR",
         },
       );
-      const after = await approvals.act(
-        makeRequest("QC_INSPECTOR"),
-        detail.request.id,
-        {
+      await expect(
+        approvals.act(makeRequest("QC_INSPECTOR"), detail.request.id, {
           action: "APPROVE",
           comment: "device cleared",
           eSignaturePayload: "I, QC Inspector, certify device release.",
-        },
-      );
-      expect(after.request.status).toBe("APPROVED");
-      const step = after.steps[0]!;
-      expect(step.eSignatureHash).toMatch(/^[0-9a-f]{64}$/);
-      // Transition also carries the hash.
-      const approveTxn = after.transitions.find((t) => t.action === "APPROVE")!;
-      expect(approveTxn.eSignatureHash).toBe(step.eSignatureHash);
+        }),
+      ).rejects.toBeInstanceOf(ValidationError);
     });
   });
 

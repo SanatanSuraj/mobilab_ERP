@@ -81,7 +81,7 @@ function makeRequest(
     user: {
       id: userId,
       orgId,
-      email: "salesmgr@mobilab.local",
+      email: "salesmgr@instigenie.local",
       roles: ["SALES_MANAGER"] as Role[],
       permissions: new Set<Permission>(),
       audience: AUDIENCE.internal,

@@ -39,7 +39,7 @@
 
 ### 1.1 What We're Building
 
-**Instigenie ERP** — a multi-tenant SaaS ERP platform. **Mobilab Diagnostic Instruments Pvt. Ltd.** is the reference (pilot) tenant that drives the initial feature set, but the platform is built to host many tenants with the same domain shape. Core modules:
+**Instigenie ERP** — a multi-tenant SaaS ERP platform. **Instigenie Diagnostic Instruments Pvt. Ltd.** is the reference (pilot) tenant that drives the initial feature set, but the platform is built to host many tenants with the same domain shape. Core modules:
 
 - **CRM** — leads, accounts, contacts, companies, deals, pipeline, quotations, orders, tickets, reports
 - **Production** — products, BOMs, ECN, work orders (15-state lifecycle), WIP stages, device IDs (incl. `RECALLED`), OEE, BMR (dual-signature), scrap (root-cause), downtime (categorised), assembly lines L1–L5, operator competency, shop-floor live view, MRP
@@ -1611,7 +1611,7 @@ packages/contracts/src/
 
 ### 13.2 Production Module (Phase 2 + 3 + 4)
 
-The production module is the most state-rich surface of the ERP. For the Mobilab tenant (the pilot customer) it models the Mobicase diagnostic suite (MBA analyser, MBM mixer, MBC cube, MCC final case, CFG centrifuge) across five assembly lines (L1–L5), two shifts, and operators with tiered competencies — but the schema is generic and is driven by per-tenant product/BOM/line configuration.
+The production module is the most state-rich surface of the ERP. For the Instigenie tenant (the pilot customer) it models the Mobicase diagnostic suite (MBA analyser, MBM mixer, MBC cube, MCC final case, CFG centrifuge) across five assembly lines (L1–L5), two shifts, and operators with tiered competencies — but the schema is generic and is driven by per-tenant product/BOM/line configuration.
 
 **Tables:**
 - Core: `products`, `bom_versions`, `bom_lines`, `ecn_logs`
@@ -2272,7 +2272,7 @@ Current prototype is at `/Users/sanatansuraj/Desktop/crm _prototype/crm-prototyp
 - All `components/` — shadcn/ui components already wired
 - All React Query hooks — same surface, different data source
 - Shared types in `src/types/` — migrate to `packages/types/`
-- Mobilab seed data in `src/data/mobilab-mock.ts` — convert to SQL seeds in `ops/sql/seed/`
+- Instigenie seed data in `src/data/instigenie-mock.ts` — convert to SQL seeds in `ops/sql/seed/`
 
 ### B.2 What Changes
 
@@ -2283,7 +2283,7 @@ Current prototype is at `/Users/sanatansuraj/Desktop/crm _prototype/crm-prototyp
 | Validation in forms (ad-hoc) | Zod schemas imported from `packages/contracts/` |
 | Hardcoded user | Real login + JWT in memory (not localStorage) |
 | No auth middleware | `middleware.ts` redirects to `/login` if no token |
-| Direct imports from `@/data/mobilab-mock` | React Query hooks calling real API |
+| Direct imports from `@/data/instigenie-mock` | React Query hooks calling real API |
 
 ### B.3 Migration Order (Phase 2, per module)
 
@@ -2399,7 +2399,7 @@ These folders may be archived under a `_frozen/` prefix if they create navigatio
 2. Update all imports (`@/services/mfg.service` → `@/services/production.service`)
 3. Rename hook: `src/hooks/useMfg.ts` → `src/hooks/useProduction.ts`
 4. Rename component dir: `src/components/mfg/` → `src/components/production/` (D.4)
-5. Delete `src/data/mobilab-mock.ts` when the last page migrates (CRM + Inventory + Production all on real API).
+5. Delete `src/data/instigenie-mock.ts` when the last page migrates (CRM + Inventory + Production all on real API).
 
 ### D.7 Consolidation Acceptance Gate
 

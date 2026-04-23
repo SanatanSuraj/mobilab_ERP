@@ -13,6 +13,17 @@ export interface Env {
   mailReplyTo: string | null;
   /** Hard override — when true, never call the provider even if a key is set. */
   emailDisabled: boolean;
+  /**
+   * MinIO / S3 endpoint, e.g. "http://localhost:9000" for the local dev
+   * container. Phase 4.1a uses this to persist rendered PDFs.
+   */
+  minioEndpoint: string;
+  minioAccessKey: string;
+  minioSecretKey: string;
+  /** Bucket for rendered PDFs (ARCHITECTURE.md §4.1). */
+  pdfBucket: string;
+  /** Brand name rendered in the PDF header. Default "InstiGenie". */
+  brandName: string;
 }
 
 function required(name: string): string {
@@ -36,5 +47,10 @@ export function loadEnv(): Env {
       process.env.MAIL_FROM ?? "InstiGenie <no-reply@instigenie.local>",
     mailReplyTo: process.env.MAIL_REPLY_TO ?? null,
     emailDisabled,
+    minioEndpoint: process.env.MINIO_ENDPOINT ?? "http://localhost:9000",
+    minioAccessKey: process.env.MINIO_ACCESS_KEY ?? "instigenie",
+    minioSecretKey: process.env.MINIO_SECRET_KEY ?? "instigenie_dev_minio",
+    pdfBucket: process.env.PDF_BUCKET ?? "instigenie-pdfs",
+    brandName: process.env.BRAND_NAME ?? "InstiGenie",
   };
 }

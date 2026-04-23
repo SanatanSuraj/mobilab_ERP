@@ -26,6 +26,7 @@ import {
   runHandlersForEvent,
   type EwbClientLike,
   type WhatsAppClientLike,
+  type EnqueuePdfRender,
 } from "../handlers/index.js";
 
 export interface OutboxJob {
@@ -50,6 +51,8 @@ export interface OutboxDispatchDeps {
   clients?: {
     ewb?: EwbClientLike;
     whatsapp?: WhatsAppClientLike;
+    /** Phase 4.1 — adapter wrapping the pdf-render BullMQ Queue. */
+    enqueuePdfRender?: EnqueuePdfRender;
   };
 }
 

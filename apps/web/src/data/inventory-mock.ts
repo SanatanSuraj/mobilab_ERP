@@ -1,5 +1,5 @@
 // ─── Inventory & Warehouse Mock Data ────────────────────────────────────────
-// Company: Mobilab Instruments (medical diagnostics)
+// Company: Instigenie Instruments (medical diagnostics)
 // Warehouses: Guwahati HQ (primary), Noida (secondary)
 
 export type TrackingType = "NONE" | "BATCH" | "SERIAL";

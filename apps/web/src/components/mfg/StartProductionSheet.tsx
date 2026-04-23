@@ -43,7 +43,7 @@ import {
   isVendorSourcedCode,
   type MobicaseProduct,
   type AssemblyLine,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 
 type BadgeKind = "DEVICE" | "MODULE_INHOUSE" | "MODULE_VENDOR";
 function classifyForBadge(code: MobicaseProduct): BadgeKind {

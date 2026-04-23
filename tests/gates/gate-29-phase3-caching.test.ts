@@ -20,7 +20,7 @@
  *      Invalidation (SCAN-based) blows away one tenant's slice without
  *      touching a sibling tenant's slice.
  *
- * Runs against the dev `mobilab-redis-cache` container on 6382.
+ * Runs against the dev `instigenie-redis-cache` container on 6382.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";

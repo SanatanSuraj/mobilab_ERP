@@ -38,6 +38,7 @@ import { z } from "zod";
 import {
   NotFoundError,
   ShortageError,
+  UnauthorizedError,
   ValidationError,
 } from "@instigenie/errors";
 import { paginated } from "@instigenie/contracts";
@@ -47,6 +48,7 @@ import { stockRepo } from "./stock.repository.js";
 import { itemsRepo } from "./items.repository.js";
 import { warehousesRepo } from "./warehouses.repository.js";
 import { requireUser } from "../../context/request-context.js";
+import type { EsignatureService } from "../esignature/service.js";
 
 type LedgerListQuery = z.infer<typeof StockLedgerListQuerySchema>;
 type SummaryListQuery = z.infer<typeof StockSummaryListQuerySchema>;
@@ -91,14 +93,69 @@ const ISSUE_TYPES: readonly StockTxnType[] = [
   "CUSTOMER_ISSUE",
 ];
 
+/**
+ * Phase 4 §9.5 — the subset of stock-ledger txn types that count as
+ * "critical actions" and therefore require password re-entry.
+ *
+ *   SCRAP           — "stock write-off" per §9.5. Irreversible material
+ *                     destruction.
+ *   CUSTOMER_ISSUE  — "device release" per §9.5. In the current Phase 2
+ *                     data model, devices leave the facility via a
+ *                     CUSTOMER_ISSUE ledger row; the dedicated device_ids
+ *                     table with 13-state lifecycle lands later.
+ *
+ * Non-critical issue types (WO_ISSUE, TRANSFER_OUT, RTV_OUT) still post
+ * without e-sig — they're internal movements, not compliance-gated
+ * events. If you need to widen this set, add a justification in the
+ * ARCHITECTURE.md critical-action list and extend Gate 43.
+ */
+const CRITICAL_TXN_TYPES: readonly StockTxnType[] = [
+  "SCRAP",
+  "CUSTOMER_ISSUE",
+];
+
+function isCriticalTxn(txnType: StockTxnType): boolean {
+  return CRITICAL_TXN_TYPES.includes(txnType);
+}
+
 function parseQty(q: string): number {
   // Contract already validated the string; Number() is safe here but we
   // keep the decimal string for storage.
   return Number.parseFloat(q);
 }
 
+export interface StockServiceDeps {
+  pool: pg.Pool;
+  /**
+   * Phase 4 §9.5 — HMAC-SHA256 seal for SCRAP and CUSTOMER_ISSUE
+   * postings. When absent the service still works, but posts of
+   * critical txn_types fail closed with ValidationError before
+   * touching the DB — strictly safer than silently skipping the seal.
+   */
+  esignature?: EsignatureService;
+}
+
+function isStockServiceDeps(
+  x: StockServiceDeps | pg.Pool,
+): x is StockServiceDeps {
+  return typeof x === "object" && x !== null && "pool" in x;
+}
+
 export class StockService {
-  constructor(private readonly pool: pg.Pool) {}
+  private readonly pool: pg.Pool;
+  private readonly esignature: EsignatureService | null;
+
+  // Two accepted shapes so Phase 2/3 tests that pre-date §4.2c and
+  // construct `new StockService(pool)` still work.
+  constructor(poolOrDeps: pg.Pool | StockServiceDeps) {
+    if (isStockServiceDeps(poolOrDeps)) {
+      this.pool = poolOrDeps.pool;
+      this.esignature = poolOrDeps.esignature ?? null;
+    } else {
+      this.pool = poolOrDeps;
+      this.esignature = null;
+    }
+  }
 
   // ── Ledger ────────────────────────────────────────────────────────────────
 
@@ -107,6 +164,41 @@ export class StockService {
     input: PostStockLedgerEntry
   ): Promise<StockLedgerEntry> {
     const user = requireUser(req);
+
+    // ─── Phase 4 §9.5 — critical-action gate ─────────────────────────────
+    // SCRAP ("stock write-off") and CUSTOMER_ISSUE ("device release")
+    // require password re-entry. We check BEFORE opening the tx so a
+    // bad payload doesn't even reserve a row-lock on stock_summary.
+    //
+    // Rule layering:
+    //   - critical txn + deps present + missing fields        → ValidationError
+    //   - critical txn + deps present + missing identity      → UnauthorizedError
+    //   - critical txn + deps MISSING (misconfigured server)  → ValidationError (fail closed)
+    //   - non-critical txn                                    → skip; e-sig fields ignored
+    const isCritical = isCriticalTxn(input.txnType);
+    if (isCritical) {
+      if (!this.esignature) {
+        throw new ValidationError(
+          `${input.txnType} is a critical action and server is not configured for electronic signatures`,
+        );
+      }
+      if (!input.eSignaturePassword) {
+        throw new ValidationError(
+          `eSignaturePassword is required for ${input.txnType}`,
+        );
+      }
+      if (!input.eSignatureReason) {
+        throw new ValidationError(
+          `eSignatureReason is required for ${input.txnType}`,
+        );
+      }
+      if (!user.identityId) {
+        throw new UnauthorizedError(
+          "e-signature requires a tenant-user session",
+        );
+      }
+    }
+
     return withRequest(req, this.pool, async (client) => {
       // Validate sign vs txn_type.
       const qty = parseQty(input.quantity);
@@ -155,7 +247,31 @@ export class StockService {
         }
       }
 
-      return stockRepo.postLedgerEntry(client, user.orgId, user.id, input);
+      // Phase 4 §9.5 — compute the seal just before the INSERT so the
+      // bound actedAt is the very same ISO string we hand to the repo.
+      // Non-critical txn_types produce a NULL signature_hash.
+      const postedAtIso = new Date().toISOString();
+      let signatureHash: string | null = null;
+      if (
+        isCritical &&
+        this.esignature &&
+        input.eSignaturePassword &&
+        input.eSignatureReason &&
+        user.identityId
+      ) {
+        const { hash } = await this.esignature.verifyAndHash({
+          userIdentityId: user.identityId,
+          password: input.eSignaturePassword,
+          reason: input.eSignatureReason,
+          actedAt: postedAtIso,
+        });
+        signatureHash = hash;
+      }
+
+      return stockRepo.postLedgerEntry(client, user.orgId, user.id, input, {
+        postedAt: postedAtIso,
+        signatureHash,
+      });
     });
   }
 

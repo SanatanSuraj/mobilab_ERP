@@ -57,3 +57,28 @@ export const jobDurationMs = new Histogram({
   buckets: [10, 50, 100, 500, 1000, 5000, 15000, 60000, 300000],
   registers: [registry],
 });
+
+/**
+ * ARCHITECTURE.md §10.3 CRITICAL alert `erp_audit_chain_break` fires when
+ * the daily qc_certs hash-chain sweep (see apps/worker audit-hashchain
+ * processor, Phase 4 §4.2) finds one or more tampered chains. The counter
+ * is bumped once per (org_id) detected as broken during a run — this is
+ * a compliance incident, not a performance metric.
+ *
+ * Alertmanager rule (abridged):
+ *   rate(erp_audit_chain_break_total[15m]) > 0   →   page on-call
+ */
+export const auditChainBreakTotal = new Counter({
+  name: "erp_audit_chain_break_total",
+  help: "Hash-chain break events detected by the daily audit sweep, by org.",
+  labelNames: ["org_id"] as const,
+  registers: [registry],
+});
+
+/** Wall-clock duration of the full audit sweep — not per-org. */
+export const auditChainRunDurationMs = new Histogram({
+  name: "instigenie_audit_chain_run_duration_ms",
+  help: "End-to-end hash-chain audit sweep duration.",
+  buckets: [100, 500, 1000, 5000, 15000, 60000, 300000],
+  registers: [registry],
+});

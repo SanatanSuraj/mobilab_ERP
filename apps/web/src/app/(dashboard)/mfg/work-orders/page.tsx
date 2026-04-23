@@ -39,7 +39,7 @@ import {
   isFinishedDeviceCode,
   isModuleCode,
   isVendorSourcedCode,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import { Search, AlertTriangle, Info } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -531,7 +531,7 @@ export default function WorkOrdersPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Work Orders"
-        description="Mobilab Manufacturing — Mobicase Diagnostic Suite | ISO 13485:2016"
+        description="Instigenie Manufacturing — Mobicase Diagnostic Suite | ISO 13485:2016"
       />
 
       {/* Status Badge Legend */}

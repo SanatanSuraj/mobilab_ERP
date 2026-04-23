@@ -14,7 +14,7 @@ import {
   getOEEAvg,
   isWOOverdue,
   getWOProgress,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import { formatCurrency, formatDate, daysDiff } from "@/lib/format";
 
 export function ManagementDashboard() {

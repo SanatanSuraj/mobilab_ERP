@@ -47,6 +47,7 @@ interface StockLedgerRow {
   unit_cost: string | null;
   posted_by: string | null;
   posted_at: Date;
+  signature_hash: string | null;
   created_at: Date;
 }
 
@@ -68,6 +69,7 @@ function rowToLedgerEntry(r: StockLedgerRow): StockLedgerEntry {
     unitCost: r.unit_cost,
     postedBy: r.posted_by,
     postedAt: r.posted_at.toISOString(),
+    signatureHash: r.signature_hash,
     createdAt: r.created_at.toISOString(),
   };
 }
@@ -75,7 +77,7 @@ function rowToLedgerEntry(r: StockLedgerRow): StockLedgerEntry {
 const LEDGER_COLS = `id, org_id, item_id, warehouse_id, quantity, uom,
                      txn_type, ref_doc_type, ref_doc_id, ref_line_id,
                      batch_no, serial_no, reason, unit_cost, posted_by,
-                     posted_at, created_at`;
+                     posted_at, signature_hash, created_at`;
 
 export interface StockLedgerListFilters {
   itemId?: string;
@@ -195,19 +197,35 @@ export const stockRepo = {
    * updates the projection atomically in the same transaction.
    *
    * `postedBy` should be the current user id (from requireUser(req)).
+   *
+   * `opts.postedAt` / `opts.signatureHash` (Phase 4 §9.5):
+   *   - When the service has an EsignatureService wired AND the
+   *     txn_type is in the critical set (SCRAP, CUSTOMER_ISSUE), the
+   *     service computes an HMAC-SHA256 bound to an ISO timestamp and
+   *     hands BOTH values here so the stored row uses the exact same
+   *     string that went into the hash. An auditor recomputing the
+   *     HMAC against (reason || userIdentityId || posted_at) gets back
+   *     the stored signature_hash bit-for-bit.
+   *   - When opts is omitted the DB defaults fire (posted_at = now(),
+   *     signature_hash = NULL) for pre-§4.2c callers that haven't
+   *     adopted the deps-struct constructor yet.
    */
   async postLedgerEntry(
     client: PoolClient,
     orgId: string,
     postedBy: string,
-    input: PostStockLedgerEntry
+    input: PostStockLedgerEntry,
+    opts?: { postedAt: string; signatureHash: string | null },
   ): Promise<StockLedgerEntry> {
     const { rows } = await client.query<StockLedgerRow>(
       `INSERT INTO stock_ledger (
          org_id, item_id, warehouse_id, quantity, uom, txn_type,
          ref_doc_type, ref_doc_id, ref_line_id, batch_no, serial_no,
-         reason, unit_cost, posted_by
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         reason, unit_cost, posted_by,
+         posted_at, signature_hash
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+                 COALESCE($15::timestamptz, now()),
+                 $16)
        RETURNING ${LEDGER_COLS}`,
       [
         orgId,
@@ -224,6 +242,8 @@ export const stockRepo = {
         input.reason ?? null,
         input.unitCost ?? null,
         postedBy,
+        opts?.postedAt ?? null,
+        opts?.signatureHash ?? null,
       ]
     );
     return rowToLedgerEntry(rows[0]!);

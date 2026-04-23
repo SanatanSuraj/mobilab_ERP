@@ -1,7 +1,7 @@
 // ─── Manufacturing & Production Module Mock Data ─────────────────────────────
-// Company: Mobilab Instruments — Analyzers, CBL Devices, Reagents
+// Company: Instigenie Instruments — Analyzers, CBL Devices, Reagents
 
-export type ProductFamily = "MOBILAB_INSTRUMENT" | "CBL_DEVICE" | "REAGENT";
+export type ProductFamily = "INSTIGENIE_INSTRUMENT" | "CBL_DEVICE" | "REAGENT";
 export type BOMStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED" | "OBSOLETE";
 export type WOStatus =
   | "PLANNED" | "MATERIAL_CHECK" | "IN_PROGRESS"
@@ -23,9 +23,9 @@ export interface MfgProduct {
 }
 
 export const mfgProducts: MfgProduct[] = [
-  { id: "mp1", productCode: "MBA-HA500", name: "Hematology Analyzer HA-500", family: "MOBILAB_INSTRUMENT", hasSerialTracking: true, activeBomVersion: "v3", standardCycleDays: 8 },
-  { id: "mp2", productCode: "MBA-BA200", name: "Biochemistry Analyzer BA-200", family: "MOBILAB_INSTRUMENT", hasSerialTracking: true, activeBomVersion: "v2", standardCycleDays: 8 },
-  { id: "mp3", productCode: "MBM-MX100", name: "Vortex Mixer MX-100", family: "MOBILAB_INSTRUMENT", hasSerialTracking: true, activeBomVersion: "v1", standardCycleDays: 5 },
+  { id: "mp1", productCode: "MBA-HA500", name: "Hematology Analyzer HA-500", family: "INSTIGENIE_INSTRUMENT", hasSerialTracking: true, activeBomVersion: "v3", standardCycleDays: 8 },
+  { id: "mp2", productCode: "MBA-BA200", name: "Biochemistry Analyzer BA-200", family: "INSTIGENIE_INSTRUMENT", hasSerialTracking: true, activeBomVersion: "v2", standardCycleDays: 8 },
+  { id: "mp3", productCode: "MBM-MX100", name: "Vortex Mixer MX-100", family: "INSTIGENIE_INSTRUMENT", hasSerialTracking: true, activeBomVersion: "v1", standardCycleDays: 5 },
   { id: "mp4", productCode: "CBL-GS300", name: "CBL Glucometer Strip GS-300", family: "CBL_DEVICE", hasSerialTracking: true, activeBomVersion: "v2", standardCycleDays: 6 },
   { id: "mp5", productCode: "RGT-CBC500", name: "CBC Reagent Lot 500T", family: "REAGENT", hasSerialTracking: false, activeBomVersion: "v1", standardCycleDays: 4 },
   { id: "mp6", productCode: "RGT-LFT250", name: "LFT Reagent Lot 250T", family: "REAGENT", hasSerialTracking: false, activeBomVersion: "v1", standardCycleDays: 3 },
@@ -154,15 +154,15 @@ export interface WIPStageTemplate {
 }
 
 export const wipStageTemplates: WIPStageTemplate[] = [
-  // Mobilab Instrument stages
-  { id: "wst1", productFamily: "MOBILAB_INSTRUMENT", sequenceNumber: 1, stageName: "Component Kitting", requiresQCSignOff: false, expectedDurationHours: 2, responsibleRole: "Stores" },
-  { id: "wst2", productFamily: "MOBILAB_INSTRUMENT", sequenceNumber: 2, stageName: "PCB Sub-Assembly", requiresQCSignOff: true, expectedDurationHours: 4, responsibleRole: "Production" },
-  { id: "wst3", productFamily: "MOBILAB_INSTRUMENT", sequenceNumber: 3, stageName: "Mechanical Assembly", requiresQCSignOff: false, expectedDurationHours: 3, responsibleRole: "Production" },
-  { id: "wst4", productFamily: "MOBILAB_INSTRUMENT", sequenceNumber: 4, stageName: "Main Integration", requiresQCSignOff: false, expectedDurationHours: 4, responsibleRole: "Production" },
-  { id: "wst5", productFamily: "MOBILAB_INSTRUMENT", sequenceNumber: 5, stageName: "Electrical Testing", requiresQCSignOff: true, expectedDurationHours: 3, responsibleRole: "QC" },
-  { id: "wst6", productFamily: "MOBILAB_INSTRUMENT", sequenceNumber: 6, stageName: "Software/Firmware Load", requiresQCSignOff: false, expectedDurationHours: 1, responsibleRole: "Production" },
-  { id: "wst7", productFamily: "MOBILAB_INSTRUMENT", sequenceNumber: 7, stageName: "Burn-in / Soak Test", requiresQCSignOff: false, expectedDurationHours: 4, responsibleRole: "Production" },
-  { id: "wst8", productFamily: "MOBILAB_INSTRUMENT", sequenceNumber: 8, stageName: "Final QC", requiresQCSignOff: true, expectedDurationHours: 2, responsibleRole: "QC" },
+  // Instigenie Instrument stages
+  { id: "wst1", productFamily: "INSTIGENIE_INSTRUMENT", sequenceNumber: 1, stageName: "Component Kitting", requiresQCSignOff: false, expectedDurationHours: 2, responsibleRole: "Stores" },
+  { id: "wst2", productFamily: "INSTIGENIE_INSTRUMENT", sequenceNumber: 2, stageName: "PCB Sub-Assembly", requiresQCSignOff: true, expectedDurationHours: 4, responsibleRole: "Production" },
+  { id: "wst3", productFamily: "INSTIGENIE_INSTRUMENT", sequenceNumber: 3, stageName: "Mechanical Assembly", requiresQCSignOff: false, expectedDurationHours: 3, responsibleRole: "Production" },
+  { id: "wst4", productFamily: "INSTIGENIE_INSTRUMENT", sequenceNumber: 4, stageName: "Main Integration", requiresQCSignOff: false, expectedDurationHours: 4, responsibleRole: "Production" },
+  { id: "wst5", productFamily: "INSTIGENIE_INSTRUMENT", sequenceNumber: 5, stageName: "Electrical Testing", requiresQCSignOff: true, expectedDurationHours: 3, responsibleRole: "QC" },
+  { id: "wst6", productFamily: "INSTIGENIE_INSTRUMENT", sequenceNumber: 6, stageName: "Software/Firmware Load", requiresQCSignOff: false, expectedDurationHours: 1, responsibleRole: "Production" },
+  { id: "wst7", productFamily: "INSTIGENIE_INSTRUMENT", sequenceNumber: 7, stageName: "Burn-in / Soak Test", requiresQCSignOff: false, expectedDurationHours: 4, responsibleRole: "Production" },
+  { id: "wst8", productFamily: "INSTIGENIE_INSTRUMENT", sequenceNumber: 8, stageName: "Final QC", requiresQCSignOff: true, expectedDurationHours: 2, responsibleRole: "QC" },
   // CBL Device stages
   { id: "wst9", productFamily: "CBL_DEVICE", sequenceNumber: 1, stageName: "Component Kitting", requiresQCSignOff: false, expectedDurationHours: 1.5, responsibleRole: "Stores" },
   { id: "wst10", productFamily: "CBL_DEVICE", sequenceNumber: 2, stageName: "PCB Sub-Assembly", requiresQCSignOff: true, expectedDurationHours: 3, responsibleRole: "Production" },
@@ -255,7 +255,7 @@ export const enhancedWorkOrders: EnhancedWorkOrder[] = [
     productId: "mp1",
     productName: "Hematology Analyzer HA-500",
     productCode: "MBA-HA500",
-    productFamily: "MOBILAB_INSTRUMENT",
+    productFamily: "INSTIGENIE_INSTRUMENT",
     bomId: "bom1",
     bomVersion: "v3",
     quantity: 3,
@@ -298,7 +298,7 @@ export const enhancedWorkOrders: EnhancedWorkOrder[] = [
     productId: "mp2",
     productName: "Biochemistry Analyzer BA-200",
     productCode: "MBA-BA200",
-    productFamily: "MOBILAB_INSTRUMENT",
+    productFamily: "INSTIGENIE_INSTRUMENT",
     bomId: "bom3",
     bomVersion: "v2",
     quantity: 2,
@@ -373,7 +373,7 @@ export const enhancedWorkOrders: EnhancedWorkOrder[] = [
     productId: "mp1",
     productName: "Hematology Analyzer HA-500",
     productCode: "MBA-HA500",
-    productFamily: "MOBILAB_INSTRUMENT",
+    productFamily: "INSTIGENIE_INSTRUMENT",
     bomId: "bom1",
     bomVersion: "v3",
     quantity: 1,

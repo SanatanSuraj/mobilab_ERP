@@ -134,16 +134,32 @@ describe("gate-12: RLS coverage across every org_id table", () => {
     ).toEqual([]);
   });
 
-  it("every policy references app.current_org (no rogue USING clauses)", async () => {
+  it("every PERMISSIVE policy references app.current_org (no rogue USING clauses)", async () => {
     // Guard against a future policy that accidentally filters on
     // something other than the tenant GUC (e.g. someone types
     // `current_user` thinking it's the tenant).
+    //
+    // PERMISSIVE vs RESTRICTIVE:
+    //   - PERMISSIVE policies are OR'd; they establish the base
+    //     tenant-isolation gate and MUST bind to app.current_org.
+    //   - RESTRICTIVE policies are AND'd onto permissive ones
+    //     (§3.7 portal customer overlay, e.g. tickets_portal_customer in
+    //     ops/sql/rls/13-portal-rls.sql) and deliberately do NOT
+    //     reference app.current_org — the tenant gate is already
+    //     enforced by the permissive policy. Enforcing the check on them
+    //     would outlaw a legitimate RLS pattern. Phase 4 §4.1 RESTRICTIVE
+    //     policies (pdf_render_* — none yet) would behave the same way.
+    //
+    // We therefore assert: every *permissive* policy references
+    // app.current_org. The RESTRICTIVE overlays get to define whatever
+    // orthogonal predicate they need.
     const { rows } = await pool.query<{
       tablename: string;
       policyname: string;
+      permissive: string;
       qual: string | null;
     }>(
-      `SELECT tablename, policyname, qual
+      `SELECT tablename, policyname, permissive, qual
          FROM pg_policies
         WHERE schemaname = 'public'
           AND tablename  = ANY($1::text[])`,
@@ -151,12 +167,12 @@ describe("gate-12: RLS coverage across every org_id table", () => {
     );
     const bad = rows.filter(
       (r) =>
-        !r.qual ||
-        !r.qual.includes("app.current_org")
+        r.permissive === "PERMISSIVE" &&
+        (!r.qual || !r.qual.includes("app.current_org"))
     );
     expect(
       bad.map((r) => `${r.tablename}.${r.policyname}`),
-      `policies not bound to app.current_org: ${bad.map((r) => `${r.tablename}.${r.policyname}`).join(", ")}`
+      `permissive policies not bound to app.current_org: ${bad.map((r) => `${r.tablename}.${r.policyname}`).join(", ")}`
     ).toEqual([]);
   });
 });

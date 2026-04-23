@@ -1,10 +1,10 @@
--- Dev subscription for the Mobilab Dev org (Sprint 1B).
+-- Dev subscription for the Instigenie Dev org (Sprint 1B).
 --
 -- Attaches the dev tenant to the ENTERPRISE plan so every module is
 -- unlocked during local development. The period window is set to one
 -- year from seed time — long enough that nothing expires mid-sprint.
 --
--- Also backfills organizations.owner_identity_id to `admin@mobilab.local`
+-- Also backfills organizations.owner_identity_id to `admin@instigenie.local`
 -- so the dev tenant has a plausible root-admin identity, matching the
 -- shape Sprint 4's provisioning flow will produce.
 --
@@ -20,7 +20,7 @@ DECLARE
 BEGIN
   PERFORM set_config('app.current_org', v_org_id::text, true);
 
-  -- Backfill owner — the dev org was implicitly owned by admin@mobilab.local.
+  -- Backfill owner — the dev org was implicitly owned by admin@instigenie.local.
   UPDATE organizations
      SET owner_identity_id = v_admin_ident,
          status            = 'ACTIVE'   -- idempotent reassert on re-seed

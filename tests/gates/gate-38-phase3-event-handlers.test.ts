@@ -45,14 +45,14 @@ import {
 } from "@instigenie/worker/handlers";
 
 // ─── Test plumbing ───────────────────────────────────────────────────────
-// The running DB is mobilab-postgres on :5434 (see `docker ps`). Gates
+// The running DB is instigenie-postgres on :5434 (see `docker ps`). Gates
 // have historically run against an env-overridden URL — the default in
 // _helpers.ts points at a non-running `instigenie` DB. We inline the
-// mobilab URL here so the file is self-contained.
+// instigenie URL here so the file is self-contained.
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
-  "postgres://mobilab_app:mobilab_dev@localhost:5434/mobilab";
+  "postgres://instigenie_app:instigenie_dev@localhost:5434/instigenie";
 
 const ORG_ID = "00000000-0000-0000-0000-00000000a001";
 const PRODUCT_ID = "00000000-0000-0000-0000-000000fc0001"; // ECG Patient Monitor v2
@@ -61,8 +61,8 @@ const ITEM_ID = "00000000-0000-0000-0000-000000fb0001"; // Resistor 1kΩ
 const WAREHOUSE_ID = "00000000-0000-0000-0000-000000fa0001"; // Main Plant Store
 const VENDOR_ID = "00000000-0000-0000-0000-000000fe0001"; // Elcon Mart
 const GRN_ID = "00000000-0000-0000-0000-0000000f3001"; // GRN-2026-0001
-const SALES_USER = "00000000-0000-0000-0000-00000000b003"; // sales@mobilab.local
-const FINANCE_USER = "00000000-0000-0000-0000-00000000b005"; // finance@mobilab.local
+const SALES_USER = "00000000-0000-0000-0000-00000000b003"; // sales@instigenie.local
+const FINANCE_USER = "00000000-0000-0000-0000-00000000b005"; // finance@instigenie.local
 
 /** Every gate-38 run gets a unique suffix so the test is re-runnable
  * without a DB wipe — the deterministic per-outbox pid/indent_number
@@ -613,7 +613,11 @@ describe("Gate 38.4 — delivery_challan.confirmed fans out to inv + EWB + WA", 
 // ─── Catalogue wiring — single lookup table, no duplicates ──────────────
 
 describe("Gate 38.5 — HANDLER_CATALOGUE shape", () => {
-  test("exposes exactly the ten §3.1 handlers with unique names", () => {
+  test("exposes the §3.1 + §4.1 handlers with unique names in declared order", () => {
+    // 10 × Phase 3 §3.1 + 1 × Phase 4 §4.1 (compliance.enqueuePdfRender).
+    // Order matches the array in apps/worker/src/handlers/index.ts, which
+    // is the order fan-out runs in — production side-effects before
+    // compliance fan-out to the pdf-render queue.
     const expected = [
       ["deal.won", "production.createWorkOrder"],
       ["deal.won", "procurement.createMrpIndent"],
@@ -622,6 +626,7 @@ describe("Gate 38.5 — HANDLER_CATALOGUE shape", () => {
       ["qc_final.passed", "inventory.recordFinishedGoods"],
       ["qc_final.passed", "finance.notifyValuation"],
       ["qc_final.passed", "crm.notifySales"],
+      ["qc_cert.issued", "compliance.enqueuePdfRender"],
       ["delivery_challan.confirmed", "inventory.recordDispatch"],
       ["delivery_challan.confirmed", "finance.generateEwb"],
       ["delivery_challan.confirmed", "crm.whatsappNotify"],

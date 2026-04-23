@@ -36,7 +36,7 @@ import { TokenFactory } from "@instigenie/api/auth/tokens";
 import { AUDIENCE } from "@instigenie/contracts";
 import { makeTestPool, waitForPg } from "./_helpers.js";
 
-const DEV_EMAIL = "sales@mobilab.local";
+const DEV_EMAIL = "sales@instigenie.local";
 const DEV_PASSWORD = "instigenie_dev_2026";
 const DEV_ORG_ID = "00000000-0000-0000-0000-00000000a001";
 const DEV_USER_ID = "00000000-0000-0000-0000-00000000b003";

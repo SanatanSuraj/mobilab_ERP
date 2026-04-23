@@ -164,16 +164,30 @@ export const certsRepo = {
       deviceSerials: string[];
       signedBy: string | null;
       signedByName: string | null;
-      signatureHash: string | null;
+      /**
+       * Phase 4 §4.2 — SHA-256 forward-linked chain hash. Required (the
+       * service layer computes it under a per-org advisory lock so the
+       * chain head read and this INSERT are serialised). Legacy callers
+       * passed null; those paths have been migrated to the new signature.
+       */
+      signatureHash: string;
+      /**
+       * Explicit issuance timestamp in canonical form (JS Date; caller
+       * also passes the matching ISO-8601 string into computeCertHash).
+       * We pass it to the INSERT rather than relying on the `now()`
+       * default so the hash input and the persisted column cannot drift
+       * by microseconds.
+       */
+      issuedAt: Date;
       notes: string | null;
     },
   ): Promise<QcCert> {
     const { rows } = await client.query<CertRow>(
       `INSERT INTO qc_certs (
          org_id, cert_number, inspection_id, work_order_id, product_id,
-         product_name, wo_pid, device_serials, signed_by, signed_by_name,
-         signature_hash, notes
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         product_name, wo_pid, device_serials, issued_at, signed_by,
+         signed_by_name, signature_hash, notes
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING ${SELECT_COLS}`,
       [
         orgId,
@@ -184,6 +198,7 @@ export const certsRepo = {
         input.productName,
         input.woPid,
         input.deviceSerials,
+        input.issuedAt,
         input.signedBy,
         input.signedByName,
         input.signatureHash,

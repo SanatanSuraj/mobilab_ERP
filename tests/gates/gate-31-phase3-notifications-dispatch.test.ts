@@ -40,7 +40,7 @@
  *  11. Dispatcher NEVER throws on channel-level failure (partial success
  *      is honored — one channel DLQs while another delivers).
  *
- * The tests run against the dev `mobilab-postgres` instance so all repo
+ * The tests run against the dev `instigenie-postgres` instance so all repo
  * writes are real. Email + WhatsApp transports are stubbed — we never
  * hit real infrastructure.
  *
@@ -216,7 +216,7 @@ async function seedTemplates(pool: pg.Pool): Promise<void> {
       channel: "EMAIL",
       name: "Multichannel Email",
       description: "gate-31 email",
-      subjectTemplate: "[MobiLab] Update {{orderNo}}",
+      subjectTemplate: "[Instigenie] Update {{orderNo}}",
       bodyTemplate: "Hi {{name}},\nOrder {{orderNo}} is now {{status}}.",
       defaultSeverity: "INFO",
       isActive: true,
@@ -482,7 +482,7 @@ describe("gate-31 (arch phase 3.6): notification dispatch", () => {
       expect(inbox!.body).toBe("Order SO-99 is packed.");
       // Email check.
       expect(email.calls).toHaveLength(1);
-      expect(email.calls[0]!.subject).toBe("[MobiLab] Update SO-99");
+      expect(email.calls[0]!.subject).toBe("[Instigenie] Update SO-99");
       expect(email.calls[0]!.body).toContain("Order SO-99 is now packed.");
       // WhatsApp variables (positional, in template-order).
       expect(whatsapp.calls).toHaveLength(1);
@@ -589,8 +589,8 @@ describe("gate-31 (arch phase 3.6): notification dispatch", () => {
         recipients: [{ userId: DEV_ADMIN_ID }],
       });
       expect(email.calls).toHaveLength(1);
-      expect(email.calls[0]!.to).toBe("admin@mobilab.local");
-      expect(email.calls[0]!.subject).toBe("[MobiLab] Update SO-50");
+      expect(email.calls[0]!.to).toBe("admin@instigenie.local");
+      expect(email.calls[0]!.subject).toBe("[Instigenie] Update SO-50");
     });
 
     it("DLQs an EMAIL when EmailSender throws", async () => {
@@ -683,7 +683,7 @@ describe("gate-31 (arch phase 3.6): notification dispatch", () => {
       // → positional: [orderNo, status, name]
       expect(whatsapp.calls[0]!.variables).toEqual(["SO-42", "shipped", "Ada"]);
       // Email fallback is wired because the resolved user has an email on file.
-      expect(whatsapp.calls[0]!.emailFallbackTo).toBe("admin@mobilab.local");
+      expect(whatsapp.calls[0]!.emailFallbackTo).toBe("admin@instigenie.local");
     });
 
     it("EMAIL_FALLBACK outcome from WhatsAppClient is NOT a DLQ", async () => {

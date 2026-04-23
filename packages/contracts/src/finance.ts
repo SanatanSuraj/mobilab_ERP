@@ -219,6 +219,12 @@ export const SalesInvoiceSchema = z.object({
   postedBy: uuid.nullable(),
   cancelledAt: z.string().nullable(),
   cancelledBy: uuid.nullable(),
+  /**
+   * Phase 4 §9.5 — HMAC-SHA256 hash of the re-entered password + reason
+   * + postedAt captured at POST time. NULL for DRAFT/CANCELLED rows and
+   * for invoices issued before Phase 4 §4.2c shipped.
+   */
+  signatureHash: z.string().nullable(),
   version: z.number().int().positive(),
   createdBy: uuid.nullable(),
   createdAt: z.string(),
@@ -292,6 +298,16 @@ export type UpdateSalesInvoice = z.infer<typeof UpdateSalesInvoiceSchema>;
 export const PostSalesInvoiceSchema = z.object({
   expectedVersion: z.number().int().positive(),
   postedAt: z.string().optional(),
+  /**
+   * Phase 4 §9.5 — "Invoice issue" is a critical action requiring
+   * password re-entry. The server HMAC-SHA256s (eSignatureReason ||
+   * userIdentityId || postedAt) with ESIGNATURE_PEPPER and stores the
+   * hex on sales_invoices.signature_hash. Optional at the contract
+   * layer so pre-§4.2c tooling still parses; the service rejects
+   * missing fields when EsignatureService is wired into DI.
+   */
+  eSignaturePassword: z.string().min(1).max(256).optional(),
+  eSignatureReason: z.string().trim().min(1).max(500).optional(),
 });
 export type PostSalesInvoice = z.infer<typeof PostSalesInvoiceSchema>;
 

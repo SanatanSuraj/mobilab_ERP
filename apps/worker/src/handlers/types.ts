@@ -43,6 +43,33 @@ export interface EwbClientLike {
 }
 
 /**
+ * Supported doc-types for the pdf-render queue. Kept structural rather
+ * than imported from the processor so that the handler package stays
+ * independent of the processor package.
+ */
+export type PdfDocTypeLike =
+  | "qc_cert"
+  | "purchase_order"
+  | "sales_invoice"
+  | "delivery_challan"
+  | "grn";
+
+/**
+ * Enqueue a pdf-render job. Wired in `apps/worker/src/index.ts` to a
+ * BullMQ Queue with the §4.1 retry policy (attempts:3, backoff:60s).
+ * The adapter stamps the jobId from (docType, docId) so outbox
+ * re-delivery is idempotent at the queue layer — the processor layer
+ * has its own ledger (pdf_render_runs) as a defence-in-depth fence.
+ */
+export interface EnqueuePdfRender {
+  (job: {
+    docType: PdfDocTypeLike;
+    docId: string;
+    orgId: string;
+  }): Promise<void>;
+}
+
+/**
  * Structural shape of the WhatsApp client — see comment on EwbClientLike
  * for why this is duplicated structurally instead of imported.
  */
@@ -81,6 +108,14 @@ export interface HandlerContext {
   clients?: {
     ewb?: EwbClientLike;
     whatsapp?: WhatsAppClientLike;
+    /**
+     * Phase 4.1 — §3.1 compliance handler uses this to queue PDF
+     * rendering for a freshly-issued QC certificate (and later PO /
+     * SI / DC / GRN). Optional so environments that don't run the
+     * pdf-render worker locally can still exercise the rest of the
+     * catalogue.
+     */
+    enqueuePdfRender?: EnqueuePdfRender;
   };
 }
 
@@ -155,6 +190,15 @@ export interface QcFinalPassedPayload {
   salesRecipientUserId: string;
   lotNumber?: string;
   deviceSerials?: string[];
+}
+
+export interface QcCertIssuedPayload {
+  orgId: string;
+  certId: string;
+  certNumber: string;
+  inspectionId: string;
+  workOrderId?: string | null;
+  productId?: string | null;
 }
 
 export interface DeliveryChallanConfirmedPayload {

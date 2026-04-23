@@ -19,6 +19,18 @@ export interface Env {
   logLevel: string;
   nodeEnv: string;
   webOrigin: string;
+  /**
+   * HMAC-SHA256 key used to seal electronic-signature hashes
+   * (ARCHITECTURE.md §4.2 / §9.5). The hash stored on approval_steps /
+   * workflow_transitions is keyed with this pepper so a leaked DB dump
+   * alone cannot reproduce it — an auditor recomputes by re-HMACing
+   * (reason || user || actedAt) against the same key.
+   *
+   * Empty string is accepted for dev/test (the hash degrades to a plain
+   * SHA-256) but production MUST set it. At least 32 chars is enforced
+   * when nodeEnv !== 'development'|'test'.
+   */
+  esignaturePepper: string;
 }
 
 function required(name: string): string {
@@ -34,6 +46,17 @@ export function loadEnv(): Env {
     throw new Error("JWT_SECRET must be at least 32 characters");
   }
   const databaseUrl = required("DATABASE_URL");
+  const nodeEnv = process.env.NODE_ENV ?? "development";
+  const esignaturePepper = process.env.ESIGNATURE_PEPPER ?? "";
+  if (
+    nodeEnv !== "development" &&
+    nodeEnv !== "test" &&
+    esignaturePepper.length < 32
+  ) {
+    throw new Error(
+      "ESIGNATURE_PEPPER must be set to at least 32 characters in non-development environments",
+    );
+  }
   return {
     databaseUrl,
     vendorDatabaseUrl: process.env.VENDOR_DATABASE_URL ?? databaseUrl,
@@ -46,7 +69,8 @@ export function loadEnv(): Env {
     port: Number(process.env.PORT ?? 4000),
     host: process.env.HOST ?? "0.0.0.0",
     logLevel: process.env.LOG_LEVEL ?? "info",
-    nodeEnv: process.env.NODE_ENV ?? "development",
+    nodeEnv,
     webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:3000",
+    esignaturePepper,
   };
 }

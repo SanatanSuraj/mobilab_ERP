@@ -52,8 +52,8 @@ import {
 
 const FAMILIES = [
   {
-    key: "MOBILAB_INSTRUMENT",
-    label: "Mobilab Instruments",
+    key: "INSTIGENIE_INSTRUMENT",
+    label: "Instigenie Instruments",
     color: "bg-blue-500",
     cardBg: "bg-blue-50 border-blue-200",
     textColor: "text-blue-700",

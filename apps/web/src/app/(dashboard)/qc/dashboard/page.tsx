@@ -45,7 +45,7 @@ export default function QCDashboardPage() {
   return (
     <div className="space-y-8 p-6">
       <PageHeader
-        title="QC Dashboard — Mobilab Manufacturing"
+        title="QC Dashboard — Instigenie Manufacturing"
         description="ISO 13485 Quality Control — Guwahati Plant | Chetan's QC Team"
       />
 

@@ -86,6 +86,7 @@ import { NotificationsService } from "./modules/notifications/notifications.serv
 import { registerNotificationsRoutes } from "./modules/notifications/routes.js";
 import { ApprovalsService } from "./modules/approvals/approvals.service.js";
 import { registerApprovalsRoutes } from "./modules/approvals/routes.js";
+import { EsignatureService } from "./modules/esignature/service.js";
 import { VendorAuthService, VendorAdminService } from "@instigenie/vendor-admin";
 import { registerVendorRoutes } from "./modules/vendor/routes.js";
 import { PortalService, registerPortalRoutes } from "./modules/portal/index.js";
@@ -152,6 +153,17 @@ async function main(): Promise<void> {
     tenantStatus,
   });
 
+  // E-signature primitive — Phase 4 §4.2 / §9.5. Shared across any
+  // critical action that requires password re-entry. Constructed BEFORE
+  // the services that depend on it (StockService, SalesInvoicesService,
+  // ApprovalsService, QcInspectionsService) so each one can take it in
+  // its deps struct. Never construct one ad-hoc in a handler — the
+  // pepper MUST come from the single env load.
+  const esignatureService = new EsignatureService({
+    pool,
+    pepper: env.esignaturePepper,
+  });
+
   // CRM services — each one is a thin orchestrator over a pg.Pool + withRequest.
   const accountsService = new AccountsService(pool);
   const contactsService = new ContactsService(pool);
@@ -163,9 +175,17 @@ async function main(): Promise<void> {
 
   // Inventory services — Phase 2 §12.1 #3. Same shape as CRM services: one
   // per domain aggregate, all sharing the RLS-enforced `pool`.
+  //
+  // StockService takes the esignature dep so postEntry() enforces
+  // password re-entry on SCRAP (stock write-off) and CUSTOMER_ISSUE
+  // (device release) per Phase 4 §9.5. itemsService / warehousesService
+  // are pure CRUD with no critical actions — plain pool is fine.
   const itemsService = new ItemsService(pool);
   const warehousesService = new WarehousesService(pool);
-  const stockService = new StockService(pool);
+  const stockService = new StockService({
+    pool,
+    esignature: esignatureService,
+  });
   // Phase 3 §3.2 — concurrency-safe reservations on top of stock_summary.
   const reservationsService = new ReservationsService(pool);
 
@@ -196,8 +216,13 @@ async function main(): Promise<void> {
   // with DRAFT → POSTED → CANCELLED lifecycle, append-only customer/vendor
   // ledgers with computed running balance, and polymorphic payments that
   // can settle N invoices atomically (with void reversal). CORE module —
-  // not feature-flagged.
-  const salesInvoicesService = new SalesInvoicesService(pool);
+  // not feature-flagged. Phase 4 §4.2c injects EsignatureService into
+  // SalesInvoicesService so POST rejects missing password + HMAC-stamps
+  // signature_hash on the row.
+  const salesInvoicesService = new SalesInvoicesService({
+    pool,
+    esignature: esignatureService,
+  });
   const purchaseInvoicesService = new PurchaseInvoicesService(pool);
   const paymentsService = new PaymentsService(pool);
   const customerLedgerService = new CustomerLedgerService(pool);
@@ -211,8 +236,13 @@ async function main(): Promise<void> {
   const notificationsService = new NotificationsService(pool);
 
   // Approvals service — Phase 3 §3.3. Chain-driven workflow engine with
-  // e-signature support and an append-only workflow_transitions audit log.
-  const approvalsService = new ApprovalsService(pool);
+  // e-signature support and an append-only workflow_transitions audit
+  // log. Phase 4 §4.2 injects EsignatureService so requires_e_signature
+  // steps actually validate the re-entered password before advancing.
+  const approvalsService = new ApprovalsService({
+    pool,
+    esignature: esignatureService,
+  });
 
   // Sprint 3 — vendor-admin stack. Uses the BYPASSRLS `vendorPool`, shares
   // the same TokenFactory (vendor tokens are a different audience within

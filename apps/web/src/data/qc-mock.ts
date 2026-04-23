@@ -1,4 +1,4 @@
-// ─── QC / Quality Assurance Module — Mobilab Manufacturing ────────────────────
+// ─── QC / Quality Assurance Module — Instigenie Manufacturing ────────────────────
 // ISO 13485 compliant QC flows: AQL Incoming → WIP Gates → Final Batch QC
 // Products: MBA (Analyser), MBM (Mobimix), MBC (Mobicube/Incubator), MCC (Mobicase Final)
 // Lines: L1 (Mobimix/MBM), L2 (Analyser/MBA), L3 (Incubator/MBC), L4 (Final Assembly), L5 (Final Device QC)

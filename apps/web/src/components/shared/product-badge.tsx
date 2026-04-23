@@ -26,7 +26,7 @@ import {
   isFinishedDeviceCode,
   isVendorSourcedCode,
   type MobicaseProduct,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 
 type BadgeKind = "DEVICE" | "MODULE_INHOUSE" | "MODULE_VENDOR";
 

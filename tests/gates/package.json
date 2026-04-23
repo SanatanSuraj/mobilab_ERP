@@ -19,6 +19,7 @@
     "@instigenie/queue": "workspace:*",
     "@instigenie/quotas": "workspace:*",
     "@instigenie/resilience": "workspace:*",
+    "@instigenie/storage": "workspace:*",
     "@instigenie/vendor-admin": "workspace:*",
     "@instigenie/worker": "workspace:*",
     "@opentelemetry/api": "^1.9.0",

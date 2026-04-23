@@ -145,11 +145,11 @@ function LoginForm() {
       // Overwrite the mock persona's display name/email with the real user's
       // identity so the topbar / sidebar chip matches who's actually signed
       // in. setRole() seeds MOCK_USERS_BY_ROLE[role] which has placeholder
-      // @mobilab.in emails — we overwrite that with the real JWT identity.
+      // @instigenie.in emails — we overwrite that with the real JWT identity.
       //
       // IMPORTANT: do NOT overwrite `orgId` here. The mock Next.js API
       // routes at apps/web/src/app/api/* key their fixtures by the slug
-      // MOCK_ORG_ID ("org_mobilab") and receive it via the X-Org-Id
+      // MOCK_ORG_ID ("org_instigenie") and receive it via the X-Org-Id
       // header that @/lib/api-client.ts reads from this store. Replacing
       // the slug with the real tenant UUID (e.g. ...-a001) makes every
       // unmigrated mock-backed page 500. Real /crm/* pages use tenantFetch,
@@ -262,7 +262,7 @@ function LoginForm() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="admin@mobilab.local"
+                  placeholder="admin@instigenie.local"
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -318,9 +318,9 @@ function LoginForm() {
 
             <p className="text-[11px] text-muted-foreground leading-snug pt-1">
               Dev seeds (password <code>instigenie_dev_2026</code>):{" "}
-              <code>admin@mobilab.local</code>,{" "}
-              <code>finance@mobilab.local</code>,{" "}
-              <code>prodmgr@mobilab.local</code>, etc.
+              <code>admin@instigenie.local</code>,{" "}
+              <code>finance@instigenie.local</code>,{" "}
+              <code>prodmgr@instigenie.local</code>, etc.
             </p>
           </CardContent>
         </Card>

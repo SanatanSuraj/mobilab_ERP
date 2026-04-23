@@ -1,4 +1,4 @@
-// ─── Mobilab Manufacturing Module ─────────────────────────────────────────────
+// ─── Instigenie Manufacturing Module ─────────────────────────────────────────────
 // Mobicase Diagnostic Suite: MBA (Analyser), MBM (Mobimix), MBC (Mobicube), MCC (Final Case), CFG (Centrifuge)
 // Assembly Lines: L1 (Mobimix), L2 (Analyser), L3 (Incubator), L4 (Final Assembly), L5 (Final Device QC)
 // Compliance: ISO 13485:2016 | 21 CFR Part 11 | IEC 62304
@@ -354,7 +354,7 @@ export const mobiDeviceIDs: MobiDeviceID[] = [
   },
 ];
 
-// ─── Work Orders (Mobilab WO Lifecycle) ──────────────────────────────────────
+// ─── Work Orders (Instigenie WO Lifecycle) ──────────────────────────────────────
 
 export interface MobiRMLine {
   itemCode: string;

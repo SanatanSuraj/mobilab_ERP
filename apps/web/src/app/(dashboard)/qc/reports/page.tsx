@@ -844,7 +844,7 @@ export default function QCReportsPage() {
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
       <PageHeader
         title="QC Analytics & Reports"
-        description="Mobilab-specific quality metrics — Incoming, WIP, NCR/CAPA, Calibration"
+        description="Instigenie-specific quality metrics — Incoming, WIP, NCR/CAPA, Calibration"
       />
 
       {/* Tab Switcher */}

@@ -29,7 +29,7 @@ import {
   formatDateTime,
   isFinishedDevice,
   isModule,
-} from "@/data/mobilab-mock";
+} from "@/data/instigenie-mock";
 import { Search, Cpu, Activity, CheckCircle2, RotateCcw, Trash2 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -768,7 +768,7 @@ export default function DeviceIDsPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Device & Module ID Registry"
-        description="Mobilab Mobicase — Devices (MCC) & Modules (MBA/MBM/MBC/CFG). Full genealogy & traceability for every manufactured unit | 21 CFR Part 11"
+        description="Instigenie Mobicase — Devices (MCC) & Modules (MBA/MBM/MBC/CFG). Full genealogy & traceability for every manufactured unit | 21 CFR Part 11"
       />
 
       {/* Summary Stats — individual clickable filter cards */}

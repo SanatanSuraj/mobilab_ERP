@@ -30,6 +30,7 @@ import {
   generateEwb,
   whatsappNotify,
 } from "./delivery-challan-confirmed.js";
+import { enqueuePdfRender } from "./qc-cert-issued.js";
 import type { HandlerEntry } from "./types.js";
 
 export const HANDLER_CATALOGUE: HandlerEntry[] = [
@@ -74,6 +75,13 @@ export const HANDLER_CATALOGUE: HandlerEntry[] = [
     handler: notifySales as unknown as HandlerEntry["handler"],
   },
 
+  // qc_cert.issued → compliance (pdf-render queue fan-out, §4.1)
+  {
+    eventType: "qc_cert.issued",
+    handlerName: "compliance.enqueuePdfRender",
+    handler: enqueuePdfRender as unknown as HandlerEntry["handler"],
+  },
+
   // delivery_challan.confirmed → inventory + finance (EWB) + crm (WhatsApp)
   {
     eventType: "delivery_challan.confirmed",
@@ -103,8 +111,11 @@ export type {
   HandlerContext,
   EwbClientLike,
   WhatsAppClientLike,
+  EnqueuePdfRender,
+  PdfDocTypeLike,
   DealWonPayload,
   QcInwardPassedPayload,
   QcFinalPassedPayload,
+  QcCertIssuedPayload,
   DeliveryChallanConfirmedPayload,
 } from "./types.js";
