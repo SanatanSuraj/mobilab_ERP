@@ -153,7 +153,7 @@ function collectMoneyIdentifiers(): string[] {
 function listTypescriptFiles(): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
-    let entries: ReturnType<typeof readdirSync>;
+    let entries: string[];
     try {
       entries = readdirSync(dir);
     } catch {
@@ -288,8 +288,6 @@ describe("finance-money-lint: no Number() / parseFloat() on money columns", () =
     // "suppressed" if a row (file, line, fragment) matches — fragment
     // must appear in the offending line exactly, which means a rename
     // or re-indent also re-opens the exemption.
-    const suppressedKey = (v: { file: string; line: number }) =>
-      `${v.file}:${v.line}`;
     const allowUsed = new Set<number>();
     const remaining: Violation[] = [];
     for (const v of allViolations) {

@@ -44,9 +44,10 @@ import { withOrg } from "@instigenie/db";
 import {
   createHttpHarness,
   DEV_USERS,
+  type DevRoleKey,
   type HttpHarness,
 } from "./_http-harness.js";
-import { AUDIENCE, type Role } from "@instigenie/contracts";
+import { AUDIENCE } from "@instigenie/contracts";
 import { DEV_ORG_ID } from "./_helpers.js";
 
 // ── Shared harness ─────────────────────────────────────────────────────
@@ -356,7 +357,7 @@ describe("gate-66: POST /admin/users/invite — HTTP axis matrix", () => {
       expect([401, 403]).toContain(res.statusCode);
     });
 
-    it.each<Role>(["SALES_REP", "SALES_MANAGER", "FINANCE", "PRODUCTION_MANAGER", "QC_INSPECTOR"])(
+    it.each<DevRoleKey>(["SALES_REP", "SALES_MANAGER", "FINANCE", "PRODUCTION_MANAGER", "QC_INSPECTOR"])(
       "%s token (no users:invite permission) → 403",
       async (role) => {
         const tok = await harness.tokenForRole(role);

@@ -36,9 +36,10 @@ import {
 import { withOrg } from "@instigenie/db";
 import {
   createHttpHarness,
+  type DevRoleKey,
   type HttpHarness,
 } from "./_http-harness.js";
-import { AUDIENCE, type Role } from "@instigenie/contracts";
+import { AUDIENCE } from "@instigenie/contracts";
 import { DEV_ORG_ID } from "./_helpers.js";
 
 let harness: HttpHarness;
@@ -327,7 +328,7 @@ describe("gate-68: POST /crm/leads — HTTP axis matrix", () => {
       expect([401, 403]).toContain(res.statusCode);
     });
 
-    it.each<Role>(["MANAGEMENT", "FINANCE", "PRODUCTION_MANAGER", "QC_INSPECTOR"])(
+    it.each<DevRoleKey>(["MANAGEMENT", "FINANCE", "PRODUCTION_MANAGER", "QC_INSPECTOR"])(
       "%s (no leads:create) → 403",
       async (role) => {
         const tok = await harness.tokenForRole(role);

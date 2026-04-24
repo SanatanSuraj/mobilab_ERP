@@ -46,7 +46,19 @@ GRANT USAGE ON SCHEMA vendor TO instigenie_vendor;
 
 -- Keep instigenie_app explicitly out of the vendor schema so a tenant-side
 -- SQL injection cannot peek at vendor admin users or the action log.
-REVOKE ALL ON SCHEMA vendor FROM instigenie_app;
+--
+-- 99-app-role.sql runs AFTER this file, so on a fresh bootstrap the role
+-- doesn't exist yet and a bare REVOKE would fail with ON_ERROR_STOP. Guard
+-- with pg_roles; the post-seed `pnpm db:migrate` (apply-to-running.sh) pass
+-- re-runs this file and the REVOKE lands then. Once 99-app-role has run
+-- once, subsequent invocations see the role and this block is a no-op.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
+    EXECUTE 'REVOKE ALL ON SCHEMA vendor FROM instigenie_app';
+  END IF;
+END
+$$;
 
 -- ── Public schema: full DML for tenant tables (needed for suspend /
 --    reinstate / change plan). BYPASSRLS means these INSERT/UPDATEs land

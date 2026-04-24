@@ -31,7 +31,22 @@
 --   audit_log_archive / stock_ledger_archive, streams to MinIO, and
 --   TRUNCATEs on ack. Runbook in docs/runbooks/audit-archive.md.
 
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- Stock `postgres:16-alpine` (used by CI) does NOT ship the pg_cron OS
+-- package, so `CREATE EXTENSION pg_cron` would fail with "extension not
+-- available" and abort initdb. Guard on pg_available_extensions so the
+-- file is a no-op on vanilla Postgres while still loading the scheduler
+-- on production images (ops/postgres/Dockerfile installs the package).
+-- All cron.schedule / cron.job / cron.job_run_details references later
+-- in this file are similarly guarded by pg_extension presence checks.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
+  ELSE
+    RAISE NOTICE 'pg_cron not available on this Postgres build — archive/watchdog schedules will be skipped. Install postgresql-16-cron to enable.';
+  END IF;
+END
+$$;
 
 -- ─── Cold-storage archive tables ──────────────────────────────────────
 
@@ -231,42 +246,54 @@ COMMENT ON FUNCTION public.phase4_watchdog_hashchain() IS
 -- pg_cron's schedule table is a singleton across databases in the
 -- cluster. Upsert by deleting any prior row with the same jobname
 -- before inserting so re-running this SQL is idempotent.
+--
+-- All of this is wrapped in `IF EXISTS (... pg_extension ... 'pg_cron')`
+-- so the file stays applicable on stock Postgres builds where pg_cron
+-- isn't installed. On production (ops/postgres/Dockerfile) the
+-- extension is present, the guard evaluates to true, and the schedules
+-- land as before.
 
 DO $$
 BEGIN
-  PERFORM cron.unschedule('phase4_archive_audit_old_rows')
-    WHERE EXISTS (
-      SELECT 1 FROM cron.job
-        WHERE jobname = 'phase4_archive_audit_old_rows'
-    );
-  PERFORM cron.unschedule('phase4_watchdog_hashchain')
-    WHERE EXISTS (
-      SELECT 1 FROM cron.job
-        WHERE jobname = 'phase4_watchdog_hashchain'
-    );
-EXCEPTION WHEN undefined_table THEN
-  -- cron.job not yet visible on very first boot — that's fine, schedule
-  -- calls below will create the rows outright.
-  NULL;
-END;
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    RETURN;
+  END IF;
+
+  BEGIN
+    PERFORM cron.unschedule('phase4_archive_audit_old_rows')
+      WHERE EXISTS (
+        SELECT 1 FROM cron.job
+          WHERE jobname = 'phase4_archive_audit_old_rows'
+      );
+    PERFORM cron.unschedule('phase4_watchdog_hashchain')
+      WHERE EXISTS (
+        SELECT 1 FROM cron.job
+          WHERE jobname = 'phase4_watchdog_hashchain'
+      );
+  EXCEPTION WHEN undefined_table THEN
+    -- cron.job not yet visible on very first boot — that's fine, schedule
+    -- calls below will create the rows outright.
+    NULL;
+  END;
+
+  -- Daily 03:00 — runs AFTER the audit-hashchain worker's 02:00 slot so
+  -- any rows the sweep produced in the last hour stay in the hot table
+  -- (i.e. we never archive a row produced in the current verify window).
+  PERFORM cron.schedule(
+    'phase4_archive_audit_old_rows',
+    '0 3 * * *',
+    $sched$SELECT public.phase4_archive_audit_old_rows();$sched$
+  );
+
+  -- Hourly — the watchdog itself is cheap (one MAX() query), and hourly
+  -- firing narrows the detection window to ~1h.
+  PERFORM cron.schedule(
+    'phase4_watchdog_hashchain',
+    '0 * * * *',
+    $sched$SELECT public.phase4_watchdog_hashchain();$sched$
+  );
+END
 $$;
-
--- Daily 03:00 — runs AFTER the audit-hashchain worker's 02:00 slot so
--- any rows the sweep produced in the last hour stay in the hot table
--- (i.e. we never archive a row produced in the current verify window).
-SELECT cron.schedule(
-  'phase4_archive_audit_old_rows',
-  '0 3 * * *',
-  $$SELECT public.phase4_archive_audit_old_rows();$$
-);
-
--- Hourly — the watchdog itself is cheap (one MAX() query), and hourly
--- firing narrows the detection window to ~1h.
-SELECT cron.schedule(
-  'phase4_watchdog_hashchain',
-  '0 * * * *',
-  $$SELECT public.phase4_watchdog_hashchain();$$
-);
 
 -- ─── Privileges for the app role ─────────────────────────────────────
 --
@@ -303,6 +330,10 @@ SELECT cron.schedule(
 
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    -- Stock Postgres without pg_cron — no cron schema to grant against.
+    RETURN;
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
     EXECUTE 'GRANT USAGE ON SCHEMA cron TO instigenie_app';
     EXECUTE 'GRANT SELECT ON cron.job TO instigenie_app';
@@ -321,6 +352,10 @@ $$;
 -- UPDATE grant), so the app can look but not tamper.
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    -- No cron.job / cron.job_run_details tables exist to attach a policy to.
+    RETURN;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
     -- Role created later; skip. Post-seed migrate pass re-runs this
     -- file and the policies land then.

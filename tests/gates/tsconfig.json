@@ -1,7 +1,7 @@
 {
   "extends": "@instigenie/config/tsconfig/library.json",
   "compilerOptions": {
-    "rootDir": ".",
+    "rootDir": "../..",
     "noEmit": true,
     "declaration": false,
     "declarationMap": false,

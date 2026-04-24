@@ -34,6 +34,7 @@ import {
   createHttpHarness,
   type HttpHarness,
 } from "./_http-harness.js";
+import { AUDIENCE } from "@instigenie/contracts";
 import { DEV_ORG_ID } from "./_helpers.js";
 
 let harness: HttpHarness;
@@ -272,7 +273,7 @@ describe("gate-67: POST /approvals/:id/act — HTTP axis matrix", () => {
       // token instead. Internal admin surface must reject cross-audience.
       const reqId = await seedRequest("e3");
       const tok = await harness.tokenWith({
-        audience: "portal",
+        audience: AUDIENCE.portal,
       });
       const res = await harness.post(`/approvals/${reqId}/act`, {
         token: tok,

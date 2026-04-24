@@ -81,8 +81,23 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.auth_load_invitation(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.auth_load_invitation(text) TO instigenie_app;
-GRANT EXECUTE ON FUNCTION public.auth_load_invitation(text) TO instigenie_vendor;
+-- Role-existence guards — mirrors init/15-audit-hashchain.sql and the
+-- pattern in rls/03-auth-cross-tenant.sql. The app and vendor roles are
+-- created in the seed step (seed/99-app-role.sql + seed/98-vendor-role.sql)
+-- which runs AFTER rls/. Skip gracefully when the role is absent; the
+-- seed's `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public` catches this
+-- function on the first boot, and the post-seed `pnpm db:migrate` pass
+-- re-applies the explicit grants.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.auth_load_invitation(text) TO instigenie_app';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_vendor') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.auth_load_invitation(text) TO instigenie_vendor';
+  END IF;
+END
+$$;
 
 COMMENT ON FUNCTION public.auth_load_invitation(text) IS
   'Cross-tenant invitation lookup by token_hash. SECURITY DEFINER bypasses RLS; safe because token_hash is a 256-bit secret. Caller switches to withOrg(row.org_id) for any follow-up mutations.';

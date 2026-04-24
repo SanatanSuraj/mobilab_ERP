@@ -91,12 +91,24 @@ $$;
 -- Revoke PUBLIC so only roles we explicitly GRANT can call this.
 REVOKE ALL ON FUNCTION public.auth_load_active_memberships(uuid) FROM PUBLIC;
 
--- The app role — the only tenant-side caller that should invoke this.
-GRANT EXECUTE ON FUNCTION public.auth_load_active_memberships(uuid) TO instigenie_app;
-
--- Vendor pool (BYPASSRLS already) may also call it; harmless and useful
--- for maintenance scripts that ride on that pool.
-GRANT EXECUTE ON FUNCTION public.auth_load_active_memberships(uuid) TO instigenie_vendor;
+-- Role-existence guards — mirrors init/15-audit-hashchain.sql. The app and
+-- vendor roles are created in seed/99-app-role.sql + seed/98-vendor-role.sql,
+-- which run AFTER this file in the canonical init→triggers→rls→seed order.
+-- Skip gracefully when the role is absent; seed/99-app-role.sql itself
+-- runs `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO instigenie_app`
+-- after role creation, which catches this function on the first boot. The
+-- explicit grants below are re-applied on the post-seed `pnpm db:migrate`
+-- pass via apply-to-running.sh.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.auth_load_active_memberships(uuid) TO instigenie_app';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_vendor') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.auth_load_active_memberships(uuid) TO instigenie_vendor';
+  END IF;
+END
+$$;
 
 COMMENT ON FUNCTION public.auth_load_active_memberships(uuid) IS
   'Cross-tenant ACTIVE-membership lookup for login. SECURITY DEFINER so it bypasses RLS; the AuthService calls this ONLY after verifying the identity password. See ops/sql/rls/03-auth-cross-tenant.sql.';
@@ -138,8 +150,17 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.auth_load_refresh_token(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.auth_load_refresh_token(text) TO instigenie_app;
-GRANT EXECUTE ON FUNCTION public.auth_load_refresh_token(text) TO instigenie_vendor;
+-- Role-existence guard — see note above auth_load_active_memberships.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.auth_load_refresh_token(text) TO instigenie_app';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'instigenie_vendor') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.auth_load_refresh_token(text) TO instigenie_vendor';
+  END IF;
+END
+$$;
 
 COMMENT ON FUNCTION public.auth_load_refresh_token(text) IS
   'Cross-tenant refresh-token lookup by token_hash. SECURITY DEFINER bypasses RLS; safe because token_hash is a 256-bit secret. Caller switches to withOrg(row.org_id) for any follow-up mutations.';

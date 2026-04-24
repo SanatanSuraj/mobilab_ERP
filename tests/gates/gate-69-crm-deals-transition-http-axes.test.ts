@@ -41,9 +41,10 @@ import {
 import { withOrg } from "@instigenie/db";
 import {
   createHttpHarness,
+  type DevRoleKey,
   type HttpHarness,
 } from "./_http-harness.js";
-import { AUDIENCE, type Role } from "@instigenie/contracts";
+import { AUDIENCE } from "@instigenie/contracts";
 import { DEV_ORG_ID } from "./_helpers.js";
 
 let harness: HttpHarness;
@@ -347,7 +348,7 @@ describe("gate-69: POST /crm/deals/:id/transition — HTTP axis matrix", () => {
       expect([401, 403]).toContain(res.statusCode);
     });
 
-    it.each<Role>(["SALES_REP", "MANAGEMENT", "FINANCE", "PRODUCTION_MANAGER", "QC_INSPECTOR"])(
+    it.each<DevRoleKey>(["SALES_REP", "MANAGEMENT", "FINANCE", "PRODUCTION_MANAGER", "QC_INSPECTOR"])(
       "%s (no deals:transition) → 403",
       async (role) => {
         const { id, version } = await seedDeal(`e-${role}`);

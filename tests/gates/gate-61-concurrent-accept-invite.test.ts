@@ -41,7 +41,6 @@ import pg from "pg";
 import { withOrg } from "@instigenie/db";
 import {
   acceptInvitationTx,
-  findIdentityByEmail,
   insertIdentity,
   insertInvitation,
 } from "../../apps/api/src/modules/admin-users/repository.js";

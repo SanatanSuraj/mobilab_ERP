@@ -67,7 +67,6 @@ import { DEV_ORG_ID } from "./_helpers.js";
 // Dev seed references (ops/sql/seed/04-crm-dev-data.sql,
 // ops/sql/seed/09-procurement-dev-data.sql).
 const SEED_CUSTOMER_APOLLO = "00000000-0000-0000-0000-0000000ac001";
-const SEED_CUSTOMER_FORTIS = "00000000-0000-0000-0000-0000000ac002";
 const SEED_VENDOR_ECM = "00000000-0000-0000-0000-000000fe0001";
 const DEV_ADMIN_ID = "00000000-0000-0000-0000-00000000b001";
 
