@@ -236,17 +236,39 @@ export async function findIdentityByEmail(
 }
 
 /**
- * Insert a new identity — called when the invited email has no existing
- * identity. Global table, no RLS. Caller supplies the bcrypt hash.
+ * Insert or return the existing identity for this email — called when
+ * the invited email has no already-password'd identity (see
+ * service.ts::accept). Global table, no RLS. Caller supplies the bcrypt
+ * hash that should be used if we do end up creating the row.
+ *
+ * Idempotent on `lower(email)` — two concurrent callers (e.g. double-
+ * clicked accept-invite link, two tabs) both resolve to the same
+ * identity id without tripping the `user_identities_email_unique` index.
+ * The winning caller's password_hash is kept; the loser's proposed hash
+ * is silently discarded, which is the right semantics — both callers
+ * proved control of the email through the same invite token, and the
+ * row carries no other state that could conflict. See Gate 61 race A.
  */
 export async function insertIdentity(
   pool: Pool,
   args: { email: string; passwordHash: string },
 ): Promise<{ id: string }> {
+  // CTE pattern: try the INSERT; if the unique index fires, fall through
+  // to the SELECT on the same lowered email. Wrapped in one round-trip
+  // so the race window is as small as possible.
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO user_identities (email, password_hash, status)
-     VALUES (lower($1), $2, 'ACTIVE')
-     RETURNING id`,
+    `WITH ins AS (
+       INSERT INTO user_identities (email, password_hash, status)
+       VALUES (lower($1), $2, 'ACTIVE')
+       ON CONFLICT ((lower(email))) DO NOTHING
+       RETURNING id
+     )
+     SELECT id FROM ins
+     UNION ALL
+     SELECT id
+       FROM user_identities
+      WHERE lower(email) = lower($1) AND deleted_at IS NULL
+      LIMIT 1`,
     [args.email, args.passwordHash],
   );
   return rows[0]!;
@@ -268,14 +290,28 @@ export async function acceptInvitationTx(
     roleId: Role;
   },
 ): Promise<{ userId: string }> {
-  // 1. Per-tenant user profile. users has identity_id FK + org_id FK. The
-  //    unique-per-org email is enforced by a unique index (see
-  //    ops/sql/init/01-schemas.sql), along with a unique (identity_id, org_id).
-  //    Upsert on (identity_id, org_id): if this identity already has a profile
-  //    in this org (e.g. an admin re-invited someone who once accepted and was
-  //    later deactivated, or the row was pre-seeded), we reuse the existing
-  //    row — flipping is_active back on and filling in name if it was null —
-  //    instead of failing the whole accept with a duplicate-key.
+  // 0. Serialize concurrent accepts for the same (org, identity). Without
+  //    this, two racing tx both try to INSERT into `users` and one trips
+  //    ONE of the two unique indexes on the table (users_identity_org_unique
+  //    OR users_email_org_unique — whichever Postgres happens to check
+  //    first). A targeted ON CONFLICT can only catch one of the two, so
+  //    the simplest correct fix is a transaction-scoped advisory lock
+  //    keyed on (org_id, identity_id). The second concurrent tx blocks
+  //    here until the first commits, then proceeds against a snapshot
+  //    that already shows the inserted row → the ON CONFLICT path below
+  //    takes the DO UPDATE branch cleanly. Gate 61 race B asserts this.
+  //    hashtextextended returns bigint which pg_advisory_xact_lock accepts.
+  await client.query(
+    `SELECT pg_advisory_xact_lock(
+              hashtextextended($1::text || '|' || $2::text, 0))`,
+    [args.orgId, args.identityId],
+  );
+
+  // 1. Per-tenant user profile. Upsert on (identity_id, org_id). With the
+  //    advisory lock above, only one tx at a time reaches this INSERT for
+  //    a given (org, identity) pair — a re-invite of an already-accepted
+  //    identity (e.g. after a SUSPENDED → REMOVED → re-invite cycle) hits
+  //    the DO UPDATE branch and refreshes is_active + name.
   const { rows: userRows } = await client.query<{ id: string }>(
     `INSERT INTO users (org_id, identity_id, email, name, is_active, capabilities)
      VALUES ($1, $2, lower($3), $4, true, '{}'::jsonb)

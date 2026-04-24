@@ -95,7 +95,29 @@ import { VendorAuthService, VendorAdminService } from "@instigenie/vendor-admin"
 import { registerVendorRoutes } from "./modules/vendor/routes.js";
 import { PortalService, registerPortalRoutes } from "./modules/portal/index.js";
 
-async function main(): Promise<void> {
+/**
+ * Result of a single buildApp() call. Tests and main() both consume this —
+ * tests need handles on pool/vendorPool/cache to close them in afterAll,
+ * main() needs them for the SIGTERM shutdown sequence.
+ */
+export interface BuiltApp {
+  app: ReturnType<typeof Fastify>;
+  pool: pg.Pool;
+  vendorPool: pg.Pool;
+  cache: Cache;
+  env: ReturnType<typeof loadEnv>;
+}
+
+/**
+ * Factory — constructs the Fastify app with every plugin and route wired,
+ * WITHOUT calling app.listen(). Tests import this and drive the app via
+ * `app.inject()` so the full preHandler stack (auth → RBAC → feature-flag →
+ * quota → handler) is exercised without opening a socket.
+ *
+ * Returns the resource handles so callers (test harnesses and the main()
+ * entry) can tear them down cleanly.
+ */
+export async function buildApp(): Promise<BuiltApp> {
   const env = loadEnv();
   const log = createLogger({ service: "api", level: env.logLevel });
 
@@ -282,6 +304,13 @@ async function main(): Promise<void> {
     timeWindow: "1 minute",
     // Login is more sensitive — per-route override applied below.
     keyGenerator: (req) => req.ip ?? "anon",
+    // Dev-only bypass so local load tests (tests/load/) aren't strangled
+    // by the 300/min per-IP limit — every k6 VU shares 127.0.0.1, which
+    // turns the global limit into effectively ~5 rps total. Only honoured
+    // when NODE_ENV !== "production" — in prod the header is ignored.
+    allowList: (req) =>
+      process.env.NODE_ENV !== "production" &&
+      req.headers["x-load-test-bypass"] === "instigenie-dev-loadtest",
   });
 
   registerProblemHandler(app);
@@ -530,7 +559,19 @@ async function main(): Promise<void> {
     portalRateLimit,
   });
 
-  // ─── Start ──────────────────────────────────────────────────────────────────
+  return { app, pool, vendorPool, cache, env };
+}
+
+/**
+ * Production entry point. Builds the app, binds the listener, and wires
+ * SIGTERM/SIGINT to close resources. Tests never call this — they call
+ * `buildApp()` directly and use `app.inject()`.
+ */
+async function main(): Promise<void> {
+  const built = await buildApp();
+  const { app, pool, vendorPool, cache, env } = built;
+  const log = createLogger({ service: "api", level: env.logLevel });
+
   await app.listen({ port: env.port, host: env.host });
   log.info({ port: env.port, host: env.host }, "api listening");
 
@@ -546,8 +587,13 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
-main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error("[api] fatal:", err);
-  process.exit(1);
-});
+// Only launch the server when NOT running under Vitest. Vitest sets
+// process.env.VITEST automatically, so importing `buildApp` from a test
+// file does not trigger the listen() side-effect.
+if (!process.env.VITEST) {
+  main().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error("[api] fatal:", err);
+    process.exit(1);
+  });
+}

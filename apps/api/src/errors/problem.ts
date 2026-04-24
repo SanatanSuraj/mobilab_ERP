@@ -49,6 +49,24 @@ export function registerProblemHandler(app: FastifyInstance): void {
       });
     }
 
+    // Fastify's built-in framework errors — content-type parse failures,
+    // body-limit exceeded, unsupported media type — arrive with a proper
+    // 4xx `statusCode` and a `FST_ERR_*` code. Honor the status so the
+    // client gets the right signal (400 / 413 / 415) instead of a generic
+    // 500. We map to stable semantic codes rather than leaking Fastify's
+    // internal identifiers.
+    if (
+      typeof fErr.code === "string" &&
+      fErr.code.startsWith("FST_ERR_") &&
+      typeof fErr.statusCode === "number" &&
+      fErr.statusCode >= 400 &&
+      fErr.statusCode < 500
+    ) {
+      const mapped = mapFastifyFrameworkError(fErr);
+      req.log.warn({ err: { code: fErr.code, message: fErr.message } }, "fastify framework error");
+      return sendProblem(req, reply, mapped);
+    }
+
     // Unknown → 500. Do NOT leak the message — log it instead.
     //
     // NOTE: Fastify is booted with `logger: false` in apps/api/src/index.ts
@@ -72,6 +90,47 @@ interface Problem {
   status: number;
   message: string;
   details?: Record<string, unknown>;
+}
+
+/**
+ * Map Fastify framework errors (FST_ERR_*) to stable Problem shapes.
+ * Keeps our external API surface stable — consumers shouldn't have to
+ * recognise Fastify's internal error codes to handle a 400/413/415.
+ */
+function mapFastifyFrameworkError(err: FastifyError): Problem {
+  const status = err.statusCode ?? 400;
+  switch (err.code) {
+    case "FST_ERR_CTP_EMPTY_JSON_BODY":
+    case "FST_ERR_CTP_INVALID_JSON_BODY":
+    case "FST_ERR_CTP_INVALID_TYPE":
+    case "FST_ERR_CTP_INVALID_CONTENT_LENGTH":
+      return {
+        code: "invalid_body",
+        status,
+        message: err.message,
+      };
+    case "FST_ERR_CTP_INVALID_MEDIA_TYPE":
+      return {
+        code: "unsupported_media_type",
+        status,
+        message: err.message,
+      };
+    case "FST_ERR_CTP_BODY_TOO_LARGE":
+      return {
+        code: "payload_too_large",
+        status,
+        message: err.message,
+      };
+    default:
+      // Any other 4xx Fastify error — fall back to a generic client_error
+      // with the framework's message. Safe because these are framework-level
+      // 4xx signals, not application errors that might leak internals.
+      return {
+        code: "client_error",
+        status,
+        message: err.message,
+      };
+  }
 }
 
 function sendProblem(

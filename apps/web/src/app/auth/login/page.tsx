@@ -18,7 +18,7 @@
  * page level — see docs/app/api-reference/functions/use-search-params.
  */
 
-import { Suspense, useState, useTransition } from "react";
+import { Suspense, useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FlaskConical, Eye, EyeOff, Loader2, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -124,6 +124,27 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const [picker, setPicker] = useState<PickerState | null>(null);
+
+  // Back-button bfcache defence. The proxy bounces authenticated users
+  // away from /auth/login on direct navigation, but a browser back from
+  // the dashboard restores this page from bfcache without re-running the
+  // proxy — so an already-authenticated user ends up looking at the
+  // sign-in form. On mount (and on pageshow for the bfcache case), if
+  // sessionStorage already has an access token we replace our history
+  // entry with the intended destination.
+  useEffect(() => {
+    function bounceIfAuthenticated(): void {
+      if (typeof window === "undefined") return;
+      if (sessionStorage.getItem(ACCESS_KEY)) {
+        router.replace(redirectTo);
+      }
+    }
+    bounceIfAuthenticated();
+    window.addEventListener("pageshow", bounceIfAuthenticated);
+    return () => {
+      window.removeEventListener("pageshow", bounceIfAuthenticated);
+    };
+  }, [redirectTo, router]);
 
   /**
    * Common post-auth step. Runs three things in this order:

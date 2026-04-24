@@ -12,7 +12,7 @@
  * consume mock shapes. Delete it once every caller is migrated.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -55,6 +55,12 @@ interface Props {
 export function NewApiLeadSheet({ open, onOpenChange }: Props) {
   const createLead = useApiCreateLead();
 
+  // useMutation.isPending has a render-gap between click 1 and click 2,
+  // so a fast double-click on the disabled button slips a 2nd POST
+  // through. A ref is synchronous — the 2nd handler invocation sees
+  // submittingRef.current === true and bails before calling mutateAsync.
+  const submittingRef = useRef(false);
+
   const [form, setForm] = useState({
     name: "",
     company: "",
@@ -94,6 +100,8 @@ export function NewApiLeadSheet({ open, onOpenChange }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!isValid()) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
 
     // decimalStr: raw trimmed string. Empty → default "0" (matches
     // CreateLeadSchema.estimatedValue.default("0")).
@@ -122,6 +130,8 @@ export function NewApiLeadSheet({ open, onOpenChange }: Props) {
           ? err.problem.detail ?? err.problem.title ?? "Failed to create lead"
           : "Failed to create lead.";
       toast.error(msg);
+    } finally {
+      submittingRef.current = false;
     }
   }
 

@@ -1,0 +1,178 @@
+{
+    "metrics": {
+        "http_reqs": {
+            "count": 69329,
+            "rate": 1529.6794303447236
+        },
+        "http_req_duration{expected_response:true}": {
+            "p(99)": 13.354719999999999,
+            "max": 79.97,
+            "avg": 3.929658180559393,
+            "min": 0.975,
+            "med": 3.499,
+            "p(90)": 5.625,
+            "p(95)": 7.474
+        },
+        "data_sent": {
+            "count": 48750004,
+            "rate": 1075623.1641596302
+        },
+        "vus": {
+            "value": 7,
+            "min": 7,
+            "max": 100
+        },
+        "http_req_blocked": {
+            "p(99)": 0.009,
+            "max": 0.913,
+            "avg": 0.0029242164173732856,
+            "min": 0,
+            "med": 0.002,
+            "p(90)": 0.004,
+            "p(95)": 0.005
+        },
+        "data_received": {
+            "count": 128122891,
+            "rate": 2826911.550995963
+        },
+        "http_req_sending": {
+            "avg": 0.008323645227824129,
+            "min": 0.002,
+            "med": 0.007,
+            "p(90)": 0.012,
+            "p(95)": 0.016,
+            "p(99)": 0.033,
+            "max": 0.881
+        },
+        "checks": {
+            "passes": 69324,
+            "fails": 69324,
+            "value": 0.5
+        },
+        "http_req_waiting": {
+            "med": 3.468,
+            "p(90)": 5.592,
+            "p(95)": 7.441,
+            "p(99)": 13.325,
+            "max": 79.871,
+            "avg": 3.8998804829147944,
+            "min": 0.956
+        },
+        "iteration_duration": {
+            "p(90)": 55.8620581,
+            "p(95)": 57.7107394,
+            "p(99)": 63.56433516,
+            "max": 88.83975,
+            "avg": 54.16110401788734,
+            "min": 51.093416,
+            "med": 53.798520499999995
+        },
+        "http_req_tls_handshaking": {
+            "p(95)": 0,
+            "p(99)": 0,
+            "max": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 69329,
+            "thresholds": {
+                "rate<0.05": false
+            },
+            "value": 0
+        },
+        "iterations": {
+            "count": 69324,
+            "rate": 1529.5691100292465
+        },
+        "http_req_duration": {
+            "med": 3.499,
+            "p(90)": 5.625,
+            "p(95)": 7.474,
+            "p(99)": 13.354719999999999,
+            "max": 79.97,
+            "avg": 3.929658180559393,
+            "min": 0.975,
+            "thresholds": {
+                "p(95)<1500": false
+            }
+        },
+        "http_req_receiving": {
+            "p(95)": 0.033,
+            "p(99)": 0.058,
+            "max": 0.881,
+            "avg": 0.021454052416739377,
+            "min": 0.005,
+            "med": 0.019,
+            "p(90)": 0.027
+        },
+        "vus_max": {
+            "min": 100,
+            "max": 100,
+            "value": 100
+        },
+        "http_req_connecting": {
+            "max": 0.45,
+            "avg": 0.0003596619019457946,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0
+        }
+    },
+    "setup_data": {
+        "pool": [
+            {
+                "email": "admin@instigenie.local",
+                "role": "SUPER_ADMIN",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTVVBFUl9BRE1JTiJdLCJvcmciOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGEwMDEiLCJpZG4iOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGYwMDEiLCJjYXBhYmlsaXRpZXMiOnsiY2FuUENCUmV3b3JrIjpmYWxzZSwiY2FuT0NBc3NlbWJseSI6ZmFsc2UsInBlcm1pdHRlZExpbmVzIjpbXX0sInN1YiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYjAwMSIsImlzcyI6Imluc3RpZ2VuaWUtYXBpIiwiYXVkIjoiaW5zdGlnZW5pZS1pbnRlcm5hbCIsImV4cCI6MTc3Njk3Njg5NSwiaWF0IjoxNzc2OTc1OTk1LCJqdGkiOiIwZjZmMjQ5NC1hNTEwLTQ4NjktYTcwZi1jMGJhNzEyNjJhMTMifQ.aJ-yqJuGr4cdd0dnrz0I7R9fhUilSohW9Hysd4pSqpQ"
+            },
+            {
+                "email": "mgmt@instigenie.local",
+                "role": "MANAGEMENT",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJNQU5BR0VNRU5UIl0sIm9yZyI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYTAwMSIsImlkbiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwZjAwMiIsImNhcGFiaWxpdGllcyI6eyJjYW5QQ0JSZXdvcmsiOmZhbHNlLCJjYW5PQ0Fzc2VtYmx5IjpmYWxzZSwicGVybWl0dGVkTGluZXMiOltdfSwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBiMDAyIiwiaXNzIjoiaW5zdGlnZW5pZS1hcGkiLCJhdWQiOiJpbnN0aWdlbmllLWludGVybmFsIiwiZXhwIjoxNzc2OTc2ODk1LCJpYXQiOjE3NzY5NzU5OTUsImp0aSI6IjA4Y2I4MmFlLWE2NjUtNGFlOS05Mjk2LTVhYjU2YzA2NTljNiJ9.zqdAzMA8rUV_eZN5O2ZXczB7_0cS2uiT5kSpdQuE-OU"
+            },
+            {
+                "role": "SALES_REP",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTQUxFU19SRVAiXSwib3JnIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBhMDAxIiwiaWRuIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBmMDAzIiwiY2FwYWJpbGl0aWVzIjp7ImNhblBDQlJld29yayI6ZmFsc2UsImNhbk9DQXNzZW1ibHkiOmZhbHNlLCJwZXJtaXR0ZWRMaW5lcyI6W119LCJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGIwMDMiLCJpc3MiOiJpbnN0aWdlbmllLWFwaSIsImF1ZCI6Imluc3RpZ2VuaWUtaW50ZXJuYWwiLCJleHAiOjE3NzY5NzY4OTUsImlhdCI6MTc3Njk3NTk5NSwianRpIjoiOGEyMDZmZmYtMTZkZi00NTU0LTkxMzEtNWUyOGRhMmFmODNkIn0.sKT0B5aCNvoNwb_i9zyJtfjuvqBl84GvQ9ht9qvIVzA",
+                "email": "sales@instigenie.local"
+            },
+            {
+                "email": "salesmgr@instigenie.local",
+                "role": "SALES_MANAGER",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTQUxFU19NQU5BR0VSIl0sIm9yZyI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYTAwMSIsImlkbiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwZjAwNCIsImNhcGFiaWxpdGllcyI6eyJjYW5QQ0JSZXdvcmsiOmZhbHNlLCJjYW5PQ0Fzc2VtYmx5IjpmYWxzZSwicGVybWl0dGVkTGluZXMiOltdfSwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBiMDA0IiwiaXNzIjoiaW5zdGlnZW5pZS1hcGkiLCJhdWQiOiJpbnN0aWdlbmllLWludGVybmFsIiwiZXhwIjoxNzc2OTc2ODk1LCJpYXQiOjE3NzY5NzU5OTUsImp0aSI6IjMzMmZiMGVmLTkwNzgtNDk2MC04ZTg4LTUzODRlYzczMWZjMyJ9.gA-Ve5nLun5QxlWzgkfPrmq7Qro5kbvST-mT0oN_gHs"
+            },
+            {
+                "email": "finance@instigenie.local",
+                "role": "FINANCE",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJGSU5BTkNFIl0sIm9yZyI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYTAwMSIsImlkbiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwZjAwNSIsImNhcGFiaWxpdGllcyI6eyJjYW5QQ0JSZXdvcmsiOmZhbHNlLCJjYW5PQ0Fzc2VtYmx5IjpmYWxzZSwicGVybWl0dGVkTGluZXMiOltdfSwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBiMDA1IiwiaXNzIjoiaW5zdGlnZW5pZS1hcGkiLCJhdWQiOiJpbnN0aWdlbmllLWludGVybmFsIiwiZXhwIjoxNzc2OTc2ODk1LCJpYXQiOjE3NzY5NzU5OTUsImp0aSI6IjI4ZmNkYzM3LTUxZDAtNGJiMS1iNmQ2LTZkODFiZDg2NzU2MiJ9.4FR0hdE12XnOuyvgbnYqs0kBHpTMacWB00CR-ogeBok"
+            }
+        ]
+    },
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "200 OK": {
+                    "fails": 0,
+                    "name": "200 OK",
+                    "path": "::200 OK",
+                    "id": "e9654c443eff553da9e69eda7007924e",
+                    "passes": 69324
+                },
+                "has user.id": {
+                    "passes": 0,
+                    "fails": 69324,
+                    "name": "has user.id",
+                    "path": "::has user.id",
+                    "id": "2d7776315e5645a562ae1ecbd7cdd263"
+                }
+            }
+    }
+}

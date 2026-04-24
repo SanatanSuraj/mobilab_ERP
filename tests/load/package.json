@@ -1,0 +1,11 @@
+{
+  "name": "@instigenie/load",
+  "version": "0.1.0",
+  "private": true,
+  "description": "k6 load tests for the top-5 API endpoints. Run with `./run.sh`.",
+  "scripts": {
+    "test": "./run.sh",
+    "test:one": "k6 run",
+    "clean-leads": "./scripts/clean-load-leads.sh"
+  }
+}

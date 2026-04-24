@@ -29,6 +29,7 @@
  * at ops/sql/init/07-finance.sql:41-49.
  */
 
+import { m } from "@instigenie/money";
 import type {
   EventHandler,
   SalesOrderDispatchedPayload,
@@ -176,7 +177,14 @@ export const draftSalesInvoice: EventHandler<
     linePlaceholders.push(
       `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}::numeric, $${p++}::numeric, $${p++}::numeric, $${p++}::numeric, $${p++}::numeric, $${p++}::numeric, $${p++}::numeric)`,
     );
-    const subtotal = Number(ln.line_total) - Number(ln.tax_amount);
+    // Money math via decimal.js so the NUMERIC line_subtotal round-trips
+    // exactly. Native float subtraction here was a real bug: two perfectly
+    // clean NUMERIC strings (e.g. "100.10" - "9.10" = "91.00") round-trip
+    // through `Number` as 100.1 - 9.1 = 90.99999999999999, which then
+    // `.toFixed(4)` shows as "91.0000" today but would fail the
+    // `line_subtotal + line_tax = line_total` invariant if either side is
+    // ever compared at higher precision.
+    const lineSubtotal = m(ln.line_total).minus(m(ln.tax_amount)).toFixed(4);
     lineValues.push(
       payload.orgId,
       invoiceId,
@@ -186,7 +194,7 @@ export const draftSalesInvoice: EventHandler<
       ln.unit_price,
       ln.discount_pct,
       ln.tax_pct,
-      subtotal.toFixed(4),
+      lineSubtotal,
       ln.tax_amount,
       ln.line_total,
     );

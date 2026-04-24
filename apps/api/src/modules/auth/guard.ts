@@ -6,7 +6,7 @@
  */
 
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { UnauthorizedError } from "@instigenie/errors";
+import { ForbiddenError, UnauthorizedError } from "@instigenie/errors";
 import {
   AUDIENCE,
   type Audience,
@@ -80,9 +80,11 @@ export function requirePermission(perm: Permission) {
     const user = req.user;
     if (!user) throw new UnauthorizedError("authentication required");
     if (!user.permissions.has(perm)) {
-      throw new UnauthorizedError("permission denied"); // 401 — caller can
-      // narrow to 403 via ForbiddenError if preferred. We pick 401 here to
-      // hide which permissions exist.
+      // Authenticated but not authorized → HTTP 403. The message intentionally
+      // omits the permission name so we don't enumerate the permission surface
+      // for an attacker; the client gets enough to know retrying auth won't
+      // help (which is what 401 would incorrectly suggest).
+      throw new ForbiddenError("permission denied");
     }
   };
 }

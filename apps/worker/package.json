@@ -23,6 +23,7 @@
     "@instigenie/contracts": "workspace:*",
     "@instigenie/db": "workspace:*",
     "@instigenie/errors": "workspace:*",
+    "@instigenie/money": "workspace:*",
     "@instigenie/observability": "workspace:*",
     "@instigenie/queue": "workspace:*",
     "@instigenie/resilience": "workspace:*",

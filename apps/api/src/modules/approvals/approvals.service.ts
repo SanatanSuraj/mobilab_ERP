@@ -47,6 +47,7 @@ import {
   UnauthorizedError,
   ValidationError,
 } from "@instigenie/errors";
+import { m, MoneyTypeError } from "@instigenie/money";
 import { withRequest } from "../shared/with-request.js";
 import { planPagination } from "../shared/pagination.js";
 import { approvalsRepo } from "./approvals.repository.js";
@@ -259,15 +260,45 @@ export class ApprovalsService {
         );
       }
       if (input.entityType === "deal_discount") {
-        const pct = Number(input.amount);
-        if (Number.isNaN(pct) || pct <= DEAL_DISCOUNT_MIN_PCT) {
+        // input.amount is a decimal string — parse via decimal.js so we
+        // never coerce money-adjacent values through Number(). Here it's
+        // actually a percentage, not a currency amount, but the same
+        // precision argument applies: the approval chain band lookup later
+        // compares string-formatted min/max_amount and any float drift here
+        // would shift which chain fires.
+        let pct;
+        try {
+          pct = m(input.amount);
+        } catch (err) {
+          if (err instanceof MoneyTypeError) {
+            throw new ValidationError(
+              `deal_discount requires >${DEAL_DISCOUNT_MIN_PCT}% — ≤${DEAL_DISCOUNT_MIN_PCT}% skips approval`,
+            );
+          }
+          throw err;
+        }
+        if (pct.lte(DEAL_DISCOUNT_MIN_PCT)) {
           throw new ValidationError(
             `deal_discount requires >${DEAL_DISCOUNT_MIN_PCT}% — ≤${DEAL_DISCOUNT_MIN_PCT}% skips approval`,
           );
         }
       } else {
-        const amt = Number(input.amount);
-        if (Number.isNaN(amt) || amt < 0) {
+        // Decimal.js parse; `m()` throws MoneyTypeError on non-numeric
+        // input, which we surface as ValidationError — keeping the public
+        // contract identical to the old `Number.isNaN(...)` check but
+        // without dropping precision on the way through.
+        let amt;
+        try {
+          amt = m(input.amount);
+        } catch (err) {
+          if (err instanceof MoneyTypeError) {
+            throw new ValidationError(
+              "amount must be a non-negative number",
+            );
+          }
+          throw err;
+        }
+        if (amt.isNegative()) {
           throw new ValidationError("amount must be a non-negative number");
         }
       }

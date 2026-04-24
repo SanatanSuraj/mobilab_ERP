@@ -54,6 +54,7 @@
  * correctness dependency.
  */
 
+import { m } from "@instigenie/money";
 import type { EventHandler, PaymentReceivedPayload } from "./types.js";
 
 interface InvoiceSettlementRow {
@@ -92,8 +93,12 @@ export const observeSettlement: EventHandler<PaymentReceivedPayload> = async (
   // currently inspect sales_invoices only because AR visibility is the
   // Phase 1 need; AP maybeSettle follows the same pattern if Track 2
   // adds it.
-  const signedAmount = Number(payload.amount);
-  const isInbound = signedAmount >= 0;
+  // `payload.amount` is a decimal string (contract-validated upstream). Use
+  // decimal.js so we never round-trip through Number — the sign itself is
+  // float-safe, but inbound/outbound disambiguation is the hinge for which
+  // ledger (AR vs AP) we touch, so "make it bit-exact" is cheap insurance.
+  const signedAmount = m(payload.amount);
+  const isInbound = !signedAmount.isNegative();
   if (!isInbound) {
     ctx.log.info(
       {
@@ -131,12 +136,18 @@ export const observeSettlement: EventHandler<PaymentReceivedPayload> = async (
   const seen = new Set<string>();
   for (const row of rows) {
     seen.add(row.id);
-    const paid = Number(row.amount_paid);
-    const total = Number(row.grand_total);
+    // NUMERIC columns arrive as strings (pg type parser); feed them directly
+    // to decimal.js. The old `Number(paid) + 1e-4 >= Number(total)` was a
+    // genuine precision-loss bug: the 1e-4 epsilon was papering over float
+    // drift on large totals, and would have falsely "settled" invoices that
+    // were actually ₹0.0001 short. Decimal.js `gte()` is bit-exact so we can
+    // drop the epsilon entirely.
+    const paid = m(row.amount_paid);
+    const total = m(row.grand_total);
     // Guard: grand_total = 0 invoices shouldn't exist in practice (CHECK
     // allows 0 but the service refuses to POST them). Treat as "paid"
     // trivially to avoid a divide-by-zero/false-negative.
-    const isSettled = total > 0 ? paid + 1e-4 >= total : true;
+    const isSettled = total.isZero() ? true : paid.gte(total);
     if (isSettled) {
       fullySettled += 1;
       settledInvoices.push({

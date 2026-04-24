@@ -24,6 +24,7 @@
     "@instigenie/worker": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/sdk-trace-base": "^1.28.0",
+    "drizzle-orm": "^0.36.4",
     "ioredis": "^5.4.1",
     "pg": "^8.13.1"
   },
@@ -31,6 +32,7 @@
     "@instigenie/config": "workspace:*",
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
+    "fast-check": "^3.23.1",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"
   }

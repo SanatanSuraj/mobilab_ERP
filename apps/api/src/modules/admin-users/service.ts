@@ -112,6 +112,15 @@ function buildAcceptUrl(webOrigin: string, rawToken: string): string {
   return url.toString();
 }
 
+/**
+ * pg error type guard — matches the inline helpers used elsewhere
+ * (qc/templates, finance/payments, etc.). Used to translate the partial
+ * unique index's 23505 into a clean ConflictError under concurrent invites.
+ */
+function isPgError(err: unknown): err is { code?: string; constraint?: string } {
+  return typeof err === "object" && err !== null && "code" in err;
+}
+
 // ─── Service class ─────────────────────────────────────────────────────────
 
 export interface AdminUsersServiceDeps {
@@ -176,15 +185,33 @@ export class AdminUsersService {
         const raw = crypto.randomBytes(32).toString("hex");
         const hash = sha256(raw);
 
-        const inserted = await insertInvitation(client, {
-          orgId: user.orgId,
-          email: input.email,
-          roleId: input.roleId,
-          tokenHash: hash,
-          invitedBy: user.id,
-          expiresAt,
-          metadata: input.name ? { name: input.name } : {},
-        });
+        // The pre-check above catches most duplicates, but concurrent invites
+        // can both pass it and collide at the partial unique index. Catch
+        // 23505 on user_invitations_org_email_active_unique and translate
+        // to ConflictError so the client gets a 409 instead of a 500.
+        let inserted;
+        try {
+          inserted = await insertInvitation(client, {
+            orgId: user.orgId,
+            email: input.email,
+            roleId: input.roleId,
+            tokenHash: hash,
+            invitedBy: user.id,
+            expiresAt,
+            metadata: input.name ? { name: input.name } : {},
+          });
+        } catch (err) {
+          if (
+            isPgError(err) &&
+            err.code === "23505" &&
+            err.constraint === "user_invitations_org_email_active_unique"
+          ) {
+            throw new ConflictError(
+              "an active invitation for this email already exists",
+            );
+          }
+          throw err;
+        }
 
         const orgName = await loadOrgName(client, user.orgId);
         const inviter = await loadUserSummary(client, user.id);

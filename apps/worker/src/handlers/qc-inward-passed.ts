@@ -15,6 +15,7 @@
  * accidental double-INSERTs noisy instead of silently duplicating.
  */
 
+import { m } from "@instigenie/money";
 import type { EventHandler, QcInwardPassedPayload } from "./types.js";
 
 function stableSuffix(outboxId: string): string {
@@ -59,9 +60,13 @@ export const draftPurchaseInvoice: EventHandler<
   QcInwardPassedPayload
 > = async (client, payload, ctx) => {
   const invoiceNumber = `PI-${payload.grnNumber}-${stableSuffix(ctx.outboxId)}`;
-  const quantityNum = Number(payload.quantity);
-  const unitPriceNum = Number(payload.unitPrice ?? "0");
-  const lineSubtotal = (quantityNum * unitPriceNum).toFixed(4);
+  // Use decimal.js via @instigenie/money so the purchase_invoices NUMERIC
+  // round-trips exactly. `Number(qty) * Number(price)` loses precision above
+  // 2^53 paise and also introduces classic float drift (0.1*0.2 ≠ 0.02) that
+  // shows up in 4dp ledger rows as "off by a paisa" reconciliation noise.
+  const quantity = m(payload.quantity);
+  const unitPrice = m(payload.unitPrice ?? "0");
+  const lineSubtotal = quantity.times(unitPrice).toFixed(4);
   const {
     rows: [invoice],
   } = await client.query<{ id: string }>(

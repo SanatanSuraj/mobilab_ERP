@@ -1,0 +1,173 @@
+{
+    "root_group": {
+        "checks": {
+            "200 OK": {
+                "name": "200 OK",
+                "path": "::200 OK",
+                "id": "e9654c443eff553da9e69eda7007924e",
+                "passes": 1624,
+                "fails": 0
+            },
+            "has data array": {
+                "fails": 0,
+                "name": "has data array",
+                "path": "::has data array",
+                "id": "4b06394e68b7c0c7ab1b0deed50b335b",
+                "passes": 1624
+            }
+        },
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {}
+    },
+    "metrics": {
+        "vus": {
+            "value": 1,
+            "min": 1,
+            "max": 10
+        },
+        "http_req_blocked": {
+            "avg": 0.008585995085995161,
+            "min": 0.001,
+            "med": 0.004,
+            "p(90)": 0.009,
+            "p(95)": 0.011,
+            "p(99)": 0.0661099999999999,
+            "max": 1.14
+        },
+        "http_req_sending": {
+            "p(99)": 0.0884899999999998,
+            "max": 0.948,
+            "avg": 0.018843366093366107,
+            "min": 0.003,
+            "med": 0.013,
+            "p(90)": 0.031,
+            "p(95)": 0.04564999999999993
+        },
+        "http_reqs": {
+            "count": 1628,
+            "rate": 35.82049382423223
+        },
+        "http_req_connecting": {
+            "avg": 0.0022708845208845208,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "max": 0.707
+        },
+        "http_req_duration": {
+            "max": 90.738,
+            "avg": 32.23368488943489,
+            "min": 10.619,
+            "med": 34.338,
+            "p(90)": 39.7629,
+            "p(95)": 41.957649999999994,
+            "p(99)": 47.5788,
+            "thresholds": {
+                "p(95)<1500": false
+            }
+        },
+        "iteration_duration": {
+            "avg": 233.09694470320184,
+            "min": 211.233959,
+            "med": 235.273375,
+            "p(90)": 240.5904161,
+            "p(95)": 242.57919995,
+            "p(99)": 247.28032339,
+            "max": 275.754875
+        },
+        "checks": {
+            "passes": 3248,
+            "fails": 0,
+            "value": 1
+        },
+        "http_req_duration{expected_response:true}": {
+            "med": 34.338,
+            "p(90)": 39.7629,
+            "p(95)": 41.957649999999994,
+            "p(99)": 47.5788,
+            "max": 90.738,
+            "avg": 32.23368488943489,
+            "min": 10.619
+        },
+        "http_req_waiting": {
+            "avg": 32.140525798525765,
+            "min": 10.566,
+            "med": 34.256,
+            "p(90)": 39.674099999999996,
+            "p(95)": 41.907399999999996,
+            "p(99)": 47.53096,
+            "max": 90.319
+        },
+        "iterations": {
+            "count": 1624,
+            "rate": 35.73248278289505
+        },
+        "http_req_receiving": {
+            "p(95)": 0.15164999999999992,
+            "p(99)": 0.2549199999999999,
+            "max": 1.027,
+            "avg": 0.07431572481572489,
+            "min": 0.014,
+            "med": 0.064,
+            "p(90)": 0.123
+        },
+        "data_received": {
+            "count": 20511035,
+            "rate": 451299.387313336
+        },
+        "http_req_failed": {
+            "fails": 1628,
+            "passes": 0,
+            "thresholds": {
+                "rate<0.05": false
+            },
+            "value": 0
+        },
+        "vus_max": {
+            "min": 10,
+            "max": 10,
+            "value": 10
+        },
+        "http_req_tls_handshaking": {
+            "p(99)": 0,
+            "max": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "data_sent": {
+            "count": 1162626,
+            "rate": 25580.981236420037
+        }
+    },
+    "setup_data": {
+        "pool": [
+            {
+                "role": "SUPER_ADMIN",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTVVBFUl9BRE1JTiJdLCJvcmciOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGEwMDEiLCJpZG4iOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGYwMDEiLCJjYXBhYmlsaXRpZXMiOnsiY2FuUENCUmV3b3JrIjpmYWxzZSwiY2FuT0NBc3NlbWJseSI6ZmFsc2UsInBlcm1pdHRlZExpbmVzIjpbXX0sInN1YiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYjAwMSIsImlzcyI6Imluc3RpZ2VuaWUtYXBpIiwiYXVkIjoiaW5zdGlnZW5pZS1pbnRlcm5hbCIsImV4cCI6MTc3NzAwMzE5OSwiaWF0IjoxNzc3MDAyMjk5LCJqdGkiOiI1MDEwOGRiOC05MmYzLTQ5OTctOTZiOC1iMTIxOTZiZDZmZmMifQ.Q6vzNlLLfmp0mKpDbxcMcF7ohSy0mFZ1ETiw7D0HjyY",
+                "email": "admin@instigenie.local"
+            },
+            {
+                "email": "mgmt@instigenie.local",
+                "role": "MANAGEMENT",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJNQU5BR0VNRU5UIl0sIm9yZyI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYTAwMSIsImlkbiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwZjAwMiIsImNhcGFiaWxpdGllcyI6eyJjYW5QQ0JSZXdvcmsiOmZhbHNlLCJjYW5PQ0Fzc2VtYmx5IjpmYWxzZSwicGVybWl0dGVkTGluZXMiOltdfSwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBiMDAyIiwiaXNzIjoiaW5zdGlnZW5pZS1hcGkiLCJhdWQiOiJpbnN0aWdlbmllLWludGVybmFsIiwiZXhwIjoxNzc3MDAzMTk5LCJpYXQiOjE3NzcwMDIyOTksImp0aSI6IjZkYmQ1YjI1LTlhODYtNDU0MC1hYmEzLWU2NzIyZjQzYjQ5YyJ9.oqJiLxgE1iO_-acjYrir1tq-ZUbHf0quk79Pq0Dk2WE"
+            },
+            {
+                "email": "sales@instigenie.local",
+                "role": "SALES_REP",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTQUxFU19SRVAiXSwib3JnIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBhMDAxIiwiaWRuIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBmMDAzIiwiY2FwYWJpbGl0aWVzIjp7ImNhblBDQlJld29yayI6ZmFsc2UsImNhbk9DQXNzZW1ibHkiOmZhbHNlLCJwZXJtaXR0ZWRMaW5lcyI6W119LCJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGIwMDMiLCJpc3MiOiJpbnN0aWdlbmllLWFwaSIsImF1ZCI6Imluc3RpZ2VuaWUtaW50ZXJuYWwiLCJleHAiOjE3NzcwMDMyMDAsImlhdCI6MTc3NzAwMjMwMCwianRpIjoiNGRlYTVkOTctZTUyNS00MTBmLTk3YzYtNmIxOTU5MWRlMDNmIn0.pef4HqT5jjqPPPgy4eRJ3eNfDmT0d2G2Z442iVmatzQ"
+            },
+            {
+                "email": "salesmgr@instigenie.local",
+                "role": "SALES_MANAGER",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTQUxFU19NQU5BR0VSIl0sIm9yZyI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYTAwMSIsImlkbiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwZjAwNCIsImNhcGFiaWxpdGllcyI6eyJjYW5QQ0JSZXdvcmsiOmZhbHNlLCJjYW5PQ0Fzc2VtYmx5IjpmYWxzZSwicGVybWl0dGVkTGluZXMiOltdfSwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBiMDA0IiwiaXNzIjoiaW5zdGlnZW5pZS1hcGkiLCJhdWQiOiJpbnN0aWdlbmllLWludGVybmFsIiwiZXhwIjoxNzc3MDAzMjAwLCJpYXQiOjE3NzcwMDIzMDAsImp0aSI6IjJmNzQ4N2NlLTI5NDktNDQ5OS04YWI2LWYxZjZjYjdhM2E2ZiJ9.Zo18bp3ySOvjLi9MDDug8Uo4uMuXv1jYU9LEtcH9J9s"
+            }
+        ]
+    }
+}

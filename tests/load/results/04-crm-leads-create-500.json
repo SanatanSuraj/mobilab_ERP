@@ -1,0 +1,168 @@
+{
+    "metrics": {
+        "http_req_duration{expected_response:true}": {
+            "min": 16.087,
+            "med": 1616.637,
+            "p(90)": 1882.2350000000001,
+            "p(95)": 1949.8926000000001,
+            "p(99)": 2082.8473599999998,
+            "max": 2117.235,
+            "avg": 1368.2752041273236
+        },
+        "http_req_waiting": {
+            "avg": 1368.2034573152912,
+            "min": 16.023,
+            "med": 1616.575,
+            "p(90)": 1882.17,
+            "p(95)": 1949.8288,
+            "p(99)": 2082.77812,
+            "max": 2117.158
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 10273,
+            "thresholds": {
+                "rate<0.05": false
+            },
+            "value": 0
+        },
+        "http_reqs": {
+            "count": 10273,
+            "rate": 225.24539809706775
+        },
+        "iteration_duration": {
+            "max": 2617.599417,
+            "avg": 1869.075830231561,
+            "min": 516.551125,
+            "med": 2117.0315204999997,
+            "p(90)": 2382.6067838999998,
+            "p(95)": 2450.3254939,
+            "p(99)": 2583.45708669
+        },
+        "data_sent": {
+            "rate": 215841.90154212958,
+            "count": 9844125
+        },
+        "checks": {
+            "passes": 20540,
+            "fails": 0,
+            "value": 1
+        },
+        "http_req_sending": {
+            "avg": 0.02046724423245369,
+            "min": 0.005,
+            "med": 0.018,
+            "p(90)": 0.026,
+            "p(95)": 0.039,
+            "p(99)": 0.069,
+            "max": 0.49
+        },
+        "http_req_receiving": {
+            "avg": 0.0512795677990845,
+            "min": 0.01,
+            "med": 0.051,
+            "p(90)": 0.068,
+            "p(95)": 0.074,
+            "p(99)": 0.092,
+            "max": 0.97
+        },
+        "http_req_duration": {
+            "avg": 1368.2752041273236,
+            "min": 16.087,
+            "med": 1616.637,
+            "p(90)": 1882.2350000000001,
+            "p(95)": 1949.8926000000001,
+            "p(99)": 2082.8473599999998,
+            "max": 2117.235,
+            "thresholds": {
+                "p(95)<1500": true
+            }
+        },
+        "http_req_tls_handshaking": {
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "max": 0,
+            "avg": 0
+        },
+        "data_received": {
+            "count": 12788787,
+            "rate": 280406.4459255918
+        },
+        "http_req_blocked": {
+            "p(99)": 0.24727999999999992,
+            "max": 1.304,
+            "avg": 0.015980823517954802,
+            "min": 0.001,
+            "med": 0.004,
+            "p(90)": 0.007,
+            "p(95)": 0.03439999999999955
+        },
+        "vus": {
+            "value": 88,
+            "min": 36,
+            "max": 500
+        },
+        "iterations": {
+            "count": 10270,
+            "rate": 225.17962021385048
+        },
+        "http_req_connecting": {
+            "p(99)": 0.19127999999999992,
+            "max": 1.104,
+            "avg": 0.008853207436970708,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "vus_max": {
+            "max": 500,
+            "value": 500,
+            "min": 500
+        }
+    },
+    "setup_data": {
+        "pool": [
+            {
+                "email": "admin@instigenie.local",
+                "role": "SUPER_ADMIN",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTVVBFUl9BRE1JTiJdLCJvcmciOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGEwMDEiLCJpZG4iOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGYwMDEiLCJjYXBhYmlsaXRpZXMiOnsiY2FuUENCUmV3b3JrIjpmYWxzZSwiY2FuT0NBc3NlbWJseSI6ZmFsc2UsInBlcm1pdHRlZExpbmVzIjpbXX0sInN1YiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYjAwMSIsImlzcyI6Imluc3RpZ2VuaWUtYXBpIiwiYXVkIjoiaW5zdGlnZW5pZS1pbnRlcm5hbCIsImV4cCI6MTc3NzAwNDQ0OCwiaWF0IjoxNzc3MDAzNTQ4LCJqdGkiOiIwNDgxNGRhNS1mZmMzLTQ2MjQtYWQ5OC1jN2U1NmQ0ZGUwODQifQ.AH-6qZvDqQnI57xXX7ZwDktij45hHTOvkb9Hubl1ej8"
+            },
+            {
+                "email": "sales@instigenie.local",
+                "role": "SALES_REP",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTQUxFU19SRVAiXSwib3JnIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBhMDAxIiwiaWRuIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBmMDAzIiwiY2FwYWJpbGl0aWVzIjp7ImNhblBDQlJld29yayI6ZmFsc2UsImNhbk9DQXNzZW1ibHkiOmZhbHNlLCJwZXJtaXR0ZWRMaW5lcyI6W119LCJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGIwMDMiLCJpc3MiOiJpbnN0aWdlbmllLWFwaSIsImF1ZCI6Imluc3RpZ2VuaWUtaW50ZXJuYWwiLCJleHAiOjE3NzcwMDQ0NDgsImlhdCI6MTc3NzAwMzU0OCwianRpIjoiYTg0ZDAzM2ItN2Y3Ny00NGJhLWFlMjYtMzhlNjBjYzI5YzljIn0.4bakF86NF1NHasIixPY6YsDW0zW5OKjmoT7DwGmGJhY"
+            },
+            {
+                "email": "salesmgr@instigenie.local",
+                "role": "SALES_MANAGER",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTQUxFU19NQU5BR0VSIl0sIm9yZyI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYTAwMSIsImlkbiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwZjAwNCIsImNhcGFiaWxpdGllcyI6eyJjYW5QQ0JSZXdvcmsiOmZhbHNlLCJjYW5PQ0Fzc2VtYmx5IjpmYWxzZSwicGVybWl0dGVkTGluZXMiOltdfSwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBiMDA0IiwiaXNzIjoiaW5zdGlnZW5pZS1hcGkiLCJhdWQiOiJpbnN0aWdlbmllLWludGVybmFsIiwiZXhwIjoxNzc3MDA0NDQ4LCJpYXQiOjE3NzcwMDM1NDgsImp0aSI6IjZhZmNiZWVhLTU0ZjYtNDBkZC1hYTIxLTc3YjQ4N2M3MThkZiJ9.sJEAiJiSdm4b0GWt19dB0T_DuJR7FFdB4nkVl3Oi7fM"
+            }
+        ]
+    },
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "201 Created": {
+                    "passes": 10270,
+                    "fails": 0,
+                    "name": "201 Created",
+                    "path": "::201 Created",
+                    "id": "728dcd977aae263ca314731145e1d447"
+                },
+                "has lead.id": {
+                    "name": "has lead.id",
+                    "path": "::has lead.id",
+                    "id": "d95dadcaa40f7553b18d0e48d1a69e16",
+                    "passes": 10270,
+                    "fails": 0
+                }
+            }
+    }
+}

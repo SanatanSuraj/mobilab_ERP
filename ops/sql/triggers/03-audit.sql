@@ -1,9 +1,18 @@
 -- Generic audit trigger. Attach to any table to automatically log INSERT /
 -- UPDATE / DELETE into audit.log. ARCHITECTURE.md §11.
 --
--- Actor is read from a GUC `app.current_user` (uuid) set by the API layer
--- at request start; if it's empty (system migrations, seed), actor=NULL.
+-- Actor is read from GUC `app.current_user` (uuid) set by the API layer at
+-- request start; if empty (system migrations, seed), actor=NULL.
 -- Org id is read from `app.current_org` (same GUC as RLS).
+-- Trace id is read from `app.current_trace_id` — the W3C trace-parent
+-- propagated by the API for observability deep-links (Phase 4 §4.2).
+--
+-- ORDERING NOTE — this file is the authoritative definition of
+-- audit.tg_log(). ops/sql/00-apply-all.sh runs init/ BEFORE triggers/, so
+-- any CREATE OR REPLACE of this function in init/ gets clobbered. The
+-- trace_id column add lives in init/19-phase4-audit-trace-id.sql so it's
+-- present by the time this function's INSERT references it on fresh
+-- installs.
 
 CREATE OR REPLACE FUNCTION audit.tg_log()
 RETURNS trigger
@@ -12,10 +21,11 @@ SECURITY DEFINER -- SECURITY DEFINER lets us bypass RLS on audit.log
 SET search_path = audit, public
 AS $$
 DECLARE
-  v_org_id  uuid;
-  v_actor   uuid;
-  v_row_id  uuid;
-  v_action  text := TG_OP;
+  v_org_id    uuid;
+  v_actor     uuid;
+  v_trace_id  text;
+  v_row_id    uuid;
+  v_action    text := TG_OP;
 BEGIN
   BEGIN
     v_org_id := nullif(current_setting('app.current_org', true), '')::uuid;
@@ -27,27 +37,39 @@ BEGIN
   EXCEPTION WHEN others THEN
     v_actor := NULL;
   END;
+  BEGIN
+    v_trace_id := nullif(current_setting('app.current_trace_id', true), '');
+  EXCEPTION WHEN others THEN
+    v_trace_id := NULL;
+  END;
 
   -- Every audited table has an `id` uuid column. We read it via to_jsonb to
   -- stay schema-agnostic.
   IF v_action = 'DELETE' THEN
     v_row_id := (to_jsonb(OLD) ->> 'id')::uuid;
-    INSERT INTO audit.log (org_id, table_name, row_id, action, actor, before, after)
+    INSERT INTO audit.log (
+      org_id, table_name, row_id, action, actor,
+      before, after, trace_id
+    )
     VALUES (
       coalesce(v_org_id, (to_jsonb(OLD) ->> 'org_id')::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
       TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME,
-      v_row_id, v_action, v_actor, to_jsonb(OLD), NULL
+      v_row_id, v_action, v_actor,
+      to_jsonb(OLD), NULL, v_trace_id
     );
     RETURN OLD;
   ELSE
     v_row_id := (to_jsonb(NEW) ->> 'id')::uuid;
-    INSERT INTO audit.log (org_id, table_name, row_id, action, actor, before, after)
+    INSERT INTO audit.log (
+      org_id, table_name, row_id, action, actor,
+      before, after, trace_id
+    )
     VALUES (
       coalesce(v_org_id, (to_jsonb(NEW) ->> 'org_id')::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
       TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME,
       v_row_id, v_action, v_actor,
       CASE WHEN v_action = 'UPDATE' THEN to_jsonb(OLD) ELSE NULL END,
-      to_jsonb(NEW)
+      to_jsonb(NEW), v_trace_id
     );
     RETURN NEW;
   END IF;

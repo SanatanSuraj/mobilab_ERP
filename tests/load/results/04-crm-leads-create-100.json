@@ -1,0 +1,168 @@
+{
+    "setup_data": {
+        "pool": [
+            {
+                "email": "admin@instigenie.local",
+                "role": "SUPER_ADMIN",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTVVBFUl9BRE1JTiJdLCJvcmciOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGEwMDEiLCJpZG4iOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGYwMDEiLCJjYXBhYmlsaXRpZXMiOnsiY2FuUENCUmV3b3JrIjpmYWxzZSwiY2FuT0NBc3NlbWJseSI6ZmFsc2UsInBlcm1pdHRlZExpbmVzIjpbXX0sInN1YiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYjAwMSIsImlzcyI6Imluc3RpZ2VuaWUtYXBpIiwiYXVkIjoiaW5zdGlnZW5pZS1pbnRlcm5hbCIsImV4cCI6MTc3NzAwMzk1NCwiaWF0IjoxNzc3MDAzMDU0LCJqdGkiOiI2MWI5OWM0Ny1lOWMxLTQ2NmMtYTEyOC00MzgzODUxZDZmNDMifQ.a6X1wU6Xa5p28zhcdJAu1JO8ps-a69aW7uPg9p1NNUU"
+            },
+            {
+                "email": "sales@instigenie.local",
+                "role": "SALES_REP",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTQUxFU19SRVAiXSwib3JnIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBhMDAxIiwiaWRuIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBmMDAzIiwiY2FwYWJpbGl0aWVzIjp7ImNhblBDQlJld29yayI6ZmFsc2UsImNhbk9DQXNzZW1ibHkiOmZhbHNlLCJwZXJtaXR0ZWRMaW5lcyI6W119LCJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMGIwMDMiLCJpc3MiOiJpbnN0aWdlbmllLWFwaSIsImF1ZCI6Imluc3RpZ2VuaWUtaW50ZXJuYWwiLCJleHAiOjE3NzcwMDM5NTQsImlhdCI6MTc3NzAwMzA1NCwianRpIjoiNjVkNjY3OTQtNjRhNC00NmE2LWJkMmMtZjVhMmE4MjVhY2E5In0.ikmzqDZ3ArfuFtG2nt2h2gXTzT0HqBzg-3VWeMF5VgQ"
+            },
+            {
+                "email": "salesmgr@instigenie.local",
+                "role": "SALES_MANAGER",
+                "token": "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlcyI6WyJTQUxFU19NQU5BR0VSIl0sIm9yZyI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwYTAwMSIsImlkbiI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwZjAwNCIsImNhcGFiaWxpdGllcyI6eyJjYW5QQ0JSZXdvcmsiOmZhbHNlLCJjYW5PQ0Fzc2VtYmx5IjpmYWxzZSwicGVybWl0dGVkTGluZXMiOltdfSwic3ViIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDBiMDA0IiwiaXNzIjoiaW5zdGlnZW5pZS1hcGkiLCJhdWQiOiJpbnN0aWdlbmllLWludGVybmFsIiwiZXhwIjoxNzc3MDAzOTU0LCJpYXQiOjE3NzcwMDMwNTQsImp0aSI6ImM4M2EyYjAyLWRkOTMtNDM5My05NzQ0LTI2NWFkNWFmNDRjYSJ9.2ATlNZm8cqmX5fQhfoJ-sxxRNgULZ0qCp6owJObDOM4"
+            }
+        ]
+    },
+    "root_group": {
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "201 Created": {
+                    "passes": 7108,
+                    "fails": 0,
+                    "name": "201 Created",
+                    "path": "::201 Created",
+                    "id": "728dcd977aae263ca314731145e1d447"
+                },
+                "has lead.id": {
+                    "name": "has lead.id",
+                    "path": "::has lead.id",
+                    "id": "d95dadcaa40f7553b18d0e48d1a69e16",
+                    "passes": 7108,
+                    "fails": 0
+                }
+            },
+        "name": ""
+    },
+    "metrics": {
+        "http_req_waiting": {
+            "p(95)": 60.58399999999999,
+            "p(99)": 91.4671,
+            "max": 138.567,
+            "avg": 30.97971115173678,
+            "min": 12.526,
+            "med": 25.572,
+            "p(90)": 52.929
+        },
+        "http_req_connecting": {
+            "p(99)": 0.18589999999999993,
+            "max": 0.752,
+            "avg": 0.00406834481788778,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "http_req_receiving": {
+            "p(95)": 0.083,
+            "p(99)": 0.128,
+            "max": 0.567,
+            "avg": 0.049976093376458926,
+            "min": 0.011,
+            "med": 0.048,
+            "p(90)": 0.072
+        },
+        "checks": {
+            "passes": 14216,
+            "fails": 0,
+            "value": 1
+        },
+        "http_req_duration": {
+            "p(90)": 53.002,
+            "p(95)": 60.65899999999999,
+            "p(99)": 91.5513,
+            "max": 138.67,
+            "avg": 31.050729152018075,
+            "min": 12.591,
+            "med": 25.645,
+            "thresholds": {
+                "p(95)<1500": false
+            }
+        },
+        "http_req_sending": {
+            "p(95)": 0.039,
+            "p(99)": 0.084,
+            "max": 0.681,
+            "avg": 0.021041906904795547,
+            "min": 0.003,
+            "med": 0.018,
+            "p(90)": 0.032
+        },
+        "data_sent": {
+            "count": 6804070,
+            "rate": 149395.65096695692
+        },
+        "iterations": {
+            "count": 7108,
+            "rate": 156.06898328105527
+        },
+        "vus": {
+            "value": 7,
+            "min": 7,
+            "max": 100
+        },
+        "http_req_tls_handshaking": {
+            "p(99)": 0,
+            "max": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "http_req_failed": {
+            "fails": 7111,
+            "passes": 0,
+            "thresholds": {
+                "rate<0.05": false
+            },
+            "value": 0
+        },
+        "http_reqs": {
+            "count": 7111,
+            "rate": 156.134853701686
+        },
+        "data_received": {
+            "count": 8843334,
+            "rate": 194171.3767859859
+        },
+        "vus_max": {
+            "value": 100,
+            "min": 100,
+            "max": 100
+        },
+        "http_req_blocked": {
+            "max": 2.043,
+            "avg": 0.010286316973702874,
+            "min": 0.001,
+            "med": 0.004,
+            "p(90)": 0.008,
+            "p(95)": 0.01,
+            "p(99)": 0.23879999999999987
+        },
+        "http_req_duration{expected_response:true}": {
+            "med": 25.645,
+            "p(90)": 53.002,
+            "p(95)": 60.65899999999999,
+            "p(99)": 91.5513,
+            "max": 138.67,
+            "avg": 31.050729152018075,
+            "min": 12.591
+        },
+        "iteration_duration": {
+            "avg": 531.5189848930767,
+            "min": 512.9585,
+            "med": 526.083187,
+            "p(90)": 553.4741795,
+            "p(95)": 561.0924919,
+            "p(99)": 591.74621425,
+            "max": 639.119667
+        }
+    }
+}

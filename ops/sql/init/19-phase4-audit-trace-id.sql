@@ -5,13 +5,19 @@
 -- trace-parent into every SQL statement that fires an audit trigger,
 -- and the trigger function must read and stamp it.
 --
--- The API sets `app.current_trace_id` on the session / transaction at
--- request start (alongside app.current_user and app.current_org). The
--- trigger function is updated in ops/sql/triggers/03-audit.sql — but
--- because that file creates the function with no trace_id awareness,
--- we CREATE OR REPLACE here with the enriched version. Idempotent: if
--- the column + updated function are already present, both statements
--- are no-ops.
+-- Split of responsibilities:
+--   • This file (init/) — schema only: adds the trace_id column to
+--     audit.log (and audit.log_archive when it exists).
+--   • ops/sql/triggers/03-audit.sql — the authoritative audit.tg_log()
+--     definition, including the `app.current_trace_id` GUC read and the
+--     INSERT that stamps v_trace_id into the new column.
+--
+-- Why the split: 00-apply-all.sh runs init/ BEFORE triggers/. An earlier
+-- iteration of this file CREATE OR REPLACE'd audit.tg_log() here with the
+-- enriched version, but triggers/03-audit.sql then ran and clobbered it
+-- back to the no-trace-id version — leaving the column present but never
+-- stamped. The function now lives in one place (triggers/), which is
+-- guaranteed to run last.
 
 ALTER TABLE audit.log
   ADD COLUMN IF NOT EXISTS trace_id text;
@@ -25,76 +31,6 @@ BEGIN
     EXECUTE 'ALTER TABLE audit.log_archive ADD COLUMN IF NOT EXISTS trace_id text';
   END IF;
 END
-$$;
-
--- Enriched trigger — picks up `app.current_trace_id` GUC. Missing GUC
--- → NULL, which is fine for pre-§4.2 callers.
-CREATE OR REPLACE FUNCTION audit.tg_log()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = audit, public
-AS $$
-DECLARE
-  v_org_id    uuid;
-  v_actor     uuid;
-  v_trace_id  text;
-  v_row_id    uuid;
-  v_action    text := TG_OP;
-BEGIN
-  BEGIN
-    v_org_id := nullif(current_setting('app.current_org', true), '')::uuid;
-  EXCEPTION WHEN others THEN
-    v_org_id := NULL;
-  END;
-  BEGIN
-    v_actor := nullif(current_setting('app.current_user', true), '')::uuid;
-  EXCEPTION WHEN others THEN
-    v_actor := NULL;
-  END;
-  BEGIN
-    v_trace_id := nullif(current_setting('app.current_trace_id', true), '');
-  EXCEPTION WHEN others THEN
-    v_trace_id := NULL;
-  END;
-
-  IF v_action = 'DELETE' THEN
-    v_row_id := (to_jsonb(OLD) ->> 'id')::uuid;
-    INSERT INTO audit.log (
-      org_id, table_name, row_id, action, actor,
-      before, after, trace_id
-    )
-    VALUES (
-      coalesce(
-        v_org_id,
-        (to_jsonb(OLD) ->> 'org_id')::uuid,
-        '00000000-0000-0000-0000-000000000000'::uuid
-      ),
-      TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME,
-      v_row_id, v_action, v_actor,
-      to_jsonb(OLD), NULL, v_trace_id
-    );
-    RETURN OLD;
-  ELSE
-    v_row_id := (to_jsonb(NEW) ->> 'id')::uuid;
-    INSERT INTO audit.log (
-      org_id, table_name, row_id, action, actor,
-      before, after, trace_id
-    )
-    VALUES (
-      coalesce(
-        v_org_id,
-        (to_jsonb(NEW) ->> 'org_id')::uuid,
-        '00000000-0000-0000-0000-000000000000'::uuid
-      ),
-      TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME,
-      v_row_id, v_action, v_actor,
-      CASE WHEN v_action = 'UPDATE' THEN to_jsonb(OLD) ELSE NULL END,
-      to_jsonb(NEW), v_trace_id
-    );
-    RETURN NEW;
-  END IF;
-END;
 $$;
 
 COMMENT ON COLUMN audit.log.trace_id IS

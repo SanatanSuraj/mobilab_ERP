@@ -1666,6 +1666,12 @@ Rules:
 - `CANCELLED` after `RM_ISSUED` requires `PRODUCTION_MANAGER` + finance sign-off (materials must be returned to stock).
 - `PARTIAL_COMPLETE` requires at least one device in `RELEASED` state and explicit closure.
 - State transition matrix lives in `packages/core/production/src/wo.state-machine.ts` — single source of truth.
+  - **Phase 2 note (2026-04, ADR 0001):** that module is not yet created. The 15-state
+    reference currently lives in `tests/gates/wo-state-machine-225.spec.ts` as an
+    executable spec (225-case matrix + 50-way race). The shipped schema enforces only
+    7 states (`ops/sql/init/05-production.sql:196-206`). Promotion to the named module
+    is a Phase 3 task gated on the approval-chain + RM + QC integrations. See
+    `docs/adr/0001-wo-state-machine-15-vs-7-phasing.md`.
 
 #### 13.2.2 Device Lifecycle (13 states)
 
