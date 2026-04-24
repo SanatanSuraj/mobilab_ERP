@@ -79,7 +79,7 @@ export default function GrnPage() {
   // New GRN form state
   const [formVendor, setFormVendor] = useState("");
   const [formPo, setFormPo] = useState("");
-  const [formWarehouse, setFormWarehouse] = useState(warehouses[0].id);
+  const [formWarehouse, setFormWarehouse] = useState(warehouses[0]?.id ?? "");
   const [formReceivedBy, setFormReceivedBy] = useState("");
 
   const filtered = useMemo(() => {
@@ -174,7 +174,7 @@ export default function GrnPage() {
     setNewGrnOpen(false);
     setFormVendor("");
     setFormPo("");
-    setFormWarehouse(warehouses[0].id);
+    setFormWarehouse(warehouses[0]?.id ?? "");
     setFormReceivedBy("");
   }
 
@@ -441,7 +441,7 @@ export default function GrnPage() {
               <label className="text-sm font-medium">Warehouse</label>
               <Select
                 value={formWarehouse}
-                onValueChange={(v) => setFormWarehouse(v ?? warehouses[0].id)}
+                onValueChange={(v) => setFormWarehouse(v ?? warehouses[0]?.id ?? "")}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select warehouse" />

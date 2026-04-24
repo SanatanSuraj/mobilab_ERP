@@ -70,9 +70,9 @@ export default function TransfersPage() {
   const [newTransferOpen, setNewTransferOpen] = useState(false);
 
   // New Transfer form state
-  const [formFrom, setFormFrom] = useState(warehouses[0].id);
-  const [formTo, setFormTo] = useState(warehouses[1].id);
-  const [formItem, setFormItem] = useState(invItems[0].id);
+  const [formFrom, setFormFrom] = useState(warehouses[0]?.id ?? "");
+  const [formTo, setFormTo] = useState(warehouses[1]?.id ?? "");
+  const [formItem, setFormItem] = useState(invItems[0]?.id ?? "");
   const [formQty, setFormQty] = useState("");
   const [formRemarks, setFormRemarks] = useState("");
 
@@ -197,9 +197,9 @@ export default function TransfersPage() {
 
   function handleSaveNewTransfer() {
     setNewTransferOpen(false);
-    setFormFrom(warehouses[0].id);
-    setFormTo(warehouses[1].id);
-    setFormItem(invItems[0].id);
+    setFormFrom(warehouses[0]?.id ?? "");
+    setFormTo(warehouses[1]?.id ?? "");
+    setFormItem(invItems[0]?.id ?? "");
     setFormQty("");
     setFormRemarks("");
   }
@@ -437,7 +437,7 @@ export default function TransfersPage() {
               <label className="text-sm font-medium">From Warehouse</label>
               <Select
                 value={formFrom}
-                onValueChange={(v) => setFormFrom(v ?? warehouses[0].id)}
+                onValueChange={(v) => setFormFrom(v ?? warehouses[0]?.id ?? "")}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select source warehouse" />
@@ -455,7 +455,7 @@ export default function TransfersPage() {
               <label className="text-sm font-medium">To Warehouse</label>
               <Select
                 value={formTo}
-                onValueChange={(v) => setFormTo(v ?? warehouses[1].id)}
+                onValueChange={(v) => setFormTo(v ?? warehouses[1]?.id ?? "")}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select destination warehouse" />
@@ -473,7 +473,7 @@ export default function TransfersPage() {
               <label className="text-sm font-medium">Item</label>
               <Select
                 value={formItem}
-                onValueChange={(v) => setFormItem(v ?? invItems[0].id)}
+                onValueChange={(v) => setFormItem(v ?? invItems[0]?.id ?? "")}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select item" />
