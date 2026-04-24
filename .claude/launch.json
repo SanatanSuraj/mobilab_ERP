@@ -5,13 +5,15 @@
       "name": "crm-prototype",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype' && pnpm dev"],
-      "port": 3000
+      "port": 3000,
+      "autoPort": true
     },
     {
       "name": "web-only",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype' && pnpm --filter @instigenie/web dev"],
-      "port": 3000
+      "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype/apps/web' && pnpm exec next dev -p $PORT"],
+      "port": 3100,
+      "autoPort": true
     }
   ]
 }

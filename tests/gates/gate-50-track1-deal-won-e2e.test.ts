@@ -91,7 +91,7 @@ async function ensureGate50Product(
       active_bom_id: string | null;
     }>(
       `INSERT INTO products (org_id, product_code, name, family, uom)
-       VALUES ($1, $2, 'gate-50 test product', 'INSTRUMENT', 'PCS')
+       VALUES ($1, $2, 'gate-50 test product', 'MODULE', 'PCS')
        ON CONFLICT (org_id, lower(product_code)) WHERE deleted_at IS NULL
          DO UPDATE SET updated_at = now()
        RETURNING id, active_bom_id`,

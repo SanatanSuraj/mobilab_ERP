@@ -102,25 +102,25 @@ BEGIN
     description, sampling_plan, is_active, created_by
   ) VALUES
     (v_tmpl_iqc_pcb,  v_org, 'IQC-PCB-ECG',
-     'Incoming PCB (ECG) — Visual + Continuity', 'IQC', 'INSTRUMENT',
+     'Incoming PCB (ECG) — Visual + Continuity', 'IQC', 'MODULE',
      NULL, v_it_pcb, NULL,
      'Standard IQC checklist for ECG main PCB batches',
      'AQL 1.0 — 5% sample, min 3 units per lot', true, v_prodmgr),
 
     (v_tmpl_iqc_bat,  v_org, 'IQC-LIPO-BATT',
-     'Incoming LiPo Battery — Voltage + Capacity', 'IQC', 'INSTRUMENT',
+     'Incoming LiPo Battery — Voltage + Capacity', 'IQC', 'MODULE',
      NULL, v_it_bat, NULL,
      'Voltage-under-load and capacity discharge test for incoming LiPo batteries',
      '100% inspection — every cell tested', true, v_prodmgr),
 
     (v_tmpl_sub_pcb,  v_org, 'SUB-PCB-ASM',
-     'PCB Sub-Assembly In-Process QC', 'SUB_QC', 'INSTRUMENT',
+     'PCB Sub-Assembly In-Process QC', 'SUB_QC', 'MODULE',
      v_wst_02, NULL, NULL,
      'Mandatory QC after PCB sub-assembly stage before mechanical assembly',
      '100% inspection', true, v_prodmgr),
 
     (v_tmpl_final_ecg, v_org, 'FIN-ECG-MONITOR',
-     'Final QC — ECG Patient Monitor', 'FINAL_QC', 'INSTRUMENT',
+     'Final QC — ECG Patient Monitor', 'FINAL_QC', 'MODULE',
      v_wst_08, NULL, v_pr_ecg,
      'End-of-line final QC for ECG Patient Monitor; prerequisite for QC cert issue',
      '100% inspection', true, v_prodmgr)

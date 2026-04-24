@@ -105,6 +105,10 @@ export const MOCK_PERMISSIONS_BY_ROLE: Record<UserRole, Permission[]> = {
     "bom:edit",
     "ecn:initiate",
     "ecn:approve",
+    "products:read",
+    "products:create",
+    "products:update",
+    "products:delete",
   ],
   MANAGEMENT: [
     "deals:mark_won",
@@ -113,6 +117,10 @@ export const MOCK_PERMISSIONS_BY_ROLE: Record<UserRole, Permission[]> = {
     "qc:override",
     "purchase_orders:approve_management",
     "ecn:approve",
+    "products:read",
+    "products:create",
+    "products:update",
+    "products:delete",
   ],
   SALES_REP: [
     "deals:write",
@@ -132,16 +140,23 @@ export const MOCK_PERMISSIONS_BY_ROLE: Record<UserRole, Permission[]> = {
   PRODUCTION: [
     "wip_stages:advance",
     "work_orders:create",
+    "products:read",
   ],
   PRODUCTION_MANAGER: [
     "wip_stages:advance",
     "work_orders:create",
     "work_orders:cancel",
     "bom:edit",
+    "products:read",
+    "products:create",
+    "products:update",
   ],
   RD: [
     "bom:edit",
     "ecn:initiate",
+    "products:read",
+    "products:create",
+    "products:update",
   ],
   QC_INSPECTOR: [
     "qc:submit_inspection",
@@ -150,6 +165,7 @@ export const MOCK_PERMISSIONS_BY_ROLE: Record<UserRole, Permission[]> = {
     "qc:submit_inspection",
     "qc:override",
     "batches:quarantine",
+    "products:read",
   ],
   STORES: [
     "stock:adjust",

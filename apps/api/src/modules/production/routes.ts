@@ -28,6 +28,7 @@ import {
   CreateBomVersionSchema,
   CreateProductSchema,
   CreateWorkOrderSchema,
+  DeviceInstanceListQuerySchema,
   ProductFamilySchema,
   ProductListQuerySchema,
   UpdateBomLineSchema,
@@ -42,11 +43,13 @@ import type { RequireFeature } from "../quotas/guard.js";
 import type { ProductsService } from "./products.service.js";
 import type { BomsService } from "./boms.service.js";
 import type { WorkOrdersService } from "./work-orders.service.js";
+import type { DeviceInstancesService } from "./device-instances.service.js";
 
 export interface RegisterProductionRoutesOptions {
   products: ProductsService;
   boms: BomsService;
   workOrders: WorkOrdersService;
+  deviceInstances: DeviceInstancesService;
   guardInternal: AuthGuardOptions;
   requireFeature: RequireFeature;
 }
@@ -357,6 +360,28 @@ export async function registerProductionRoutes(
       return reply.send({
         data: await opts.workOrders.listTemplates(req, query.productFamily),
       });
+    }
+  );
+
+  // ─── Device Instances (Phase 5 Mobicase slice) ────────────────────────────
+  // Reuses the work_orders:read permission — the mfg/device-ids UI sits in
+  // the same production-floor workflow as the work-orders page.
+
+  app.get(
+    "/production/device-instances",
+    { preHandler: woRead },
+    async (req, reply) => {
+      const query = DeviceInstanceListQuerySchema.parse(req.query);
+      return reply.send(await opts.deviceInstances.list(req, query));
+    }
+  );
+
+  app.get(
+    "/production/device-instances/:id",
+    { preHandler: woRead },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      return reply.send(await opts.deviceInstances.getById(req, id));
     }
   );
 }

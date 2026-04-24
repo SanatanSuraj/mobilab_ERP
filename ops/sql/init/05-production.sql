@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS products (
   org_id               uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   product_code         text NOT NULL,
   name                 text NOT NULL,
-  family               text NOT NULL DEFAULT 'INSTRUMENT'
-                         CHECK (family IN ('INSTRUMENT', 'DEVICE', 'REAGENT', 'CONSUMABLE')),
+  family               text NOT NULL DEFAULT 'MODULE'
+                         CHECK (family IN ('MODULE', 'DEVICE', 'REAGENT', 'CONSUMABLE')),
   description          text,
   uom                  text NOT NULL DEFAULT 'PCS',
   standard_cycle_days  integer NOT NULL DEFAULT 0 CHECK (standard_cycle_days >= 0),
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS wip_stage_templates (
   id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id                    uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   product_family            text NOT NULL
-                              CHECK (product_family IN ('INSTRUMENT', 'DEVICE', 'REAGENT', 'CONSUMABLE')),
+                              CHECK (product_family IN ('MODULE', 'DEVICE', 'REAGENT', 'CONSUMABLE')),
   sequence_number           integer NOT NULL CHECK (sequence_number > 0),
   stage_name                text NOT NULL,
   requires_qc_signoff       boolean NOT NULL DEFAULT false,

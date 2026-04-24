@@ -49,7 +49,7 @@ const uuid = z.string().uuid();
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 export const PRODUCT_FAMILIES = [
-  "INSTRUMENT",
+  "MODULE",
   "DEVICE",
   "REAGENT",
   "CONSUMABLE",
@@ -130,7 +130,7 @@ export type Product = z.infer<typeof ProductSchema>;
 export const CreateProductSchema = z.object({
   productCode: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1).max(200),
-  family: ProductFamilySchema.default("INSTRUMENT"),
+  family: ProductFamilySchema.default("MODULE"),
   description: z.string().trim().max(2000).optional(),
   uom: z.string().trim().min(1).max(16).default("PCS"),
   standardCycleDays: z.number().int().nonnegative().default(0),
@@ -388,3 +388,95 @@ export const AdvanceWipStageSchema = z.object({
   expectedStageVersion: z.number().int().nonnegative().optional(),
 });
 export type AdvanceWipStage = z.infer<typeof AdvanceWipStageSchema>;
+
+// ─── Device Instances (Phase 5 Mobicase slice) ──────────────────────────────
+
+export const MOBICASE_PRODUCT_CODES = [
+  "MBA",
+  "MBM",
+  "MBC",
+  "MCC",
+  "CFG",
+] as const;
+export const MobicaseProductCodeSchema = z.enum(MOBICASE_PRODUCT_CODES);
+export type MobicaseProductCode = z.infer<typeof MobicaseProductCodeSchema>;
+
+export const DEVICE_INSTANCE_STATUSES = [
+  "CREATED",
+  "IN_PRODUCTION",
+  "SUB_QC_PASS",
+  "SUB_QC_FAIL",
+  "IN_REWORK",
+  "REWORK_LIMIT_EXCEEDED",
+  "FINAL_ASSEMBLY",
+  "FINAL_QC_PASS",
+  "FINAL_QC_FAIL",
+  "RELEASED",
+  "DISPATCHED",
+  "SCRAPPED",
+  "RECALLED",
+] as const;
+export const DeviceInstanceStatusSchema = z.enum(DEVICE_INSTANCE_STATUSES);
+export type DeviceInstanceStatus = z.infer<typeof DeviceInstanceStatusSchema>;
+
+export const ASSEMBLY_LINES = ["L1", "L2", "L3", "L4", "L5"] as const;
+export const AssemblyLineSchema = z.enum(ASSEMBLY_LINES);
+export type AssemblyLine = z.infer<typeof AssemblyLineSchema>;
+
+export const DeviceInstanceSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  deviceCode: z.string(),
+  productCode: MobicaseProductCodeSchema,
+  workOrderRef: z.string(),
+  status: DeviceInstanceStatusSchema,
+  reworkCount: z.number().int().nonnegative(),
+  maxReworkLimit: z.number().int().nonnegative(),
+  assignedLine: AssemblyLineSchema.nullable(),
+
+  // Standalone module components (MBA/MBM/MBC/CFG)
+  pcbId: z.string().nullable(),
+  sensorId: z.string().nullable(),
+  detectorId: z.string().nullable(),
+  machineId: z.string().nullable(),
+  cfgVendorId: z.string().nullable(),
+  cfgSerialNo: z.string().nullable(),
+
+  // MCC aggregated sub-assembly component IDs
+  analyzerPcbId: z.string().nullable(),
+  analyzerSensorId: z.string().nullable(),
+  analyzerDetectorId: z.string().nullable(),
+  mixerMachineId: z.string().nullable(),
+  mixerPcbId: z.string().nullable(),
+  incubatorPcbId: z.string().nullable(),
+
+  // Unit-level accessories
+  micropipetteId: z.string().nullable(),
+  centrifugeId: z.string().nullable(),
+
+  // Dispatch
+  finishedGoodsRef: z.string().nullable(),
+  invoiceRef: z.string().nullable(),
+  deliveryChallanRef: z.string().nullable(),
+  salesOrderRef: z.string().nullable(),
+  dispatchedAt: z.string().nullable(),
+
+  // Scrap
+  scrappedAt: z.string().nullable(),
+  scrappedReason: z.string().nullable(),
+
+  notes: z.string().nullable(),
+  version: z.number().int().positive(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  deletedAt: z.string().nullable(),
+});
+export type DeviceInstance = z.infer<typeof DeviceInstanceSchema>;
+
+export const DeviceInstanceListQuerySchema = PaginationQuerySchema.extend({
+  productCode: MobicaseProductCodeSchema.optional(),
+  status: DeviceInstanceStatusSchema.optional(),
+  workOrderRef: z.string().trim().min(1).max(64).optional(),
+  assignedLine: AssemblyLineSchema.optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});

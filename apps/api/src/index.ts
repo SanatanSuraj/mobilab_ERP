@@ -67,6 +67,7 @@ import { registerProcurementRoutes } from "./modules/procurement/routes.js";
 import { ProductsService } from "./modules/production/products.service.js";
 import { BomsService } from "./modules/production/boms.service.js";
 import { WorkOrdersService } from "./modules/production/work-orders.service.js";
+import { DeviceInstancesService } from "./modules/production/device-instances.service.js";
 import { registerProductionRoutes } from "./modules/production/routes.js";
 import { InspectionTemplatesService } from "./modules/qc/templates.service.js";
 import { QcInspectionsService } from "./modules/qc/inspections.service.js";
@@ -230,6 +231,7 @@ export async function buildApp(): Promise<BuiltApp> {
   const productsService = new ProductsService(pool);
   const bomsService = new BomsService(pool);
   const workOrdersService = new WorkOrdersService(pool);
+  const deviceInstancesService = new DeviceInstancesService(pool);
 
   // QC services — Phase 2 §12.1 #6 / §13.4. Inspection templates, inspections
   // with DRAFT → IN_PROGRESS → PASSED/FAILED lifecycle, and append-only
@@ -430,6 +432,7 @@ export async function buildApp(): Promise<BuiltApp> {
     products: productsService,
     boms: bomsService,
     workOrders: workOrdersService,
+    deviceInstances: deviceInstancesService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,

@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS inspection_templates (
   kind                    text NOT NULL
                             CHECK (kind IN ('IQC', 'SUB_QC', 'FINAL_QC')),
   product_family          text
-                            CHECK (product_family IN ('INSTRUMENT', 'DEVICE', 'REAGENT', 'CONSUMABLE')),
+                            CHECK (product_family IN ('MODULE', 'DEVICE', 'REAGENT', 'CONSUMABLE')),
   -- For SUB_QC templates — which wip_stage_template this template hangs off.
   -- NULL for IQC (bound by item) and FINAL_QC (bound by product).
   wip_stage_template_id   uuid REFERENCES wip_stage_templates(id) ON DELETE SET NULL,

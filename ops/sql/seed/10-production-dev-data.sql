@@ -62,7 +62,7 @@ DECLARE
   v_bml_11   uuid := '00000000-0000-0000-0000-000000fc020b';
   v_bml_12   uuid := '00000000-0000-0000-0000-000000fc020c';
 
-  -- WIP stage templates (INSTRUMENT family, 8 stages)
+  -- WIP stage templates (MODULE family, 8 stages)
   v_wst_01   uuid := '00000000-0000-0000-0000-000000fc0301';
   v_wst_02   uuid := '00000000-0000-0000-0000-000000fc0302';
   v_wst_03   uuid := '00000000-0000-0000-0000-000000fc0303';
@@ -114,10 +114,10 @@ BEGIN
     standard_cycle_days, has_serial_tracking, rework_limit, is_active
   ) VALUES
     (v_pr_ecg,  v_org, 'ECG-MONITOR-V2',  'ECG Patient Monitor v2',
-     'INSTRUMENT', 'Finished clinical ECG monitor — CDSCO cleared', 'PCS',
+     'MODULE', 'Finished clinical ECG monitor — CDSCO cleared', 'PCS',
      8, true, 2, true),
     (v_pr_spir, v_org, 'SPIROMETER-C1',   'Digital Spirometer C1',
-     'INSTRUMENT', 'Handheld clinical spirometer', 'PCS',
+     'MODULE', 'Handheld clinical spirometer', 'PCS',
      6, true, 2, true),
     (v_pr_glu,  v_org, 'GLUCO-STRIP-500', 'Glucometer Strip Lot 500',
      'REAGENT',    'Single-use glucose strips, batch-controlled', 'BOX',
@@ -176,19 +176,19 @@ BEGIN
     (v_bml_12, v_org, v_bm_spir1, 3, v_it_bat,  1.000, 'EA', 'BAT-01',      true,  'BATCH', 21, 320)
   ON CONFLICT (id) DO NOTHING;
 
-  -- ─── WIP Stage Templates (INSTRUMENT family, 8 stages) ────────────────────
+  -- ─── WIP Stage Templates (MODULE family, 8 stages) ────────────────────
   INSERT INTO wip_stage_templates (
     id, org_id, product_family, sequence_number, stage_name,
     requires_qc_signoff, expected_duration_hours, responsible_role, is_active
   ) VALUES
-    (v_wst_01, v_org, 'INSTRUMENT', 1, 'Component Kitting',        false, 2,   'Stores',     true),
-    (v_wst_02, v_org, 'INSTRUMENT', 2, 'PCB Sub-Assembly',          true,  4,   'Production', true),
-    (v_wst_03, v_org, 'INSTRUMENT', 3, 'Mechanical Assembly',       false, 3,   'Production', true),
-    (v_wst_04, v_org, 'INSTRUMENT', 4, 'Main Integration',          false, 4,   'Production', true),
-    (v_wst_05, v_org, 'INSTRUMENT', 5, 'Electrical Testing',        true,  3,   'QC',         true),
-    (v_wst_06, v_org, 'INSTRUMENT', 6, 'Software/Firmware Load',    false, 1,   'Production', true),
-    (v_wst_07, v_org, 'INSTRUMENT', 7, 'Burn-in / Soak Test',       false, 4,   'Production', true),
-    (v_wst_08, v_org, 'INSTRUMENT', 8, 'Final QC',                  true,  2,   'QC',         true)
+    (v_wst_01, v_org, 'MODULE', 1, 'Component Kitting',        false, 2,   'Stores',     true),
+    (v_wst_02, v_org, 'MODULE', 2, 'PCB Sub-Assembly',          true,  4,   'Production', true),
+    (v_wst_03, v_org, 'MODULE', 3, 'Mechanical Assembly',       false, 3,   'Production', true),
+    (v_wst_04, v_org, 'MODULE', 4, 'Main Integration',          false, 4,   'Production', true),
+    (v_wst_05, v_org, 'MODULE', 5, 'Electrical Testing',        true,  3,   'QC',         true),
+    (v_wst_06, v_org, 'MODULE', 6, 'Software/Firmware Load',    false, 1,   'Production', true),
+    (v_wst_07, v_org, 'MODULE', 7, 'Burn-in / Soak Test',       false, 4,   'Production', true),
+    (v_wst_08, v_org, 'MODULE', 8, 'Final QC',                  true,  2,   'QC',         true)
   ON CONFLICT (id) DO NOTHING;
 
   -- ─── Work Orders ───────────────────────────────────────────────────────────

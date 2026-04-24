@@ -154,7 +154,7 @@ export const productsRepo = {
         orgId,
         input.productCode,
         input.name,
-        input.family ?? "INSTRUMENT",
+        input.family ?? "MODULE",
         input.description ?? null,
         input.uom ?? "PCS",
         input.standardCycleDays ?? 0,

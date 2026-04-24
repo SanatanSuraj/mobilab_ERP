@@ -15,7 +15,8 @@ BEGIN
     'bom_lines',
     'wip_stage_templates',
     'work_orders',
-    'wip_stages'
+    'wip_stages',
+    'device_instances'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);

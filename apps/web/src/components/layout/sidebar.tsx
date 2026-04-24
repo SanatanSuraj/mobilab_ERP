@@ -133,6 +133,11 @@ const navSections: NavSection[] = [
     roles: ["SUPER_ADMIN", "MANAGEMENT", "PRODUCTION", "PRODUCTION_MANAGER", "RD", "QC_INSPECTOR", "QC_MANAGER"],
     items: [
       {
+        label: "Products",
+        href: "/production/products",
+        roles: ["SUPER_ADMIN", "MANAGEMENT", "PRODUCTION_MANAGER", "RD", "PRODUCTION", "QC_MANAGER"],
+      },
+      {
         label: "Work Orders",
         href: "/production/work-orders",
         roles: ["SUPER_ADMIN", "MANAGEMENT", "PRODUCTION", "PRODUCTION_MANAGER", "RD"],
@@ -207,6 +212,7 @@ const navSections: NavSection[] = [
     roles: ["SUPER_ADMIN"],
     items: [
       { label: "Item Master", href: "/inventory/items" },
+      { label: "Products", href: "/admin/products" },
       { label: "Warehouses", href: "/inventory/warehouses" },
       { label: "Users & Roles", href: "/admin/users" },
     ],

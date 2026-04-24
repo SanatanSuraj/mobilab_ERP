@@ -1,14 +1,20 @@
 "use client";
 
-// TODO(phase-5): Instigenie Mobicase device-ID tracking has no backend routes
-// yet. Expected routes (scoped to the mobicase manufacturing domain):
-//   GET  /mfg/device-ids?status=&workOrderId=&type=
-//   GET  /mfg/device-ids/:id - device detail + stage log trail
-//   POST /mfg/device-ids/:id/transition - advance stage / mark scrap
-// Mock imports left in place until the mobicase slice ships in
-// apps/api/src/modules/mfg (distinct from generic /production).
+// Phase 5 — Mobicase device-ID tracking.
+// Live data: the device/module list comes from the real API at
+//   GET /production/device-instances
+// and is fetched on mount via apiListDeviceInstances() (tenant-scoped,
+// bearer + org header via tenantFetch).
+//
+// The mock still backs stage logs, work orders and operators — those slices
+// ship in a later phase. We adapt the API DeviceInstance shape to the local
+// MobiDeviceID view-model so the existing UI (ComponentTree / ComponentChips
+// / DeviceDetailDialog) keeps working unchanged.
+//
+// Outstanding future routes (scoped to the mobicase manufacturing domain):
+//   POST /production/device-instances/:id/transition - advance stage / mark scrap
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,7 +33,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  mobiDeviceIDs,
   mobiStageLogs,
   mobiWorkOrders,
   mobiOperators,
@@ -38,7 +43,57 @@ import {
   isFinishedDevice,
   isModule,
 } from "@/data/instigenie-mock";
+import { apiListDeviceInstances } from "@/lib/api/production";
+import type { DeviceInstance } from "@instigenie/contracts";
 import { Search, Cpu, Activity, CheckCircle2, RotateCcw, Trash2 } from "lucide-react";
+
+// ─── API → view-model adapter ────────────────────────────────────────────────
+// The API-side DeviceInstance uses `deviceCode` / `workOrderRef`; the UI was
+// built against the mock MobiDeviceID which uses `deviceId` / `workOrderNumber`
+// and a FK-shaped `workOrderId`. We derive `workOrderId` by looking up
+// mobiWorkOrders by the WO number — the mock still owns the stage-logs +
+// WO slices, so lookup must match on that side.
+
+function toDeviceIdVM(d: DeviceInstance): MobiDeviceID {
+  const wo = mobiWorkOrders.find((w) => w.woNumber === d.workOrderRef);
+  return {
+    id: d.id,
+    deviceId: d.deviceCode,
+    productCode: d.productCode,
+    workOrderId: wo?.id ?? "",
+    workOrderNumber: d.workOrderRef,
+    status: d.status as DeviceIDStatus,
+    reworkCount: d.reworkCount,
+    maxReworkLimit: d.maxReworkLimit,
+    createdAt: d.createdAt,
+    assignedLine: (d.assignedLine ?? "L1") as MobiDeviceID["assignedLine"],
+
+    pcbId: d.pcbId ?? undefined,
+    sensorId: d.sensorId ?? undefined,
+    detectorId: d.detectorId ?? undefined,
+    machineId: d.machineId ?? undefined,
+    cfgVendorId: d.cfgVendorId ?? undefined,
+    cfgSerialNo: d.cfgSerialNo ?? undefined,
+
+    analyzerPcbId: d.analyzerPcbId ?? undefined,
+    analyzerSensorId: d.analyzerSensorId ?? undefined,
+    analyzerDetectorId: d.analyzerDetectorId ?? undefined,
+    mixerMachineId: d.mixerMachineId ?? undefined,
+    mixerPcbId: d.mixerPcbId ?? undefined,
+    incubatorPcbId: d.incubatorPcbId ?? undefined,
+
+    micropipetteId: d.micropipetteId ?? undefined,
+    centrifugeId: d.centrifugeId ?? undefined,
+
+    finishedGoodsRef: d.finishedGoodsRef ?? undefined,
+    invoiceRef: d.invoiceRef ?? undefined,
+    deliveryChallanRef: d.deliveryChallanRef ?? undefined,
+    salesOrderRef: d.salesOrderRef ?? undefined,
+    dispatchedAt: d.dispatchedAt ?? undefined,
+    scrappedAt: d.scrappedAt ?? undefined,
+    scrappedReason: d.scrappedReason ?? undefined,
+  };
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -728,10 +783,37 @@ export default function DeviceIDsPage() {
   const [selectedDevice, setSelectedDevice] = useState<MobiDeviceID | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  // ── Fetch device instances from the backend ─────────────────────────────────
+  // One-shot load on mount; the /production/device-instances endpoint is
+  // paginated but we pull up to 200 here — the mock ships 10 seed rows, and
+  // by the time this scales we'll add server-side filters + pagination wiring.
+  const [devices, setDevices] = useState<MobiDeviceID[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiListDeviceInstances({ page: 1, limit: 200 });
+        if (cancelled) return;
+        setDevices(res.data.map(toDeviceIdVM));
+      } catch (err) {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Unique WO numbers for dropdown
   const uniqueWOs = useMemo(() => {
     const seen = new Set<string>();
-    return mobiDeviceIDs
+    return devices
       .filter((d) => {
         if (seen.has(d.workOrderNumber)) return false;
         seen.add(d.workOrderNumber);
@@ -739,24 +821,24 @@ export default function DeviceIDsPage() {
       })
       .map((d) => d.workOrderNumber)
       .sort();
-  }, []);
+  }, [devices]);
 
   // Summary stats — MCC = finished devices, all others = modules
   const stats = useMemo(() => {
-    const devices   = mobiDeviceIDs.filter(isFinishedDevice);
-    const modules   = mobiDeviceIDs.filter(isModule);
+    const finished = devices.filter(isFinishedDevice);
+    const modules  = devices.filter(isModule);
     return {
-      finishedDevices:   devices.length,
-      dispatchedDevices: devices.filter((d) => d.status === "DISPATCHED").length,
+      finishedDevices:   finished.length,
+      dispatchedDevices: finished.filter((d) => d.status === "DISPATCHED").length,
       modulesInProd:     modules.filter((d) => d.status === "IN_PRODUCTION").length,
       modulesQCPass:     modules.filter((d) => d.status === "SUB_QC_PASS" || d.status === "FINAL_QC_PASS").length,
       inRework:          modules.filter((d) => d.status === "IN_REWORK").length,
-      scrapped:          mobiDeviceIDs.filter((d) => d.status === "SCRAPPED").length,
+      scrapped:          devices.filter((d) => d.status === "SCRAPPED").length,
     };
-  }, []);
+  }, [devices]);
 
   const filtered = useMemo(() => {
-    return mobiDeviceIDs.filter((dev) => {
+    return devices.filter((dev) => {
       const matchesType   = typeFilter === "ALL"
         || (typeFilter === "DEVICE" && isFinishedDevice(dev))
         || (typeFilter === "MODULE" && isModule(dev));
@@ -765,7 +847,7 @@ export default function DeviceIDsPage() {
       const matchesSearch = !search || dev.deviceId.toLowerCase().includes(search.toLowerCase());
       return matchesType && matchesStatus && matchesWO && matchesSearch;
     });
-  }, [typeFilter, statusFilter, woFilter, search]);
+  }, [devices, typeFilter, statusFilter, woFilter, search]);
 
   function handleRowClick(dev: MobiDeviceID) {
     setSelectedDevice(dev);
@@ -950,14 +1032,24 @@ export default function DeviceIDsPage() {
         </Select>
 
         <span className="text-sm text-muted-foreground">
-          {filtered.length} of {mobiDeviceIDs.length} entries
+          {loading
+            ? "Loading…"
+            : `${filtered.length} of ${devices.length} entries`}
         </span>
       </div>
 
       {/* Device IDs Table */}
       <Card>
         <CardContent className="p-0">
-          {filtered.length === 0 ? (
+          {loadError ? (
+            <div className="py-16 text-center text-sm text-red-700">
+              Failed to load device instances: {loadError}
+            </div>
+          ) : loading ? (
+            <div className="py-16 text-center text-muted-foreground text-sm">
+              Loading device instances…
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground text-sm">
               No devices match your filters
             </div>

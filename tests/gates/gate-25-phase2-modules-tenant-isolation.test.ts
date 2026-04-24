@@ -261,7 +261,7 @@ describe("gate-25: Phase-2 modules cross-tenant isolation", () => {
       await client.query(
         `INSERT INTO products (
            id, org_id, product_code, name, family
-         ) VALUES ($1, $2, 'PROD-OTHER', 'Other Product', 'INSTRUMENT')
+         ) VALUES ($1, $2, 'PROD-OTHER', 'Other Product', 'MODULE')
          ON CONFLICT (id) DO NOTHING`,
         [OTHER_PRODUCT_ID, OTHER_ORG_ID]
       );
@@ -289,7 +289,7 @@ describe("gate-25: Phase-2 modules cross-tenant isolation", () => {
       await client.query(
         `INSERT INTO wip_stage_templates (
            id, org_id, product_family, sequence_number, stage_name
-         ) VALUES ($1, $2, 'INSTRUMENT', 1, 'Assembly')
+         ) VALUES ($1, $2, 'MODULE', 1, 'Assembly')
          ON CONFLICT (id) DO NOTHING`,
         [OTHER_WIP_TMPL_ID, OTHER_ORG_ID]
       );

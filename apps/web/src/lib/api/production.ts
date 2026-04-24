@@ -46,6 +46,11 @@ import type {
   WoPriority,
   // Templates
   WipStageTemplate,
+  // Device instances
+  DeviceInstance,
+  DeviceInstanceStatus,
+  MobicaseProductCode,
+  AssemblyLine,
 } from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
@@ -304,4 +309,26 @@ export async function apiListWipStageTemplates(
     `/production/wip-stage-templates${qs(q)}`
   );
   return res.data;
+}
+
+// ─── Device Instances (Phase 5 Mobicase slice) ───────────────────────────────
+
+export interface DeviceInstanceListQuery extends PaginationParams {
+  productCode?: MobicaseProductCode;
+  status?: DeviceInstanceStatus;
+  workOrderRef?: string;
+  assignedLine?: AssemblyLine;
+  search?: string;
+}
+
+export async function apiListDeviceInstances(
+  q: DeviceInstanceListQuery = {}
+): Promise<PaginatedResponse<DeviceInstance>> {
+  return tenantGet(`/production/device-instances${qs(q)}`);
+}
+
+export async function apiGetDeviceInstance(
+  id: string
+): Promise<DeviceInstance> {
+  return tenantGet(`/production/device-instances/${id}`);
 }
