@@ -404,3 +404,176 @@ export const QcCertListQuerySchema = PaginationQuerySchema.extend({
   to: z.string().date().optional(),
   search: z.string().trim().min(1).max(200).optional(),
 });
+
+// ─── QC Equipment (Phase 5) ──────────────────────────────────────────────────
+//
+// Calibration register. Read-only API — writes happen via SQL seed for now.
+
+export const QC_EQUIPMENT_CATEGORIES = [
+  "TEST_INSTRUMENT",
+  "GAUGE",
+  "METER",
+  "BALANCE",
+  "OVEN",
+  "CHAMBER",
+  "OTHER",
+] as const;
+export const QcEquipmentCategorySchema = z.enum(QC_EQUIPMENT_CATEGORIES);
+export type QcEquipmentCategory = z.infer<typeof QcEquipmentCategorySchema>;
+
+export const QC_EQUIPMENT_STATUSES = [
+  "ACTIVE",
+  "OUT_OF_SERVICE",
+  "IN_CALIBRATION",
+  "RETIRED",
+] as const;
+export const QcEquipmentStatusSchema = z.enum(QC_EQUIPMENT_STATUSES);
+export type QcEquipmentStatus = z.infer<typeof QcEquipmentStatusSchema>;
+
+export const QcEquipmentSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  assetCode: z.string(),
+  name: z.string(),
+  category: QcEquipmentCategorySchema,
+  manufacturer: z.string().nullable(),
+  modelNumber: z.string().nullable(),
+  serialNumber: z.string().nullable(),
+  location: z.string().nullable(),
+  status: QcEquipmentStatusSchema,
+  calibrationIntervalDays: z.number().int().positive(),
+  lastCalibratedAt: z.string().nullable(),
+  nextDueAt: z.string().nullable(),
+  notes: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type QcEquipment = z.infer<typeof QcEquipmentSchema>;
+
+export const QcEquipmentListQuerySchema = PaginationQuerySchema.extend({
+  category: QcEquipmentCategorySchema.optional(),
+  status: QcEquipmentStatusSchema.optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});
+
+// ─── CAPA Actions (Phase 5) ──────────────────────────────────────────────────
+//
+// Corrective and Preventive Actions. Sources include NCRs, audits, customer
+// complaints, internal incidents.
+
+export const CAPA_SOURCE_TYPES = [
+  "NCR",
+  "AUDIT",
+  "COMPLAINT",
+  "INTERNAL",
+] as const;
+export const CapaSourceTypeSchema = z.enum(CAPA_SOURCE_TYPES);
+export type CapaSourceType = z.infer<typeof CapaSourceTypeSchema>;
+
+export const CAPA_ACTION_TYPES = ["CORRECTIVE", "PREVENTIVE", "BOTH"] as const;
+export const CapaActionTypeSchema = z.enum(CAPA_ACTION_TYPES);
+export type CapaActionType = z.infer<typeof CapaActionTypeSchema>;
+
+export const CAPA_SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+export const CapaSeveritySchema = z.enum(CAPA_SEVERITIES);
+export type CapaSeverity = z.infer<typeof CapaSeveritySchema>;
+
+export const CAPA_STATUSES = [
+  "OPEN",
+  "IN_PROGRESS",
+  "PENDING_VERIFICATION",
+  "CLOSED",
+  "CANCELLED",
+] as const;
+export const CapaStatusSchema = z.enum(CAPA_STATUSES);
+export type CapaStatus = z.infer<typeof CapaStatusSchema>;
+
+export const QcCapaActionSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  capaNumber: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  sourceType: CapaSourceTypeSchema,
+  sourceRef: z.string().nullable(),
+  actionType: CapaActionTypeSchema,
+  severity: CapaSeveritySchema,
+  status: CapaStatusSchema,
+  ownerName: z.string().nullable(),
+  dueDate: z.string().nullable(),
+  closedAt: z.string().nullable(),
+  rootCause: z.string().nullable(),
+  effectivenessCheck: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type QcCapaAction = z.infer<typeof QcCapaActionSchema>;
+
+export const QcCapaActionListQuerySchema = PaginationQuerySchema.extend({
+  status: CapaStatusSchema.optional(),
+  severity: CapaSeveritySchema.optional(),
+  sourceType: CapaSourceTypeSchema.optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});
+
+// ─── QC reports (date-windowed inspection + cert rollup) ─────────────────────
+
+export const QcReportsQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+});
+export type QcReportsQuery = z.infer<typeof QcReportsQuerySchema>;
+
+export const QcReportsSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  /** Inspection counts in window (created_at), bucketed by status. */
+  inspections: z.object({
+    total: z.number().int().nonnegative(),
+    draft: z.number().int().nonnegative(),
+    inProgress: z.number().int().nonnegative(),
+    passed: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    passRatePct: z.number(),
+  }),
+  /** Pass-rate split by inspection kind. */
+  byKind: z.object({
+    iqc: z.object({
+      total: z.number().int().nonnegative(),
+      passed: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+      passRatePct: z.number(),
+    }),
+    subQc: z.object({
+      total: z.number().int().nonnegative(),
+      passed: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+      passRatePct: z.number(),
+    }),
+    finalQc: z.object({
+      total: z.number().int().nonnegative(),
+      passed: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+      passRatePct: z.number(),
+    }),
+  }),
+  /** Cycle time on completed inspections. */
+  cycleTime: z.object({
+    completedCount: z.number().int().nonnegative(),
+    avgHours: z.number().nullable(),
+    p50Hours: z.number().nullable(),
+    p90Hours: z.number().nullable(),
+  }),
+  /** Cert issuance count + top products certified. */
+  certs: z.object({
+    issued: z.number().int().nonnegative(),
+    topProducts: z.array(
+      z.object({
+        productId: z.string().uuid().nullable(),
+        productName: z.string(),
+        certCount: z.number().int().nonnegative(),
+      }),
+    ),
+  }),
+});
+export type QcReports = z.infer<typeof QcReportsSchema>;

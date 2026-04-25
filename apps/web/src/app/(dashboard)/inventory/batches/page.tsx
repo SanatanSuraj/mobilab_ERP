@@ -1,29 +1,23 @@
 "use client";
 
-// TODO(phase-5): Inventory batch/lot tracking has no backend routes yet.
-// Expected routes:
-//   GET  /inventory/batches - list batches with item/warehouse filters + expiry
-//   GET  /inventory/batches/:id
-//   POST /inventory/batches/:id/quarantine
-//   POST /inventory/batches/:id/release
-// Mock imports left in place until the batches slice ships in
-// apps/api/src/modules/inventory (the header inv_batch table already exists
-// in the schema — only the API routes need to ship).
+/**
+ * Batch / Lot Register — derives from stock_ledger rows where batch_no is
+ * populated.
+ *
+ * Phase-2 batch tracking lives entirely on the ledger: GRN_RECEIPT and
+ * WO_OUTPUT rows tag the batch they introduced; downstream WO_ISSUE /
+ * SCRAP / TRANSFER rows reference the same batch_no. A dedicated
+ * /inventory/batches table with expiry rollups is Phase-5; until then
+ * the ledger is the source of truth.
+ *
+ * Reuses useApiStockLedger — no new endpoint.
+ */
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -31,204 +25,244 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Progress } from "@/components/ui/progress";
 import {
-  invBatches,
-  invItems,
-  warehouses,
-  getInvItemById,
-  getWarehouseById,
-  formatDate,
-  getDaysToExpiry,
-  getExpiryUrgency,
-  getExpiringBatches,
-  InvBatch,
-} from "@/data/inventory-mock";
-import { Layers, CheckCircle, ShieldAlert, Clock, AlertTriangle } from "lucide-react";
+  useApiItems,
+  useApiStockLedger,
+  useApiWarehouses,
+} from "@/hooks/useInventoryApi";
+import { Layers, Calendar, ArchiveX, Activity } from "lucide-react";
 
-const BATCH_STATUSES = [
-  "All",
-  "ACTIVE",
-  "PARTIALLY_CONSUMED",
-  "QUARANTINED",
-  "EXPIRED",
-] as const;
-
-function ExpiryCell({ expiryDate }: { expiryDate: string }) {
-  const urgency = getExpiryUrgency(expiryDate);
-  const days = getDaysToExpiry(expiryDate);
-
-  const colorClass =
-    urgency === "expired" || urgency === "urgent"
-      ? "text-red-600"
-      : urgency === "warning"
-        ? "text-amber-600"
-        : "text-green-600";
-
-  return (
-    <div>
-      <p className={`text-sm font-medium ${colorClass}`}>
-        {formatDate(expiryDate)}
-      </p>
-      <p className="text-xs text-muted-foreground">
-        {days <= 0 ? "Expired" : `${days}d remaining`}
-      </p>
-    </div>
-  );
+interface BatchRow {
+  batchNo: string;
+  itemId: string;
+  itemName: string;
+  itemSku: string;
+  warehouseId: string;
+  warehouseCode: string;
+  totalReceived: number;
+  totalIssued: number;
+  available: number;
+  uom: string;
+  firstPostedAt: string;
+  lastPostedAt: string;
+  status: "ACTIVE" | "DEPLETED";
 }
 
-function QtyProgressCell({
-  received,
-  current,
-  consumed,
-}: {
-  received: number;
-  current: number;
-  consumed: number;
-}) {
-  const pct = received > 0 ? Math.round((current / received) * 100) : 0;
-  return (
-    <div className="min-w-[120px]">
-      <div className="flex justify-between text-xs text-muted-foreground mb-1">
-        <span>
-          {current}/{received}
-        </span>
-        <span className="text-red-500">-{consumed}</span>
-      </div>
-      <Progress value={pct} className="h-1.5" />
-    </div>
-  );
+function parseQty(q: string | null | undefined): number {
+  if (!q) return 0;
+  const n = Number(q);
+  return Number.isFinite(n) ? n : 0;
 }
+
+function formatDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+type StatusFilter = "all" | "ACTIVE" | "DEPLETED";
 
 export default function BatchesPage() {
-  const [warehouseFilter, setWarehouseFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [itemFilter, setItemFilter] = useState("All");
-  const [detailBatch, setDetailBatch] = useState<InvBatch | null>(null);
+  const itemsQuery = useApiItems({ limit: 200 });
+  const warehousesQuery = useApiWarehouses({ limit: 100 });
+  const [itemId, setItemId] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
-  const expiring30 = getExpiringBatches(30);
-  const expiring90 = getExpiringBatches(90);
+  // Pull a wide ledger window — batch rows are sparse (only GRN/WO_OUTPUT
+  // and downstream issues carry batch_no). We filter client-side.
+  const ledgerQuery = useApiStockLedger(
+    useMemo(
+      () => ({
+        limit: 500,
+        sortBy: "postedAt" as const,
+        sortDir: "desc" as const,
+        itemId: itemId === "all" ? undefined : itemId,
+      }),
+      [itemId]
+    )
+  );
 
-  const totalBatches = invBatches.length;
-  const activeBatches = invBatches.filter((b) => b.status === "ACTIVE").length;
-  const quarantinedBatches = invBatches.filter(
-    (b) => b.status === "QUARANTINED"
-  ).length;
-  const expiring90Count = expiring90.length;
-
-  const filteredBatches = useMemo(() => {
-    return invBatches.filter((b) => {
-      if (warehouseFilter !== "All" && b.warehouseId !== warehouseFilter)
-        return false;
-      if (statusFilter !== "All" && b.status !== statusFilter) return false;
-      if (itemFilter !== "All" && b.itemId !== itemFilter) return false;
-      return true;
-    });
-  }, [warehouseFilter, statusFilter, itemFilter]);
-
-  const columns: Column<InvBatch>[] = [
-    {
-      key: "batchNumber",
-      header: "Batch Number",
-      sortable: true,
-      render: (b) => (
-        <span className="font-mono text-xs font-bold">{b.batchNumber}</span>
-      ),
-    },
-    {
-      key: "itemId",
-      header: "Item",
-      render: (b) => {
-        const item = getInvItemById(b.itemId);
-        return (
-          <div>
-            <p className="text-sm font-medium">{item?.name ?? b.itemId}</p>
-            <p className="text-xs font-mono text-muted-foreground">
-              {item?.itemCode}
-            </p>
-          </div>
-        );
-      },
-    },
-    {
-      key: "vendorLotNumber",
-      header: "Vendor Lot #",
-      render: (b) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {b.vendorLotNumber}
-        </span>
-      ),
-    },
-    {
-      key: "vendorName",
-      header: "Vendor",
-      render: (b) => <span className="text-sm">{b.vendorName}</span>,
-    },
-    {
-      key: "grnId",
-      header: "GRN",
-      render: (b) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {b.grnId}
-        </span>
-      ),
-    },
-    {
-      key: "mfgDate",
-      header: "Mfg Date",
-      render: (b) => (
-        <span className="text-sm text-muted-foreground">
-          {formatDate(b.mfgDate)}
-        </span>
-      ),
-    },
-    {
-      key: "expiryDate",
-      header: "Expiry Date",
-      sortable: true,
-      render: (b) => <ExpiryCell expiryDate={b.expiryDate} />,
-    },
-    {
-      key: "currentQty",
-      header: "Qty (Rcvd/Curr/Cnsmd)",
-      render: (b) => (
-        <QtyProgressCell
-          received={b.receivedQty}
-          current={b.currentQty}
-          consumed={b.consumedQty}
+  if (
+    ledgerQuery.isLoading ||
+    itemsQuery.isLoading ||
+    warehousesQuery.isLoading
+  ) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+        <PageHeader
+          title="Batch / Lot Register"
+          description="Batch traceability across receipts, production output, and issues"
         />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  const ledger = (ledgerQuery.data?.data ?? []).filter((r) => r.batchNo);
+  const items = itemsQuery.data?.data ?? [];
+  const warehouses = warehousesQuery.data?.data ?? [];
+  const itemById = new Map(items.map((i) => [i.id, i]));
+  const warehouseById = new Map(warehouses.map((w) => [w.id, w]));
+  const batchedItems = items.filter((i) => i.isBatched);
+
+  // Roll up by (batch_no, item_id, warehouse_id). Same batch_no can in
+  // theory exist for two items at two warehouses, so the composite key
+  // matters.
+  const byKey = new Map<string, BatchRow>();
+  for (const r of ledger) {
+    const key = `${r.batchNo!}::${r.itemId}::${r.warehouseId}`;
+    const item = itemById.get(r.itemId);
+    const wh = warehouseById.get(r.warehouseId);
+    const existing = byKey.get(key);
+    const qty = parseQty(r.quantity);
+    if (existing) {
+      if (qty > 0) existing.totalReceived += qty;
+      else existing.totalIssued += Math.abs(qty);
+      existing.available += qty;
+      // postedAt sort is desc → first row we encounter is the latest.
+      if (r.postedAt > existing.lastPostedAt) existing.lastPostedAt = r.postedAt;
+      if (r.postedAt < existing.firstPostedAt)
+        existing.firstPostedAt = r.postedAt;
+    } else {
+      byKey.set(key, {
+        batchNo: r.batchNo!,
+        itemId: r.itemId,
+        itemName: item?.name ?? r.itemId.slice(0, 8),
+        itemSku: item?.sku ?? "—",
+        warehouseId: r.warehouseId,
+        warehouseCode: wh?.code ?? r.warehouseId.slice(0, 8),
+        totalReceived: qty > 0 ? qty : 0,
+        totalIssued: qty < 0 ? Math.abs(qty) : 0,
+        available: qty,
+        uom: r.uom,
+        firstPostedAt: r.postedAt,
+        lastPostedAt: r.postedAt,
+        status: "ACTIVE",
+      });
+    }
+  }
+
+  for (const row of byKey.values()) {
+    row.status = row.available > 0 ? "ACTIVE" : "DEPLETED";
+  }
+
+  const allRows = Array.from(byKey.values()).sort(
+    (a, b) =>
+      new Date(b.lastPostedAt).getTime() - new Date(a.lastPostedAt).getTime()
+  );
+  const rows =
+    statusFilter === "all"
+      ? allRows
+      : allRows.filter((r) => r.status === statusFilter);
+
+  const totalBatches = allRows.length;
+  const activeBatches = allRows.filter((r) => r.status === "ACTIVE").length;
+  const depleted = allRows.filter((r) => r.status === "DEPLETED").length;
+  const skuCount = new Set(allRows.map((r) => r.itemId)).size;
+
+  const columns: Column<BatchRow>[] = [
+    {
+      key: "batchNo",
+      header: "Batch / Lot",
+      render: (r) => (
+        <span className="font-mono text-xs font-bold">{r.batchNo}</span>
       ),
     },
     {
-      key: "qcStatus",
-      header: "QC",
-      render: (b) => <StatusBadge status={b.qcStatus} />,
+      key: "item",
+      header: "Item",
+      render: (r) => (
+        <div>
+          <p className="text-sm leading-tight">{r.itemName}</p>
+          <p className="font-mono text-xs text-muted-foreground">{r.itemSku}</p>
+        </div>
+      ),
+    },
+    {
+      key: "warehouse",
+      header: "Warehouse",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">{r.warehouseCode}</span>
+      ),
+    },
+    {
+      key: "totalReceived",
+      header: "Received",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono">
+          {r.totalReceived.toLocaleString("en-IN")}
+          <span className="text-xs text-muted-foreground ml-1">{r.uom}</span>
+        </span>
+      ),
+    },
+    {
+      key: "totalIssued",
+      header: "Issued",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono text-amber-700">
+          {r.totalIssued.toLocaleString("en-IN")}
+          <span className="text-xs text-muted-foreground ml-1">{r.uom}</span>
+        </span>
+      ),
+    },
+    {
+      key: "available",
+      header: "Available",
+      className: "text-right",
+      render: (r) => (
+        <span
+          className={`text-sm font-mono font-semibold ${
+            r.available > 0 ? "text-green-700" : "text-muted-foreground"
+          }`}
+        >
+          {r.available.toLocaleString("en-IN")}
+          <span className="text-xs text-muted-foreground ml-1">{r.uom}</span>
+        </span>
+      ),
     },
     {
       key: "status",
       header: "Status",
-      render: (b) => <StatusBadge status={b.status} />,
+      render: (r) =>
+        r.status === "ACTIVE" ? (
+          <span className="text-xs font-semibold text-green-700">Active</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">Depleted</span>
+        ),
     },
     {
-      key: "storageTemp",
-      header: "Storage Temp",
-      render: (b) => (
-        <span className="text-sm text-muted-foreground">
-          {b.storageTemp ?? "—"}
+      key: "lastPostedAt",
+      header: "Last Move",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">
+          {formatDate(r.lastPostedAt)}
         </span>
       ),
     },
   ];
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
+    <div className="p-6 max-w-[1400px] mx-auto space-y-6">
       <PageHeader
-        title="Batch Register"
-        description="Track reagent and component batches with FEFO and expiry monitoring"
+        title="Batch / Lot Register"
+        description="Batch traceability across receipts, production output, and issues"
       />
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Total Batches"
           value={String(totalBatches)}
@@ -238,237 +272,62 @@ export default function BatchesPage() {
         <KPICard
           title="Active"
           value={String(activeBatches)}
-          icon={CheckCircle}
+          icon={Activity}
           iconColor="text-green-600"
         />
         <KPICard
-          title="Quarantined"
-          value={String(quarantinedBatches)}
-          icon={ShieldAlert}
-          iconColor="text-orange-600"
+          title="Depleted"
+          value={String(depleted)}
+          icon={ArchiveX}
+          iconColor="text-muted-foreground"
         />
         <KPICard
-          title="Expiring in 90 Days"
-          value={String(expiring90Count)}
-          icon={Clock}
-          iconColor="text-amber-600"
+          title="Batched SKUs"
+          value={String(skuCount)}
+          icon={Calendar}
+          iconColor="text-purple-600"
         />
       </div>
 
-      {/* Expiry Alert Banner */}
-      {expiring30.length > 0 && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800">
-          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-          <p className="text-sm font-medium">
-            {expiring30.length} batch{expiring30.length !== 1 ? "es" : ""}{" "}
-            expiring within 30 days — review immediately
-          </p>
-        </div>
-      )}
-
-      {/* Filter Bar */}
-      <div className="flex flex-wrap gap-3 mb-4">
-        <Select
-          value={warehouseFilter}
-          onValueChange={(v) => setWarehouseFilter(v ?? "All")}
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Warehouse" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="All">All Warehouses</SelectItem>
-            {warehouses.map((wh) => (
-              <SelectItem key={wh.id} value={wh.id}>
-                {wh.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v ?? "All")}
-        >
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            {BATCH_STATUSES.map((s) => (
-              <SelectItem key={s} value={s}>
-                {s === "All"
-                  ? "All Statuses"
-                  : s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={itemFilter}
-          onValueChange={(v) => setItemFilter(v ?? "All")}
-        >
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder="Item" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="All">All Items</SelectItem>
-            {invItems.map((item) => (
-              <SelectItem key={item.id} value={item.id}>
-                {item.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <DataTable<InvBatch>
-        data={filteredBatches}
+      <DataTable<BatchRow>
+        data={rows}
         columns={columns}
-        searchKey="batchNumber"
-        searchPlaceholder="Search by batch number..."
-        onRowClick={(b) => setDetailBatch(b)}
+        searchKey="batchNo"
+        searchPlaceholder="Search batch / lot #..."
+        pageSize={15}
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select
+              value={statusFilter}
+              onValueChange={(v) =>
+                setStatusFilter((v ?? "all") as StatusFilter)
+              }
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="ACTIVE">Active</SelectItem>
+                <SelectItem value="DEPLETED">Depleted</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={itemId} onValueChange={(v) => setItemId(v ?? "all")}>
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Item" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Batched Items</SelectItem>
+                {batchedItems.map((i) => (
+                  <SelectItem key={i.id} value={i.id}>
+                    {i.sku} — {i.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        }
       />
-
-      {/* Detail Dialog */}
-      <Dialog
-        open={!!detailBatch}
-        onOpenChange={(open) => !open && setDetailBatch(null)}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-mono">
-              {detailBatch?.batchNumber}
-            </DialogTitle>
-          </DialogHeader>
-          {detailBatch && (
-            <div className="space-y-4">
-              {/* Item */}
-              <div>
-                <p className="text-xs text-muted-foreground mb-1 font-medium uppercase tracking-wide">
-                  Item
-                </p>
-                <p className="font-semibold">
-                  {getInvItemById(detailBatch.itemId)?.name}
-                </p>
-                <p className="text-xs font-mono text-muted-foreground">
-                  {getInvItemById(detailBatch.itemId)?.itemCode}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Warehouse:</span>{" "}
-                  <span className="font-medium">
-                    {getWarehouseById(detailBatch.warehouseId)?.name}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Vendor:</span>{" "}
-                  <span className="font-medium">{detailBatch.vendorName}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Vendor Lot #:</span>{" "}
-                  <span className="font-mono text-xs">
-                    {detailBatch.vendorLotNumber}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">GRN:</span>{" "}
-                  <span className="font-mono text-xs">{detailBatch.grnId}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Mfg Date:</span>{" "}
-                  <span className="font-medium">
-                    {formatDate(detailBatch.mfgDate)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Expiry Date:</span>{" "}
-                  <ExpiryCell expiryDate={detailBatch.expiryDate} />
-                </div>
-                <div>
-                  <span className="text-muted-foreground">QC Status:</span>{" "}
-                  <StatusBadge status={detailBatch.qcStatus} />
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Status:</span>{" "}
-                  <StatusBadge status={detailBatch.status} />
-                </div>
-                {detailBatch.catalogueNumber && (
-                  <div>
-                    <span className="text-muted-foreground">
-                      Catalogue #:
-                    </span>{" "}
-                    <span className="font-mono text-xs">
-                      {detailBatch.catalogueNumber}
-                    </span>
-                  </div>
-                )}
-                {detailBatch.storageTemp && (
-                  <div>
-                    <span className="text-muted-foreground">
-                      Storage Temp:
-                    </span>{" "}
-                    <span className="font-medium">
-                      {detailBatch.storageTemp}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Consumption Progress */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Consumption</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>
-                        Received:{" "}
-                        <strong>{detailBatch.receivedQty}</strong>
-                      </span>
-                      <span>
-                        Current: <strong>{detailBatch.currentQty}</strong>
-                      </span>
-                      <span className="text-red-600">
-                        Consumed: <strong>{detailBatch.consumedQty}</strong>
-                      </span>
-                    </div>
-                    <Progress
-                      value={
-                        detailBatch.receivedQty > 0
-                          ? Math.round(
-                              (detailBatch.currentQty /
-                                detailBatch.receivedQty) *
-                                100
-                            )
-                          : 0
-                      }
-                      className="h-3"
-                    />
-                    <p className="text-xs text-muted-foreground text-right">
-                      {detailBatch.receivedQty > 0
-                        ? Math.round(
-                            (detailBatch.currentQty /
-                              detailBatch.receivedQty) *
-                              100
-                          )
-                        : 0}
-                      % remaining
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDetailBatch(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -25,11 +25,6 @@ export const mfgKeys = {
   stageLogsLine: (line: AssemblyLine) => ["mfg", "stage-logs", "line", line] as const,
   oeeAvg: () => ["mfg", "oee", "average"] as const,
   oeeRecords: () => ["mfg", "oee", "records"] as const,
-  workOrders: (filters?: WOFilters) => ["mfg", "work-orders", filters] as const,
-  workOrder: (id: string) => ["mfg", "work-orders", id] as const,
-  boms: () => ["mfg", "bom"] as const,
-  bom: (id: string) => ["mfg", "bom", id] as const,
-  ecns: () => ["mfg", "ecn"] as const,
 };
 
 export function useMobiWorkOrders(filters?: WOFilters) {
@@ -180,37 +175,5 @@ export function useOEEAverage() {
     queryKey: mfgKeys.oeeAvg(),
     queryFn: () => mfgService.getOEEAverage(),
     staleTime: 5 * 60_000,
-  });
-}
-
-export function useWorkOrders(filters?: WOFilters) {
-  return useQuery({
-    queryKey: mfgKeys.workOrders(filters),
-    queryFn: () => mfgService.getWorkOrders(filters),
-    staleTime: 30_000,
-  });
-}
-
-export function useWorkOrder(id: string) {
-  return useQuery({
-    queryKey: mfgKeys.workOrder(id),
-    queryFn: () => mfgService.getWorkOrder(id),
-    enabled: Boolean(id),
-  });
-}
-
-export function useBOMs() {
-  return useQuery({
-    queryKey: mfgKeys.boms(),
-    queryFn: () => mfgService.getBOMs(),
-    staleTime: 5 * 60_000,
-  });
-}
-
-export function useECNs() {
-  return useQuery({
-    queryKey: mfgKeys.ecns(),
-    queryFn: () => mfgService.getECNs(),
-    staleTime: 60_000,
   });
 }

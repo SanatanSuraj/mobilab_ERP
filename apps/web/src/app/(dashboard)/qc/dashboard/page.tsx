@@ -1,375 +1,236 @@
 "use client";
 
-// TODO(phase-5): QC dashboard aggregates across incoming / WIP / NCR / CAPA /
-// equipment. useApiQcInspections + useApiQcCerts exist, but the specialized
-// incoming/WIP/NCR/CAPA/equipment entities and rollups have no backend route
-// yet. Expected:
-//   GET /qc/overview - single-call aggregates for all dashboard KPIs
-// Mock imports left in place until the overview route ships in
-// apps/api/src/modules/qc (or until the specialized slices ship and the
-// dashboard is rewritten over them).
+/**
+ * QC Dashboard — aggregates /qc/inspections by status, kind and verdict.
+ *
+ * Single inspections list (sorted by createdAt desc) is enough for KPIs
+ * and a recent-fails table. Findings detail and per-WO drill-down lives
+ * on the individual inspection pages.
+ *
+ * Reuses useApiQcInspections — no new backend endpoint.
+ */
 
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
+import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  incomingInspections,
-  wipInspections,
-  ncrRecords,
-  equipmentRecords,
-  getPendingIncomingInspections,
-  getOpenNCRs,
-  getOpenCAPAs,
-  getCalibrationDueEquipment,
-  getOverdueEquipment,
-  getIncomingPassRate,
-  getDaysUntilCalibration,
-  formatDate,
-  formatDateTime,
-} from "@/data/qc-mock";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useApiQcInspections } from "@/hooks/useQcApi";
+import type { QcInspection, QcInspectionKind } from "@instigenie/contracts";
 import {
-  ClipboardList,
-  ShieldAlert,
+  CheckCircle2,
+  XCircle,
+  ClipboardCheck,
   AlertTriangle,
-  Wrench,
-  TrendingUp,
-  Activity,
-  AlertCircle,
 } from "lucide-react";
 
-export default function QCDashboardPage() {
-  const pendingIncoming = getPendingIncomingInspections();
-  const openNCRs = getOpenNCRs();
-  const openCAPAs = getOpenCAPAs();
-  const calDueEquipment = getCalibrationDueEquipment();
-  const overdueEquipment = getOverdueEquipment();
-  const incomingPassRate = getIncomingPassRate();
-  const today = new Date("2026-04-17");
+function formatDate(iso: string | null): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
 
-  const wipActive = wipInspections.filter(
-    (i) => i.status === "IN_PROGRESS" || i.status === "PENDING"
+type KindFilter = QcInspectionKind | "all";
+
+export default function QCDashboardPage() {
+  const [kind, setKind] = useState<KindFilter>("all");
+
+  const inspectionsQuery = useApiQcInspections(
+    useMemo(
+      () => ({
+        limit: 200,
+        sortBy: "createdAt" as const,
+        sortDir: "desc" as const,
+        kind: kind === "all" ? undefined : kind,
+      }),
+      [kind]
+    )
   );
 
+  if (inspectionsQuery.isLoading) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+        <PageHeader
+          title="QC Dashboard"
+          description="Incoming, WIP, NCR, CAPA, and equipment at a glance"
+        />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  const rows = inspectionsQuery.data?.data ?? [];
+
+  const totalCount = rows.length;
+  const passCount = rows.filter((r) => r.status === "PASSED").length;
+  const failCount = rows.filter((r) => r.status === "FAILED").length;
+  const inProgressCount = rows.filter(
+    (r) => r.status === "IN_PROGRESS" || r.status === "DRAFT"
+  ).length;
+  const finalised = passCount + failCount;
+  const passRate = finalised === 0 ? 0 : Math.round((passCount / finalised) * 100);
+
+  const byKind: Record<QcInspectionKind, number> = {
+    IQC: 0,
+    SUB_QC: 0,
+    FINAL_QC: 0,
+  };
+  for (const r of rows) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
+
+  const fails = rows.filter((r) => r.status === "FAILED").slice(0, 25);
+
+  const columns: Column<QcInspection>[] = [
+    {
+      key: "inspectionNumber",
+      header: "Inspection #",
+      render: (r) => (
+        <span className="font-mono text-xs font-bold">{r.inspectionNumber}</span>
+      ),
+    },
+    {
+      key: "kind",
+      header: "Kind",
+      render: (r) => <StatusBadge status={r.kind} />,
+    },
+    {
+      key: "templateName",
+      header: "Template",
+      render: (r) => (
+        <span className="text-sm text-muted-foreground">
+          {r.templateName ?? r.templateCode ?? "—"}
+        </span>
+      ),
+    },
+    {
+      key: "sourceLabel",
+      header: "Source",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">
+          {r.sourceLabel ?? `${r.sourceType}`}
+        </span>
+      ),
+    },
+    {
+      key: "verdict",
+      header: "Verdict",
+      render: (r) =>
+        r.verdict ? (
+          <StatusBadge status={r.verdict} />
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      key: "completedAt",
+      header: "Completed",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">
+          {formatDate(r.completedAt)}
+        </span>
+      ),
+    },
+  ];
+
   return (
-    <div className="space-y-8 p-6">
+    <div className="p-6 max-w-[1400px] mx-auto space-y-6">
       <PageHeader
-        title="QC Dashboard — Instigenie Manufacturing"
-        description="ISO 13485 Quality Control — Guwahati Plant | Chetan's QC Team"
+        title="QC Dashboard"
+        description="Incoming, WIP, NCR, CAPA, and equipment at a glance"
       />
 
-      {/* Calibration Overdue Alert Banner */}
-      {overdueEquipment.length > 0 && (
-        <div className="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 shrink-0" />
-          <div>
-            <span className="font-semibold">Equipment Calibration Overdue</span>
-            {" — "}
-            {overdueEquipment.map((e) => e.equipmentName).join(", ")}.{" "}
-            Results from affected stages are flagged.
-          </div>
-        </div>
-      )}
-
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
-          title="Incoming Inspections"
-          value={String(pendingIncoming.length)}
-          icon={ClipboardList}
+          title="Total Inspections"
+          value={String(totalCount)}
+          icon={ClipboardCheck}
           iconColor="text-blue-600"
-          change="Pending / In Progress / Countersign"
-          trend="neutral"
         />
         <KPICard
-          title="Open NCRs"
-          value={String(openNCRs.length)}
+          title="Pass Rate"
+          value={`${passRate}%`}
+          icon={CheckCircle2}
+          iconColor="text-green-600"
+        />
+        <KPICard
+          title="In Progress"
+          value={String(inProgressCount)}
           icon={AlertTriangle}
-          iconColor="text-red-600"
-          change={openNCRs.length > 0 ? "Requires action" : "All clear"}
-          trend={openNCRs.length > 0 ? "down" : "up"}
-        />
-        <KPICard
-          title="Open CAPAs"
-          value={String(openCAPAs.length)}
-          icon={ShieldAlert}
-          iconColor="text-orange-600"
-          change={openCAPAs.length > 0 ? "In progress" : "All closed"}
-          trend={openCAPAs.length > 0 ? "down" : "up"}
-        />
-        <KPICard
-          title="Calibration Alerts"
-          value={String(calDueEquipment.length)}
-          icon={Wrench}
           iconColor="text-amber-600"
-          change={calDueEquipment.length > 0 ? "Due / Overdue" : "All calibrated"}
-          trend={calDueEquipment.length > 0 ? "down" : "up"}
         />
         <KPICard
-          title="Incoming Pass Rate"
-          value={`${incomingPassRate}%`}
-          icon={TrendingUp}
-          iconColor="text-teal-600"
-          change="All completed AQL inspections"
-          trend={incomingPassRate >= 80 ? "up" : "down"}
+          title="Fails"
+          value={String(failCount)}
+          icon={XCircle}
+          iconColor="text-red-600"
         />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <KPICard
-          title="WIP Inspections"
-          value={String(wipActive.length)}
-          icon={Activity}
+          title="IQC (Incoming)"
+          value={String(byKind.IQC)}
+          icon={ClipboardCheck}
           iconColor="text-indigo-600"
-          change="Active gate inspections"
-          trend="neutral"
+        />
+        <KPICard
+          title="Sub-Assembly QC"
+          value={String(byKind.SUB_QC)}
+          icon={ClipboardCheck}
+          iconColor="text-purple-600"
+        />
+        <KPICard
+          title="Final QC"
+          value={String(byKind.FINAL_QC)}
+          icon={ClipboardCheck}
+          iconColor="text-teal-600"
         />
       </div>
 
-      {/* Incoming QC Queue */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Incoming QC Queue</h2>
-        <Card>
-          <CardContent className="p-0">
-            {pendingIncoming.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground text-sm">
-                No pending incoming inspections
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 border-b">
-                    <tr>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Inspection #</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">GRN #</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Vendor</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Item</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Batch / Lot</th>
-                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Qty</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">AQL Level</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Inspector</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {pendingIncoming.map((insp) => (
-                      <tr key={insp.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs font-bold text-blue-700">
-                          {insp.inspectionNumber}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                          {insp.grnNumber}
-                        </td>
-                        <td className="px-4 py-3 text-sm">{insp.vendorName}</td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm font-medium">{insp.itemName}</div>
-                          <div className="text-xs text-muted-foreground font-mono">{insp.itemCode}</div>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs">{insp.batchLotNumber}</td>
-                        <td className="px-4 py-3 text-right font-mono text-sm">{insp.qtyReceived}</td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">{insp.aqlLevel}</td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={insp.status} />
-                        </td>
-                        <td className="px-4 py-3 text-sm">{insp.inspectedBy}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Open NCRs */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Open NCRs</h2>
-        <Card>
-          <CardContent className="p-0">
-            {openNCRs.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground text-sm">
-                No open NCRs
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 border-b">
-                    <tr>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">NCR #</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Severity</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Source</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Title</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">WO / Item</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Raised By</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Raised At</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">CAPA Linked</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {openNCRs.map((ncr) => (
-                      <tr key={ncr.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs font-bold text-red-700">
-                          {ncr.ncrNumber}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={ncr.severity} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={ncr.source} />
-                        </td>
-                        <td className="px-4 py-3 max-w-[240px]">
-                          <p className="text-sm truncate" title={ncr.title}>
-                            {ncr.title.length > 60 ? ncr.title.slice(0, 60) + "…" : ncr.title}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          {ncr.workOrderPid ?? ncr.itemName ?? "—"}
-                        </td>
-                        <td className="px-4 py-3 text-sm">{ncr.raisedBy}</td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          {formatDateTime(ncr.raisedAt)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={ncr.status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          {ncr.linkedCAPAId ? (
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 border border-green-200">
-                              Yes
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-500 border border-gray-200">
-                              No
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Open CAPAs */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Open CAPAs</h2>
-        <Card>
-          <CardContent className="p-0">
-            {openCAPAs.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground text-sm">
-                No open CAPAs
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 border-b">
-                    <tr>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">CAPA #</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Type</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Problem Statement</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Responsible</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Target Closure</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Effectiveness</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {openCAPAs.map((capa) => {
-                      const isOverdue = new Date(capa.targetClosureDate) < today;
-                      return (
-                        <tr
-                          key={capa.id}
-                          className={`hover:bg-muted/30 transition-colors ${isOverdue ? "bg-red-50/60" : ""}`}
-                        >
-                          <td className="px-4 py-3 font-mono text-xs font-bold text-orange-700">
-                            {capa.capaNumber}
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={capa.type} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={capa.status} />
-                          </td>
-                          <td className="px-4 py-3 max-w-[280px]">
-                            <p className="text-sm truncate" title={capa.problemStatement}>
-                              {capa.problemStatement.length > 70
-                                ? capa.problemStatement.slice(0, 70) + "…"
-                                : capa.problemStatement}
-                            </p>
-                          </td>
-                          <td className="px-4 py-3 text-sm">{capa.responsiblePerson}</td>
-                          <td className={`px-4 py-3 text-sm font-medium ${isOverdue ? "text-red-700" : ""}`}>
-                            {formatDate(capa.targetClosureDate)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={capa.effectivenessStatus} />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Equipment Calibration Status */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Equipment Calibration Status</h2>
-        <Card>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 border-b">
-                  <tr>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Equipment ID</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Name</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Location</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Last Cal. Date</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Next Due Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {equipmentRecords.map((eqp) => {
-                    const daysLeft = getDaysUntilCalibration(eqp.nextCalibrationDue);
-                    const isOverdue = eqp.status === "CALIBRATION_OVERDUE";
-                    const isDueSoon = !isOverdue && daysLeft <= 30;
-                    const dueDateClass = isOverdue
-                      ? "text-red-700 font-medium"
-                      : isDueSoon
-                      ? "text-amber-700 font-medium"
-                      : "";
-                    return (
-                      <tr key={eqp.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs font-bold text-blue-700">
-                          {eqp.equipmentId}
-                        </td>
-                        <td className="px-4 py-3 text-sm">{eqp.equipmentName}</td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">{eqp.location}</td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={eqp.status} />
-                        </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          {formatDate(eqp.lastCalibrationDate)}
-                        </td>
-                        <td className={`px-4 py-3 text-xs ${dueDateClass || "text-muted-foreground"}`}>
-                          {formatDate(eqp.nextCalibrationDue)}
-                          {isOverdue && " (OVERDUE)"}
-                          {isDueSoon && !isOverdue && ` (${daysLeft}d left)`}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+      <div>
+        <h2 className="text-lg font-semibold mb-2">Recent Fails</h2>
+        <DataTable<QcInspection>
+          data={fails}
+          columns={columns}
+          searchKey="inspectionNumber"
+          searchPlaceholder="Search inspection #..."
+          pageSize={10}
+          actions={
+            <Select value={kind} onValueChange={(v) => setKind((v ?? "all") as KindFilter)}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Kind" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Kinds</SelectItem>
+                <SelectItem value="IQC">Incoming (IQC)</SelectItem>
+                <SelectItem value="SUB_QC">Sub-Assembly</SelectItem>
+                <SelectItem value="FINAL_QC">Final QC</SelectItem>
+              </SelectContent>
+            </Select>
+          }
+        />
       </div>
     </div>
   );

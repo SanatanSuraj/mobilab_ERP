@@ -44,6 +44,7 @@ import {
   apiDeleteVendor,
   apiGetGrn,
   apiGetIndent,
+  apiGetProcurementReports,
   apiGetPurchaseOrder,
   apiGetVendor,
   apiListGrnLines,
@@ -63,6 +64,7 @@ import {
   apiUpdateVendor,
   type GrnListQuery,
   type IndentListQuery,
+  type ProcurementReportsQuery,
   type PurchaseOrderListQuery,
   type VendorListQuery,
 } from "@/lib/api/procurement";
@@ -83,6 +85,7 @@ import type {
   IndentWithLines,
   PoLine,
   PostGrn,
+  ProcurementReports,
   PurchaseOrder,
   PurchaseOrderWithLines,
   UpdateGrn,
@@ -129,6 +132,11 @@ export const procurementApiKeys = {
     list: (q: GrnListQuery) => ["proc-api", "grns", "list", q] as const,
     detail: (id: string) => ["proc-api", "grns", "detail", id] as const,
     lines: (id: string) => ["proc-api", "grns", "lines", id] as const,
+  },
+  reports: {
+    all: ["proc-api", "reports"] as const,
+    summary: (q: ProcurementReportsQuery) =>
+      ["proc-api", "reports", "summary", q] as const,
   },
 };
 
@@ -593,5 +601,20 @@ export function useApiPostGrn(grnId: string) {
       // Inventory ledger + summary picked up fresh rows.
       qc.invalidateQueries({ queryKey: ["inv-api"] });
     },
+  });
+}
+
+// ─── Reports ───────────────────────────────────────────────────────────────
+
+/**
+ * Date-windowed PO throughput / GRN delivery / vendor spend roll-up. Defaults
+ * to the last 90 days when no range is passed.
+ */
+export function useApiProcurementReports(q: ProcurementReportsQuery = {}) {
+  return useQuery<ProcurementReports, Error>({
+    queryKey: procurementApiKeys.reports.summary(q),
+    queryFn: () => apiGetProcurementReports(q),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 }

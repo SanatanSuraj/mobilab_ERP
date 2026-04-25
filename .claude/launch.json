@@ -11,8 +11,8 @@
     {
       "name": "web-only",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype/apps/web' && pnpm exec next dev -p $PORT"],
-      "port": 3100,
+      "runtimeArgs": ["-c", "cd '/Users/sanatansuraj/Desktop/crm _prototype/crm-prototype/apps/web' && exec env PORT=${PORT:-3200} pnpm exec next dev"],
+      "port": 3200,
       "autoPort": true
     }
   ]

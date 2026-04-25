@@ -51,9 +51,19 @@ import {
   apiGetQcCert,
   apiIssueQcCert,
   apiRecallQcCert,
+  // Equipment + CAPA (Phase 5)
+  apiListQcEquipment,
+  apiGetQcEquipment,
+  apiListQcCapaActions,
+  apiGetQcCapaAction,
+  // Reports
+  apiGetQcReports,
   type InspectionTemplateListQuery,
   type QcInspectionListQuery,
   type QcCertListQuery,
+  type QcEquipmentListQuery,
+  type QcCapaActionListQuery,
+  type QcReportsQuery,
 } from "@/lib/api/qc";
 
 import type {
@@ -75,6 +85,7 @@ import type {
   UpdateQcFinding,
   QcCert,
   IssueQcCert,
+  QcReports,
 } from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
@@ -109,6 +120,23 @@ export const qcApiKeys = {
     all: ["qc-api", "certs"] as const,
     list: (q: QcCertListQuery) => ["qc-api", "certs", "list", q] as const,
     detail: (id: string) => ["qc-api", "certs", "detail", id] as const,
+  },
+  equipment: {
+    all: ["qc-api", "equipment"] as const,
+    list: (q: QcEquipmentListQuery) =>
+      ["qc-api", "equipment", "list", q] as const,
+    detail: (id: string) => ["qc-api", "equipment", "detail", id] as const,
+  },
+  capa: {
+    all: ["qc-api", "capa"] as const,
+    list: (q: QcCapaActionListQuery) =>
+      ["qc-api", "capa", "list", q] as const,
+    detail: (id: string) => ["qc-api", "capa", "detail", id] as const,
+  },
+  reports: {
+    all: ["qc-api", "reports"] as const,
+    summary: (q: QcReportsQuery) =>
+      ["qc-api", "reports", "summary", q] as const,
   },
 };
 
@@ -485,5 +513,62 @@ export function useApiRecallQcCert() {
         queryKey: ["qc-api", "inspections", "cert"],
       });
     },
+  });
+}
+
+// ─── Equipment + CAPA (Phase 5, read-only) ─────────────────────────────────
+
+export function useApiQcEquipment(query: QcEquipmentListQuery = {}) {
+  return useQuery({
+    queryKey: qcApiKeys.equipment.list(query),
+    queryFn: () => apiListQcEquipment(query),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiQcEquipmentById(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? qcApiKeys.equipment.detail(id)
+      : ["qc-api", "equipment", "detail", "__none__"],
+    queryFn: () => apiGetQcEquipment(id!),
+    enabled: Boolean(id),
+    staleTime: 60_000,
+  });
+}
+
+export function useApiQcCapaActions(query: QcCapaActionListQuery = {}) {
+  return useQuery({
+    queryKey: qcApiKeys.capa.list(query),
+    queryFn: () => apiListQcCapaActions(query),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiQcCapaAction(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? qcApiKeys.capa.detail(id)
+      : ["qc-api", "capa", "detail", "__none__"],
+    queryFn: () => apiGetQcCapaAction(id!),
+    enabled: Boolean(id),
+    staleTime: 60_000,
+  });
+}
+
+// ─── Reports ───────────────────────────────────────────────────────────────
+
+/**
+ * Date-windowed inspection counts + cycle time + cert rollup. Defaults to the
+ * last 90 days when no range is passed.
+ */
+export function useApiQcReports(q: QcReportsQuery = {}) {
+  return useQuery<QcReports, Error>({
+    queryKey: qcApiKeys.reports.summary(q),
+    queryFn: () => apiGetQcReports(q),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 }

@@ -14,7 +14,9 @@
 import type { PoolClient } from "pg";
 import type {
   CreateWorkOrder,
+  ProductFamily,
   UpdateWorkOrder,
+  WipBoardCard,
   WipStage,
   WipStageQcResult,
   WipStageStatus,
@@ -22,6 +24,7 @@ import type {
   WoPriority,
   WoStatus,
   WorkOrder,
+  WorkOrderListItem,
 } from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
 
@@ -199,71 +202,114 @@ const TEMPLATE_COLS = `id, org_id, product_family, sequence_number, stage_name,
 export const workOrdersRepo = {
   // ── Header ─────────────────────────────────────────────────────────────────
 
+  /**
+   * Paginated list of work orders enriched with product master + embedded
+   * stages[]. Two queries (header+product, then stages keyed by wo_id) so the
+   * page never issues N+1 to render its `productName`/`productCode` columns
+   * or the in-row stage progress chip.
+   */
   async list(
     client: PoolClient,
     filters: WorkOrderListFilters,
     plan: PaginationPlan
-  ): Promise<{ data: WorkOrder[]; total: number }> {
-    const where: string[] = ["deleted_at IS NULL"];
+  ): Promise<{ data: WorkOrderListItem[]; total: number }> {
+    const where: string[] = ["wo.deleted_at IS NULL"];
     const params: unknown[] = [];
     let i = 1;
     if (filters.status) {
-      where.push(`status = $${i}`);
+      where.push(`wo.status = $${i}`);
       params.push(filters.status);
       i++;
     }
     if (filters.priority) {
-      where.push(`priority = $${i}`);
+      where.push(`wo.priority = $${i}`);
       params.push(filters.priority);
       i++;
     }
     if (filters.productId) {
-      where.push(`product_id = $${i}`);
+      where.push(`wo.product_id = $${i}`);
       params.push(filters.productId);
       i++;
     }
     if (filters.assignedTo) {
-      where.push(`assigned_to = $${i}`);
+      where.push(`wo.assigned_to = $${i}`);
       params.push(filters.assignedTo);
       i++;
     }
     if (filters.dealId) {
-      where.push(`deal_id = $${i}`);
+      where.push(`wo.deal_id = $${i}`);
       params.push(filters.dealId);
       i++;
     }
     if (filters.from) {
-      where.push(`created_at >= $${i}::date`);
+      where.push(`wo.created_at >= $${i}::date`);
       params.push(filters.from);
       i++;
     }
     if (filters.to) {
-      where.push(`created_at < ($${i}::date + interval '1 day')`);
+      where.push(`wo.created_at < ($${i}::date + interval '1 day')`);
       params.push(filters.to);
       i++;
     }
     if (filters.search) {
       where.push(
-        `(pid ILIKE $${i} OR notes ILIKE $${i} OR lot_number ILIKE $${i})`
+        `(wo.pid ILIKE $${i} OR wo.notes ILIKE $${i} OR wo.lot_number ILIKE $${i})`
       );
       params.push(`%${filters.search}%`);
       i++;
     }
     const whereSql = `WHERE ${where.join(" AND ")}`;
-    const countSql = `SELECT count(*)::bigint AS total FROM work_orders ${whereSql}`;
-    const listSql = `
-      SELECT ${SELECT_COLS}
-        FROM work_orders
+    const woCols = SELECT_COLS.replace(/(\w+)/g, "wo.$1");
+    // plan.orderBy is `col asc|desc` (see planPagination); prefix the column.
+    const orderBy = `wo.${plan.orderBy}`;
+    const countSql = `
+      SELECT count(*)::bigint AS total
+        FROM work_orders wo
        ${whereSql}
-       ORDER BY ${plan.orderBy}
+    `;
+    const listSql = `
+      SELECT ${woCols},
+             p.product_code, p.name AS product_name, p.family AS product_family
+        FROM work_orders wo
+        JOIN products p ON p.id = wo.product_id
+       ${whereSql}
+       ORDER BY ${orderBy}
        LIMIT ${plan.limit} OFFSET ${plan.offset}
     `;
     const [countRes, listRes] = await Promise.all([
       client.query<{ total: string }>(countSql, params),
-      client.query<WorkOrderRow>(listSql, params),
+      client.query<
+        WorkOrderRow & {
+          product_code: string;
+          product_name: string;
+          product_family: ProductFamily;
+        }
+      >(listSql, params),
     ]);
+    if (listRes.rows.length === 0) {
+      return { data: [], total: Number(countRes.rows[0]!.total) };
+    }
+    const woIds = listRes.rows.map((r) => r.id);
+    const stagesRes = await client.query<WipStageRow>(
+      `SELECT ${STAGE_COLS} FROM wip_stages
+        WHERE wo_id = ANY($1::uuid[])
+        ORDER BY wo_id, sequence_number ASC`,
+      [woIds]
+    );
+    const stagesByWo = new Map<string, WipStage[]>();
+    for (const s of stagesRes.rows) {
+      const arr = stagesByWo.get(s.wo_id) ?? [];
+      arr.push(rowToWipStage(s));
+      stagesByWo.set(s.wo_id, arr);
+    }
     return {
-      data: listRes.rows.map(rowToWorkOrder),
+      data: listRes.rows.map((r) => ({
+        ...rowToWorkOrder(r),
+        productCode: r.product_code,
+        productName: r.product_name,
+        productFamily: r.product_family,
+        stages: stagesByWo.get(r.id) ?? [],
+      })),
       total: Number(countRes.rows[0]!.total),
     };
   },
@@ -433,6 +479,62 @@ export const workOrdersRepo = {
       [woId]
     );
     return rows.map(rowToWipStage);
+  },
+
+  /**
+   * Kanban-board projection: every non-cancelled, non-deleted WO joined with
+   * its product master, plus every stage row keyed by wo_id. Two queries
+   * (header+product, then all stages for the matching WOs) — the page never
+   * issues N+1.
+   */
+  async listForBoard(client: PoolClient): Promise<WipBoardCard[]> {
+    const woCols = SELECT_COLS.replace(/(\w+)/g, "wo.$1");
+    const headerSql = `
+      SELECT ${woCols},
+             p.product_code, p.name AS product_name, p.family AS product_family
+        FROM work_orders wo
+        JOIN products p ON p.id = wo.product_id
+       WHERE wo.deleted_at IS NULL
+         AND wo.status <> 'CANCELLED'
+       ORDER BY
+         CASE wo.priority
+           WHEN 'CRITICAL' THEN 1
+           WHEN 'HIGH'     THEN 2
+           WHEN 'NORMAL'   THEN 3
+           WHEN 'LOW'      THEN 4
+         END ASC,
+         wo.target_date ASC NULLS LAST,
+         wo.created_at DESC
+       LIMIT 200
+    `;
+    const headerRes = await client.query<
+      WorkOrderRow & {
+        product_code: string;
+        product_name: string;
+        product_family: ProductFamily;
+      }
+    >(headerSql);
+    if (headerRes.rows.length === 0) return [];
+    const woIds = headerRes.rows.map((r) => r.id);
+    const stagesRes = await client.query<WipStageRow>(
+      `SELECT ${STAGE_COLS} FROM wip_stages
+        WHERE wo_id = ANY($1::uuid[])
+        ORDER BY wo_id, sequence_number ASC`,
+      [woIds]
+    );
+    const stagesByWo = new Map<string, WipStage[]>();
+    for (const s of stagesRes.rows) {
+      const arr = stagesByWo.get(s.wo_id) ?? [];
+      arr.push(rowToWipStage(s));
+      stagesByWo.set(s.wo_id, arr);
+    }
+    return headerRes.rows.map((r) => ({
+      ...rowToWorkOrder(r),
+      productCode: r.product_code,
+      productName: r.product_name,
+      productFamily: r.product_family,
+      stages: stagesByWo.get(r.id) ?? [],
+    }));
   },
 
   async getStageById(

@@ -3,162 +3,190 @@
 import { useMemo } from "react";
 import { KPICard } from "@/components/shared/kpi-card";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { ProductBadge } from "@/components/shared/product-badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertTriangle, AlertCircle, Factory, ShieldCheck, Clock, BarChart3 } from "lucide-react";
 import {
-  mobiWorkOrders,
-  mobiDeviceIDs,
-  scrapEntries,
-  getOnHoldWOs,
-  getOEEAvg,
-  isWOOverdue,
-  getWOProgress,
-  isFinishedDeviceCode,
-  isModuleCode,
-} from "@/data/instigenie-mock";
-import { formatCurrency, formatDate, currentMonthPrefix } from "@/lib/format";
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  AlertTriangle,
+  Factory,
+  ShieldCheck,
+  Clock,
+  BarChart3,
+} from "lucide-react";
+import { useApiWorkOrders } from "@/hooks/useProductionApi";
+import { formatDate } from "@/lib/format";
+import type { WorkOrder } from "@instigenie/contracts";
+
+/**
+ * Production shop-floor dashboard — live data from /production/work-orders.
+ *
+ * Device-ID registry, scrap ledger, and OEE aggregation are not yet exposed
+ * by the real API, so the panels that relied on those mocks have been
+ * removed. When those endpoints land, add the KPI slots + tables back.
+ */
+
+const ACTIVE_STATUSES: WorkOrder["status"][] = [
+  "PLANNED",
+  "MATERIAL_CHECK",
+  "IN_PROGRESS",
+  "REWORK",
+];
+
+function isOverdue(wo: WorkOrder): boolean {
+  if (!wo.targetDate) return false;
+  if (wo.status === "COMPLETED" || wo.status === "CANCELLED") return false;
+  return new Date(wo.targetDate) < new Date();
+}
 
 export function ProductionDashboard() {
-  const onHoldWOs = useMemo(() => getOnHoldWOs(), []);
+  const workOrdersQuery = useApiWorkOrders({ limit: 100 });
 
-  const reworkLimitDevices = useMemo(
-    () => mobiDeviceIDs.filter((d) => d.status === "REWORK_LIMIT_EXCEEDED"),
-    []
+  const workOrders = useMemo(
+    () => workOrdersQuery.data?.data ?? [],
+    [workOrdersQuery.data?.data]
   );
 
   const openWOs = useMemo(
-    () =>
-      mobiWorkOrders.filter(
-        (w) => w.status !== "COMPLETED" && w.status !== "CANCELLED"
-      ).length,
-    []
+    () => workOrders.filter((w) => ACTIVE_STATUSES.includes(w.status)).length,
+    [workOrders]
   );
 
   const qcHolds = useMemo(
-    () =>
-      mobiWorkOrders.filter(
-        (w) => w.status === "QC_IN_PROGRESS" || w.status === "QC_HANDOVER_PENDING"
-      ).length,
-    []
+    () => workOrders.filter((w) => w.status === "QC_HOLD"),
+    [workOrders]
   );
 
   const overdueWOs = useMemo(
-    () => mobiWorkOrders.filter((w) => isWOOverdue(w)).length,
-    []
+    () => workOrders.filter(isOverdue).length,
+    [workOrders]
   );
 
-  const oeeAvg = useMemo(() => getOEEAvg(), []);
+  const completedWOs = useMemo(
+    () => workOrders.filter((w) => w.status === "COMPLETED").length,
+    [workOrders]
+  );
 
-  // Live current month — never hardcoded
-  const thisMonthScrap = useMemo(() => {
-    const month = currentMonthPrefix();
-    return scrapEntries.filter((s) => s.scrappedAt.startsWith(month));
-  }, []);
+  if (workOrdersQuery.isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-64" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {onHoldWOs.length > 0 && (
+      {qcHolds.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-start gap-3">
           <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
           <div>
             <p className="text-sm font-medium text-amber-800">
-              {onHoldWOs.length} WO{onHoldWOs.length > 1 ? "s" : ""} on hold —{" "}
-              {onHoldWOs[0]?.onHoldReason?.slice(0, 80) ?? ""}
+              {qcHolds.length} Work Order{qcHolds.length > 1 ? "s" : ""} on QC
+              hold
             </p>
-          </div>
-        </div>
-      )}
-      {reworkLimitDevices.length > 0 && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 flex items-start gap-3">
-          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-red-800">
-              {reworkLimitDevices.length} device(s) with REWORK_LIMIT_EXCEEDED — initiate scrap write-off
-            </p>
-            <p className="text-xs text-red-700 mt-0.5">
-              {reworkLimitDevices.map((d) => d.deviceId).join(", ")}
+            <p className="text-xs text-amber-700 mt-0.5">
+              {qcHolds.map((w) => w.pid).join(", ")}
             </p>
           </div>
         </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Open Work Orders" value={String(openWOs)} icon={Factory} trend="neutral" iconColor="text-blue-600" />
-        <KPICard title="QC Holds" value={String(qcHolds)} icon={ShieldCheck} trend={qcHolds > 0 ? "down" : "up"} iconColor={qcHolds > 0 ? "text-red-600" : "text-green-600"} />
-        <KPICard title="Overdue WOs" value={String(overdueWOs)} icon={Clock} trend={overdueWOs > 0 ? "down" : "up"} iconColor={overdueWOs > 0 ? "text-red-600" : "text-green-600"} />
-        <KPICard title="OEE %" value={`${oeeAvg}%`} icon={BarChart3} trend={oeeAvg >= 75 ? "up" : "down"} iconColor={oeeAvg >= 75 ? "text-green-600" : "text-amber-600"} />
+        <KPICard
+          title="Open Work Orders"
+          value={String(openWOs)}
+          icon={Factory}
+          trend="neutral"
+          iconColor="text-blue-600"
+        />
+        <KPICard
+          title="QC Holds"
+          value={String(qcHolds.length)}
+          icon={ShieldCheck}
+          trend={qcHolds.length > 0 ? "down" : "up"}
+          iconColor={qcHolds.length > 0 ? "text-red-600" : "text-green-600"}
+        />
+        <KPICard
+          title="Overdue WOs"
+          value={String(overdueWOs)}
+          icon={Clock}
+          trend={overdueWOs > 0 ? "down" : "up"}
+          iconColor={overdueWOs > 0 ? "text-red-600" : "text-green-600"}
+        />
+        <KPICard
+          title="Completed"
+          value={String(completedWOs)}
+          icon={BarChart3}
+          trend="up"
+          iconColor="text-green-600"
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold">Work Orders</CardTitle>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-semibold">Work Orders</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {workOrders.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No work orders yet.
+            </p>
+          ) : (
             <div className="rounded-lg border overflow-hidden">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
                     <TableHead>WO#</TableHead>
-                    <TableHead title="Finished device — MCC (Mobicase)">Device</TableHead>
-                    <TableHead title="Sub-assembly modules — MBA, MBM, MBC, CFG">Module</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Progress</TableHead>
-                    <TableHead className="text-right">Lines</TableHead>
+                    <TableHead>Priority</TableHead>
+                    <TableHead>Rework</TableHead>
                     <TableHead>Target</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mobiWorkOrders.map((wo) => {
-                    const pct = getWOProgress(wo);
-                    const overdue = isWOOverdue(wo);
+                  {workOrders.map((wo) => {
+                    const overdue = isOverdue(wo);
                     return (
                       <TableRow key={wo.id}>
-                        <TableCell className="font-mono text-xs">{wo.woNumber}</TableCell>
-                        <TableCell>
-                          {(() => {
-                            const deviceCodes = wo.productCodes.filter(isFinishedDeviceCode);
-                            if (deviceCodes.length === 0)
-                              return <span className="text-muted-foreground text-xs">—</span>;
-                            return (
-                              <div className="flex gap-1 flex-wrap">
-                                {deviceCodes.map((pc) => (
-                                  <ProductBadge key={pc} productCode={pc} />
-                                ))}
-                              </div>
-                            );
-                          })()}
+                        <TableCell className="font-mono text-xs">
+                          {wo.pid}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {wo.quantity}
                         </TableCell>
                         <TableCell>
-                          {(() => {
-                            const moduleCodes = wo.productCodes
-                              .filter(isModuleCode)
-                              .slice()
-                              .sort((a, b) => a.localeCompare(b));
-                            if (moduleCodes.length === 0)
-                              return <span className="text-muted-foreground text-xs">—</span>;
-                            return (
-                              <div className="flex gap-1 flex-wrap">
-                                {moduleCodes.map((pc) => (
-                                  <ProductBadge key={pc} productCode={pc} />
-                                ))}
-                              </div>
-                            );
-                          })()}
+                          <StatusBadge status={wo.status} />
                         </TableCell>
-                        <TableCell><StatusBadge status={wo.status} /></TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2 min-w-[80px]">
-                            <Progress value={pct} className="h-1.5 flex-1" />
-                            <span className="text-xs text-muted-foreground w-6">{pct}%</span>
-                          </div>
+                        <TableCell className="text-xs">{wo.priority}</TableCell>
+                        <TableCell className="text-xs tabular-nums">
+                          {wo.reworkCount > 0 ? wo.reworkCount : "—"}
                         </TableCell>
-                        <TableCell className="text-right text-xs tabular-nums">{wo.lineAssignments.length}</TableCell>
-                        <TableCell className={`text-xs ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
-                          {formatDate(wo.targetEndDate)}
+                        <TableCell
+                          className={`text-xs ${
+                            overdue
+                              ? "text-red-600 font-medium"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {wo.targetDate ? formatDate(wo.targetDate) : "—"}
                         </TableCell>
                       </TableRow>
                     );
@@ -166,33 +194,9 @@ export function ProductionDashboard() {
                 </TableBody>
               </Table>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold">Scrap (April 2026)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {thisMonthScrap.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">No scrap this month.</p>
-            ) : (
-              <div className="space-y-3">
-                {thisMonthScrap.map((s) => (
-                  <div key={s.id} className="p-3 rounded-lg border space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs font-medium">{s.deviceId ?? s.scrapNumber}</span>
-                      <StatusBadge status={s.rootCause} />
-                    </div>
-                    <p className="text-xs text-muted-foreground">{s.rootCauseDescription.slice(0, 60)}…</p>
-                    <p className="text-sm font-semibold text-red-600">{formatCurrency(s.scrapValueINR)}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

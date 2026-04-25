@@ -37,7 +37,9 @@ import type {
   BomStatus,
   // Work orders
   WorkOrder,
+  WorkOrderListItem,
   WipStage,
+  WipBoardCard,
   WorkOrderWithStages,
   CreateWorkOrder,
   UpdateWorkOrder,
@@ -51,6 +53,16 @@ import type {
   DeviceInstanceStatus,
   MobicaseProductCode,
   AssemblyLine,
+  // MRP / reports / ECN
+  MrpRow,
+  ProductionReports,
+  EngineeringChangeNotice,
+  EcnStatus,
+  EcnSeverity,
+  EcnChangeType,
+  CreateEcn,
+  UpdateEcn,
+  EcnTransition,
 } from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
@@ -224,7 +236,7 @@ export interface WorkOrderListQuery extends PaginationParams {
 
 export async function apiListWorkOrders(
   q: WorkOrderListQuery = {}
-): Promise<PaginatedResponse<WorkOrder>> {
+): Promise<PaginatedResponse<WorkOrderListItem>> {
   return tenantGet(`/production/work-orders${qs(q)}`);
 }
 
@@ -271,6 +283,18 @@ export async function apiListWipStages(
 ): Promise<WipStage[]> {
   const res = await tenantGet<DataEnvelope<WipStage>>(
     `/production/work-orders/${workOrderId}/stages`
+  );
+  return res.data;
+}
+
+/**
+ * Kanban-board projection — every active WO with its product + stages embedded.
+ * Sorted server-side by priority then target_date so the page can stream lanes
+ * without client-side rework.
+ */
+export async function apiGetWipBoard(): Promise<WipBoardCard[]> {
+  const res = await tenantGet<DataEnvelope<WipBoardCard>>(
+    `/production/wip-board`
   );
   return res.data;
 }
@@ -331,4 +355,72 @@ export async function apiGetDeviceInstance(
   id: string
 ): Promise<DeviceInstance> {
   return tenantGet(`/production/device-instances/${id}`);
+}
+
+// ─── MRP ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-component shortage rollup driven by SQL CTEs over open WOs × bom_lines ×
+ * stock_summary × open POs. Sorted shortage-DESC by the server.
+ */
+export async function apiGetMrp(): Promise<MrpRow[]> {
+  const res = await tenantGet<DataEnvelope<MrpRow>>(`/production/mrp`);
+  return res.data;
+}
+
+// ─── Production reports ──────────────────────────────────────────────────────
+
+export interface ProductionReportsQuery {
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to 90 days ago. */
+  from?: string;
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to today. */
+  to?: string;
+}
+
+export async function apiGetProductionReports(
+  q: ProductionReportsQuery = {}
+): Promise<ProductionReports> {
+  return tenantGet(`/production/reports${qs(q)}`);
+}
+
+// ─── ECN — Engineering Change Notices ────────────────────────────────────────
+
+export interface EcnListQuery extends PaginationParams {
+  status?: EcnStatus;
+  severity?: EcnSeverity;
+  changeType?: EcnChangeType;
+  affectedProductId?: string;
+  search?: string;
+}
+
+export async function apiListEcns(
+  q: EcnListQuery = {}
+): Promise<PaginatedResponse<EngineeringChangeNotice>> {
+  return tenantGet(`/production/ecns${qs(q)}`);
+}
+
+export async function apiGetEcn(
+  id: string
+): Promise<EngineeringChangeNotice> {
+  return tenantGet(`/production/ecns/${id}`);
+}
+
+export async function apiCreateEcn(
+  body: CreateEcn
+): Promise<EngineeringChangeNotice> {
+  return tenantPost(`/production/ecns`, body);
+}
+
+export async function apiUpdateEcn(
+  id: string,
+  body: UpdateEcn
+): Promise<EngineeringChangeNotice> {
+  return tenantPatch(`/production/ecns/${id}`, body);
+}
+
+export async function apiTransitionEcn(
+  id: string,
+  body: EcnTransition
+): Promise<EngineeringChangeNotice> {
+  return tenantPost(`/production/ecns/${id}/transition`, body);
 }

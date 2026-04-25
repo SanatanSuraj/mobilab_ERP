@@ -100,7 +100,7 @@ export const WIP_STAGE_QC_RESULTS = ["PASS", "FAIL"] as const;
 export const WipStageQcResultSchema = z.enum(WIP_STAGE_QC_RESULTS);
 export type WipStageQcResult = z.infer<typeof WipStageQcResultSchema>;
 
-export const PRODUCTION_NUMBER_KINDS = ["WO"] as const;
+export const PRODUCTION_NUMBER_KINDS = ["WO", "ECN"] as const;
 export const ProductionNumberKindSchema = z.enum(PRODUCTION_NUMBER_KINDS);
 export type ProductionNumberKind = z.infer<typeof ProductionNumberKindSchema>;
 
@@ -335,6 +335,226 @@ export const WorkOrderWithStagesSchema = WorkOrderSchema.extend({
   stages: z.array(WipStageSchema),
 });
 export type WorkOrderWithStages = z.infer<typeof WorkOrderWithStagesSchema>;
+
+/**
+ * WIP kanban card — non-cancelled WO joined with its product master + embedded
+ * stages[] in one round trip. Used by GET /production/wip-board.
+ */
+export const WipBoardCardSchema = WorkOrderSchema.extend({
+  productName: z.string(),
+  productCode: z.string(),
+  productFamily: ProductFamilySchema,
+  stages: z.array(WipStageSchema),
+});
+export type WipBoardCard = z.infer<typeof WipBoardCardSchema>;
+
+/**
+ * Enriched WO list row — header fields plus product master and embedded
+ * stages[] so the work-orders page never needs a second products lookup.
+ * Used by GET /production/work-orders.
+ */
+export const WorkOrderListItemSchema = WorkOrderSchema.extend({
+  productName: z.string(),
+  productCode: z.string(),
+  productFamily: ProductFamilySchema,
+  stages: z.array(WipStageSchema),
+});
+export type WorkOrderListItem = z.infer<typeof WorkOrderListItemSchema>;
+
+// ─── MRP — Material Requirements Planning ───────────────────────────────────
+
+/**
+ * One row per component item rolled up across every non-completed work order.
+ * Server-side aggregation joins open WOs × bom_lines × stock_summary × open
+ * po_lines so the page can highlight shortages without doing math.
+ */
+export const MrpRowSchema = z.object({
+  itemId: uuid,
+  sku: z.string(),
+  name: z.string(),
+  uom: z.string(),
+  category: z.string(),
+  requiredQty: qtyStr,
+  onHand: qtyStr,
+  reserved: qtyStr,
+  available: qtyStr,
+  onOrder: qtyStr,
+  shortage: qtyStr,
+  woCount: z.number().int().nonnegative(),
+});
+export type MrpRow = z.infer<typeof MrpRowSchema>;
+
+// ─── Production reports ──────────────────────────────────────────────────────
+
+export const ProductionReportsQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+});
+export type ProductionReportsQuery = z.infer<typeof ProductionReportsQuerySchema>;
+
+export const ProductionReportsSchema = z.object({
+  /** Inclusive window — defaults to last 90 days when caller omits range. */
+  from: z.string(),
+  to: z.string(),
+  /** WO throughput across the window. */
+  throughput: z.object({
+    total: z.number().int().nonnegative(),
+    completed: z.number().int().nonnegative(),
+    inProgress: z.number().int().nonnegative(),
+    qcHold: z.number().int().nonnegative(),
+    rework: z.number().int().nonnegative(),
+    cancelled: z.number().int().nonnegative(),
+    completionRatePct: z.number(),
+  }),
+  /** Cycle time — only completed WOs in the window. */
+  cycleTime: z.object({
+    completedCount: z.number().int().nonnegative(),
+    avgHours: z.number().nullable(),
+    p50Hours: z.number().nullable(),
+    p90Hours: z.number().nullable(),
+  }),
+  /** Per-stage QC pass / fail / rework counters. */
+  qc: z.object({
+    totalQcStages: z.number().int().nonnegative(),
+    passed: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    reworkLoops: z.number().int().nonnegative(),
+    passRatePct: z.number(),
+  }),
+  /** Top products by completed-WO count. */
+  topProducts: z.array(
+    z.object({
+      productId: uuid,
+      productCode: z.string(),
+      name: z.string(),
+      completed: z.number().int().nonnegative(),
+      totalQty: qtyStr,
+    }),
+  ),
+});
+export type ProductionReports = z.infer<typeof ProductionReportsSchema>;
+
+// ─── ECN — Engineering Change Notices ────────────────────────────────────────
+
+export const ECN_STATUSES = [
+  "DRAFT",
+  "PENDING_REVIEW",
+  "APPROVED",
+  "REJECTED",
+  "IMPLEMENTED",
+  "CANCELLED",
+] as const;
+export const EcnStatusSchema = z.enum(ECN_STATUSES);
+export type EcnStatus = z.infer<typeof EcnStatusSchema>;
+
+export const ECN_SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+export const EcnSeveritySchema = z.enum(ECN_SEVERITIES);
+export type EcnSeverity = z.infer<typeof EcnSeveritySchema>;
+
+export const ECN_CHANGE_TYPES = [
+  "DESIGN",
+  "MATERIAL",
+  "PROCESS",
+  "DOCUMENTATION",
+  "OTHER",
+] as const;
+export const EcnChangeTypeSchema = z.enum(ECN_CHANGE_TYPES);
+export type EcnChangeType = z.infer<typeof EcnChangeTypeSchema>;
+
+export const EngineeringChangeNoticeSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  ecnNumber: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  changeType: EcnChangeTypeSchema,
+  severity: EcnSeveritySchema,
+  status: EcnStatusSchema,
+  affectedProductId: uuid.nullable(),
+  affectedProductCode: z.string().nullable(),
+  affectedProductName: z.string().nullable(),
+  affectedBomId: uuid.nullable(),
+  affectedBomVersionLabel: z.string().nullable(),
+  reason: z.string().nullable(),
+  proposedChange: z.string().nullable(),
+  impactSummary: z.string().nullable(),
+  raisedBy: z.string().nullable(),
+  approvedBy: z.string().nullable(),
+  approvedAt: z.string().nullable(),
+  implementedAt: z.string().nullable(),
+  targetImplementationDate: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type EngineeringChangeNotice = z.infer<
+  typeof EngineeringChangeNoticeSchema
+>;
+
+export const EcnListQuerySchema = PaginationQuerySchema.extend({
+  status: EcnStatusSchema.optional(),
+  severity: EcnSeveritySchema.optional(),
+  changeType: EcnChangeTypeSchema.optional(),
+  affectedProductId: uuid.optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});
+export type EcnListQuery = z.infer<typeof EcnListQuerySchema>;
+
+/**
+ * Create an ECN. New ECNs always land in DRAFT status — callers move them
+ * forward via the transition endpoint. `ecnNumber` is optional; the service
+ * auto-generates `ECN-YYYY-NNNN` from production_number_sequences when absent.
+ */
+export const CreateEcnSchema = z.object({
+  ecnNumber: z.string().trim().min(1).max(32).optional(),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
+  changeType: EcnChangeTypeSchema,
+  severity: EcnSeveritySchema.default("MEDIUM"),
+  affectedProductId: uuid.optional(),
+  affectedBomId: uuid.optional(),
+  reason: z.string().trim().max(2000).optional(),
+  proposedChange: z.string().trim().max(2000).optional(),
+  impactSummary: z.string().trim().max(2000).optional(),
+  raisedBy: z.string().trim().max(120).optional(),
+  targetImplementationDate: z.string().date().optional(),
+});
+export type CreateEcn = z.infer<typeof CreateEcnSchema>;
+
+/**
+ * Patch an existing ECN. Status changes are NOT allowed here — use the
+ * dedicated transition endpoint so we can enforce the workflow and stamp
+ * approved_at / implemented_at consistently.
+ */
+export const UpdateEcnSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  changeType: EcnChangeTypeSchema.optional(),
+  severity: EcnSeveritySchema.optional(),
+  affectedProductId: uuid.nullable().optional(),
+  affectedBomId: uuid.nullable().optional(),
+  reason: z.string().trim().max(2000).nullable().optional(),
+  proposedChange: z.string().trim().max(2000).nullable().optional(),
+  impactSummary: z.string().trim().max(2000).nullable().optional(),
+  raisedBy: z.string().trim().max(120).nullable().optional(),
+  targetImplementationDate: z.string().date().nullable().optional(),
+});
+export type UpdateEcn = z.infer<typeof UpdateEcnSchema>;
+
+/**
+ * Workflow transition. Allowed moves are enforced server-side:
+ *   DRAFT          → PENDING_REVIEW | CANCELLED
+ *   PENDING_REVIEW → APPROVED       | REJECTED | CANCELLED
+ *   APPROVED       → IMPLEMENTED    | CANCELLED
+ *
+ * `approvedBy` is required when moving to APPROVED so the audit row is
+ * meaningful. The service stamps `approved_at` / `implemented_at`
+ * automatically — clients never send timestamps.
+ */
+export const EcnTransitionSchema = z.object({
+  toStatus: EcnStatusSchema,
+  approvedBy: z.string().trim().max(120).optional(),
+});
+export type EcnTransition = z.infer<typeof EcnTransitionSchema>;
 
 export const CreateWorkOrderSchema = z.object({
   /** Optional — service auto-generates PID-YYYY-NNNN via production_number_sequences if absent. */

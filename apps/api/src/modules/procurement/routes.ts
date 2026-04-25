@@ -26,6 +26,7 @@ import {
   GrnListQuerySchema,
   IndentListQuerySchema,
   PostGrnSchema,
+  ProcurementReportsQuerySchema,
   PurchaseOrderListQuerySchema,
   UpdateGrnLineSchema,
   UpdateGrnSchema,
@@ -43,12 +44,14 @@ import type { VendorsService } from "./vendors.service.js";
 import type { IndentsService } from "./indents.service.js";
 import type { PurchaseOrdersService } from "./purchase-orders.service.js";
 import type { GrnsService } from "./grns.service.js";
+import type { ProcurementReportsService } from "./reports.service.js";
 
 export interface RegisterProcurementRoutesOptions {
   vendors: VendorsService;
   indents: IndentsService;
   purchaseOrders: PurchaseOrdersService;
   grns: GrnsService;
+  reports: ProcurementReportsService;
   guardInternal: AuthGuardOptions;
   requireFeature: RequireFeature;
 }
@@ -392,6 +395,19 @@ export async function registerProcurementRoutes(
       const { id } = IdParamSchema.parse(req.params);
       const body = PostGrnSchema.parse(req.body);
       return reply.send(await opts.grns.post(req, id, body));
+    }
+  );
+
+  // ─── Procurement reports ──────────────────────────────────────────────────
+  // Date-window PO throughput / GRN delivery / vendor spend roll-up. `from`/
+  // `to` optional — service defaults to last 90 days when absent.
+
+  app.get(
+    "/procurement/reports",
+    { preHandler: read },
+    async (req, reply) => {
+      const query = ProcurementReportsQuerySchema.parse(req.query);
+      return reply.send(await opts.reports.summary(req, query));
     }
   );
 }

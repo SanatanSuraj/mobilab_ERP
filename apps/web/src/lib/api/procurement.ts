@@ -56,6 +56,8 @@ import type {
   UpdateGrnLine,
   PostGrn,
   GrnStatus,
+  // Reports
+  ProcurementReports,
 } from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
@@ -392,4 +394,19 @@ export async function apiPostGrn(
   body: PostGrn
 ): Promise<GrnWithLines> {
   return tenantPost(`/procurement/grns/${id}/post`, body);
+}
+
+// ─── Procurement reports ────────────────────────────────────────────────────
+
+export interface ProcurementReportsQuery {
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to 90 days ago. */
+  from?: string;
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to today. */
+  to?: string;
+}
+
+export async function apiGetProcurementReports(
+  q: ProcurementReportsQuery = {}
+): Promise<ProcurementReports> {
+  return tenantGet(`/procurement/reports${qs(q)}`);
 }

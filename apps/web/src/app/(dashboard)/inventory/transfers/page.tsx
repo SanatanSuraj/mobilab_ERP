@@ -1,29 +1,23 @@
 "use client";
 
-// TODO(phase-5): Stock transfer module has no backend routes yet. Expected
-// routes:
-//   GET  /inventory/stock-transfers
-//   POST /inventory/stock-transfers (DRAFT)
-//   POST /inventory/stock-transfers/:id/dispatch (posts OUT ledger rows)
-//   POST /inventory/stock-transfers/:id/receive  (posts IN ledger rows)
-// Mock imports left in place until the stock-transfers slice ships in
-// apps/api/src/modules/inventory.
+/**
+ * Stock Transfers — paired TRANSFER_OUT / TRANSFER_IN rows on stock_ledger.
+ *
+ * The full request → approve → ship → receive workflow needs its own
+ * stock_transfers table (Phase-5). Until then we read what we have:
+ * the ledger already records the move. Each transfer surfaces as a
+ * single row by joining the OUT (source warehouse, negative qty) and
+ * IN (destination warehouse, positive qty) pair on shared ref_doc_id.
+ *
+ * Reuses useApiStockLedger — no new endpoint.
+ */
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
-import { StatusBadge } from "@/components/shared/status-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -32,487 +26,293 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  stockTransfers,
-  warehouses,
-  invItems,
-  formatCurrency,
-  formatDate,
-  StockTransfer,
-} from "@/data/inventory-mock";
+  useApiItems,
+  useApiStockLedger,
+  useApiWarehouses,
+} from "@/hooks/useInventoryApi";
+import type { StockTxnType } from "@instigenie/contracts";
 import {
   ArrowLeftRight,
-  Truck,
   CheckCircle2,
-  FileClock,
-  Plus,
+  Truck,
+  Warehouse,
 } from "lucide-react";
 
-const STATUS_OPTIONS = [
-  "All",
-  "DRAFT",
-  "APPROVED",
-  "IN_TRANSIT",
-  "RECEIVED",
-  "DISCREPANCY",
-];
+interface TransferRow {
+  refDocId: string;
+  itemId: string;
+  itemName: string;
+  itemSku: string;
+  fromWh: string;
+  toWh: string;
+  quantity: number;
+  uom: string;
+  status: "COMPLETED" | "IN_TRANSIT";
+  postedAt: string;
+  reason: string | null;
+}
+
+function parseQty(q: string | null | undefined): number {
+  if (!q) return 0;
+  const n = Number(q);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+type StatusFilter = "all" | "COMPLETED" | "IN_TRANSIT";
 
 export default function TransfersPage() {
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [selectedTransfer, setSelectedTransfer] = useState<StockTransfer | null>(null);
-  const [newTransferOpen, setNewTransferOpen] = useState(false);
+  const itemsQuery = useApiItems({ limit: 200 });
+  const warehousesQuery = useApiWarehouses({ limit: 100 });
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
-  // New Transfer form state
-  const [formFrom, setFormFrom] = useState(warehouses[0]?.id ?? "");
-  const [formTo, setFormTo] = useState(warehouses[1]?.id ?? "");
-  const [formItem, setFormItem] = useState(invItems[0]?.id ?? "");
-  const [formQty, setFormQty] = useState("");
-  const [formRemarks, setFormRemarks] = useState("");
+  const outQuery = useApiStockLedger(
+    useMemo(
+      () => ({
+        limit: 200,
+        sortBy: "postedAt" as const,
+        sortDir: "desc" as const,
+        txnType: "TRANSFER_OUT" as StockTxnType,
+      }),
+      []
+    )
+  );
+  const inQuery = useApiStockLedger(
+    useMemo(
+      () => ({
+        limit: 200,
+        sortBy: "postedAt" as const,
+        sortDir: "desc" as const,
+        txnType: "TRANSFER_IN" as StockTxnType,
+      }),
+      []
+    )
+  );
 
-  const filtered = useMemo(() => {
-    if (statusFilter === "All") return stockTransfers;
-    return stockTransfers.filter((t) => t.status === statusFilter);
-  }, [statusFilter]);
+  if (
+    outQuery.isLoading ||
+    inQuery.isLoading ||
+    itemsQuery.isLoading ||
+    warehousesQuery.isLoading
+  ) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+        <PageHeader
+          title="Stock Transfers"
+          description="Inter-warehouse stock moves and in-transit stock"
+        />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
 
-  const inTransitCount = stockTransfers.filter((t) => t.status === "IN_TRANSIT").length;
-  const receivedCount = stockTransfers.filter((t) => t.status === "RECEIVED").length;
-  const draftPendingCount = stockTransfers.filter(
-    (t) => t.status === "DRAFT" || t.status === "APPROVED"
-  ).length;
+  const outs = outQuery.data?.data ?? [];
+  const ins = inQuery.data?.data ?? [];
+  const items = itemsQuery.data?.data ?? [];
+  const warehouses = warehousesQuery.data?.data ?? [];
+  const itemById = new Map(items.map((i) => [i.id, i]));
+  const warehouseById = new Map(warehouses.map((w) => [w.id, w]));
 
-  const columns: Column<StockTransfer>[] = [
+  // Match OUT → IN by (ref_doc_id, item_id). If both legs exist the
+  // transfer is COMPLETED; OUT-only means in-transit.
+  const inByKey = new Map<string, (typeof ins)[number]>();
+  for (const i of ins) {
+    if (!i.refDocId) continue;
+    inByKey.set(`${i.refDocId}::${i.itemId}`, i);
+  }
+
+  const allRows: TransferRow[] = outs.map((o) => {
+    const fromWh = warehouseById.get(o.warehouseId);
+    const item = itemById.get(o.itemId);
+    const matchedIn = o.refDocId
+      ? inByKey.get(`${o.refDocId}::${o.itemId}`)
+      : undefined;
+    const toWh = matchedIn
+      ? warehouseById.get(matchedIn.warehouseId)
+      : undefined;
+    return {
+      refDocId: o.refDocId ?? o.id,
+      itemId: o.itemId,
+      itemName: item?.name ?? o.itemId.slice(0, 8),
+      itemSku: item?.sku ?? "—",
+      fromWh: fromWh?.code ?? o.warehouseId.slice(0, 8),
+      toWh: toWh?.code ?? "in transit",
+      quantity: Math.abs(parseQty(o.quantity)),
+      uom: o.uom,
+      status: matchedIn ? "COMPLETED" : "IN_TRANSIT",
+      postedAt: o.postedAt,
+      reason: o.reason,
+    };
+  });
+
+  const rows =
+    statusFilter === "all"
+      ? allRows
+      : allRows.filter((r) => r.status === statusFilter);
+
+  const totalTransfers = allRows.length;
+  const completed = allRows.filter((r) => r.status === "COMPLETED").length;
+  const inTransit = allRows.filter((r) => r.status === "IN_TRANSIT").length;
+  const whCount = warehouses.length;
+
+  const columns: Column<TransferRow>[] = [
     {
-      key: "transferNumber",
-      header: "Transfer Number",
-      sortable: true,
-      render: (t) => (
-        <span className="font-mono font-semibold text-sm">{t.transferNumber}</span>
+      key: "refDocId",
+      header: "Transfer #",
+      render: (r) => (
+        <span className="font-mono text-xs font-bold">
+          {r.refDocId.slice(-8).toUpperCase()}
+        </span>
       ),
     },
     {
-      key: "fromWarehouseName",
-      header: "From → To",
-      render: (t) => (
-        <div className="flex items-center gap-1.5 text-sm">
-          <span className="font-medium">{t.fromWarehouseName}</span>
-          <span className="text-muted-foreground">→</span>
-          <span className="font-medium">{t.toWarehouseName}</span>
+      key: "item",
+      header: "Item",
+      render: (r) => (
+        <div>
+          <p className="text-sm leading-tight">{r.itemName}</p>
+          <p className="font-mono text-xs text-muted-foreground">{r.itemSku}</p>
         </div>
       ),
     },
     {
-      key: "createdAt",
-      header: "Created",
-      sortable: true,
-      render: (t) => (
-        <span className="text-sm text-muted-foreground">{formatDate(t.createdAt)}</span>
+      key: "from",
+      header: "From",
+      render: (r) => (
+        <span className="text-xs font-mono text-muted-foreground">
+          {r.fromWh}
+        </span>
       ),
     },
     {
-      key: "shippedAt",
-      header: "Shipped",
-      render: (t) => (
-        <span className="text-sm text-muted-foreground">
-          {t.shippedAt ? formatDate(t.shippedAt) : "—"}
+      key: "to",
+      header: "To",
+      render: (r) => (
+        <span className="text-xs font-mono text-muted-foreground">{r.toWh}</span>
+      ),
+    },
+    {
+      key: "quantity",
+      header: "Qty",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono font-semibold">
+          {r.quantity.toLocaleString("en-IN")}
+          <span className="text-xs text-muted-foreground ml-1">{r.uom}</span>
         </span>
       ),
     },
     {
       key: "status",
       header: "Status",
-      render: (t) => <StatusBadge status={t.status} />,
-    },
-    {
-      key: "lines",
-      header: "Items",
-      render: (t) => (
-        <span className="text-sm font-medium">{t.lines.length}</span>
+      render: (r) => (
+        <Badge
+          variant="outline"
+          className={`text-xs ${
+            r.status === "COMPLETED"
+              ? "bg-green-50 text-green-700 border-green-200"
+              : "bg-amber-50 text-amber-700 border-amber-200"
+          }`}
+        >
+          {r.status === "COMPLETED" ? "Completed" : "In Transit"}
+        </Badge>
       ),
     },
     {
-      key: "totalValue",
-      header: "Total Value",
-      className: "text-right",
-      render: (t) => (
-        <span className="text-sm font-medium text-right block">
-          {formatCurrency(t.totalValue)}
+      key: "reason",
+      header: "Reason",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground line-clamp-2">
+          {r.reason ?? "—"}
         </span>
       ),
     },
     {
-      key: "eWayBillRequired",
-      header: "E-Way Bill",
-      render: (t) => {
-        if (t.eWayBillNumber) {
-          return (
-            <span className="font-mono text-xs text-muted-foreground">
-              {t.eWayBillNumber}
-            </span>
-          );
-        }
-        if (t.eWayBillRequired) {
-          return (
-            <Badge
-              variant="outline"
-              className="text-xs bg-amber-50 text-amber-700 border-amber-200"
-            >
-              Required
-            </Badge>
-          );
-        }
-        return <span className="text-muted-foreground text-sm">—</span>;
-      },
-    },
-    {
-      key: "requestedBy",
-      header: "Requested By",
-      render: (t) => (
-        <span className="text-sm text-muted-foreground">{t.requestedBy}</span>
-      ),
-    },
-    {
-      key: "id",
-      header: "Actions",
-      render: (t) => (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            setSelectedTransfer(t);
-          }}
-        >
-          View Details
-        </Button>
+      key: "postedAt",
+      header: "Posted",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">
+          {formatDate(r.postedAt)}
+        </span>
       ),
     },
   ];
 
-  function handleSaveNewTransfer() {
-    setNewTransferOpen(false);
-    setFormFrom(warehouses[0]?.id ?? "");
-    setFormTo(warehouses[1]?.id ?? "");
-    setFormItem(invItems[0]?.id ?? "");
-    setFormQty("");
-    setFormRemarks("");
-  }
-
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
+    <div className="p-6 max-w-[1400px] mx-auto space-y-6">
       <PageHeader
-        title="Inter-Warehouse Transfers"
-        description="Manage stock movements between Guwahati HQ and Noida"
-        actions={
-          <Button onClick={() => setNewTransferOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Transfer
-          </Button>
-        }
+        title="Stock Transfers"
+        description="Inter-warehouse stock moves and in-transit stock"
       />
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Total Transfers"
-          value={String(stockTransfers.length)}
+          value={String(totalTransfers)}
           icon={ArrowLeftRight}
           iconColor="text-blue-600"
         />
         <KPICard
-          title="In Transit"
-          value={String(inTransitCount)}
-          icon={Truck}
-          iconColor="text-indigo-600"
-        />
-        <KPICard
-          title="Completed (Received)"
-          value={String(receivedCount)}
+          title="Completed"
+          value={String(completed)}
           icon={CheckCircle2}
           iconColor="text-green-600"
         />
         <KPICard
-          title="Draft / Pending"
-          value={String(draftPendingCount)}
-          icon={FileClock}
+          title="In Transit"
+          value={String(inTransit)}
+          icon={Truck}
           iconColor="text-amber-600"
+        />
+        <KPICard
+          title="Warehouses"
+          value={String(whCount)}
+          icon={Warehouse}
+          iconColor="text-purple-600"
         />
       </div>
 
-      {/* Filter + Table */}
-      <DataTable<StockTransfer>
-        data={filtered}
+      <DataTable<TransferRow>
+        data={rows}
         columns={columns}
-        searchKey="transferNumber"
-        searchPlaceholder="Search by transfer number..."
-        onRowClick={(t) => setSelectedTransfer(t)}
+        searchKey="refDocId"
+        searchPlaceholder="Search transfer #..."
+        pageSize={15}
         actions={
           <Select
             value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v ?? "All")}
+            onValueChange={(v) => setStatusFilter((v ?? "all") as StatusFilter)}
           >
             <SelectTrigger className="w-44">
-              <SelectValue placeholder="All Statuses" />
+              <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
-              {STATUS_OPTIONS.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s === "All" ? "All Statuses" : s.replace(/_/g, " ")}
-                </SelectItem>
-              ))}
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="COMPLETED">Completed</SelectItem>
+              <SelectItem value="IN_TRANSIT">In Transit</SelectItem>
             </SelectContent>
           </Select>
         }
       />
-
-      {/* Transfer Detail Dialog */}
-      <Dialog
-        open={!!selectedTransfer}
-        onOpenChange={(open) => { if (!open) setSelectedTransfer(null); }}
-      >
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-mono text-lg">
-              {selectedTransfer?.transferNumber}
-            </DialogTitle>
-          </DialogHeader>
-
-          {selectedTransfer && (
-            <div className="space-y-5">
-              {/* Header info */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground text-xs mb-0.5">From</p>
-                  <p className="font-medium">{selectedTransfer.fromWarehouseName}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs mb-0.5">To</p>
-                  <p className="font-medium">{selectedTransfer.toWarehouseName}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs mb-0.5">Status</p>
-                  <StatusBadge status={selectedTransfer.status} />
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs mb-0.5">Created</p>
-                  <p className="font-medium">{formatDate(selectedTransfer.createdAt)}</p>
-                </div>
-                {selectedTransfer.shippedAt && (
-                  <div>
-                    <p className="text-muted-foreground text-xs mb-0.5">Shipped</p>
-                    <p className="font-medium">{formatDate(selectedTransfer.shippedAt)}</p>
-                  </div>
-                )}
-                {selectedTransfer.receivedAt && (
-                  <div>
-                    <p className="text-muted-foreground text-xs mb-0.5">Received</p>
-                    <p className="font-medium">{formatDate(selectedTransfer.receivedAt)}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-muted-foreground text-xs mb-0.5">Requested By</p>
-                  <p className="font-medium">{selectedTransfer.requestedBy}</p>
-                </div>
-                {selectedTransfer.approvedBy && (
-                  <div>
-                    <p className="text-muted-foreground text-xs mb-0.5">Approved By</p>
-                    <p className="font-medium">{selectedTransfer.approvedBy}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-muted-foreground text-xs mb-0.5">Total Value</p>
-                  <p className="font-semibold text-base">
-                    {formatCurrency(selectedTransfer.totalValue)}
-                  </p>
-                </div>
-                {selectedTransfer.eWayBillNumber && (
-                  <div>
-                    <p className="text-muted-foreground text-xs mb-0.5">E-Way Bill</p>
-                    <p className="font-mono font-medium text-sm">
-                      {selectedTransfer.eWayBillNumber}
-                    </p>
-                  </div>
-                )}
-                {selectedTransfer.remarks && (
-                  <div className="col-span-2 md:col-span-3">
-                    <p className="text-muted-foreground text-xs mb-0.5">Remarks</p>
-                    <p className="text-sm italic">{selectedTransfer.remarks}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Lines table */}
-              <div>
-                <p className="text-sm font-semibold mb-2">
-                  Transfer Lines ({selectedTransfer.lines.length})
-                </p>
-                <div className="rounded-lg border overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/50">
-                        <TableHead>Item Code</TableHead>
-                        <TableHead>Item Name</TableHead>
-                        <TableHead className="text-right">Requested</TableHead>
-                        <TableHead className="text-right">Shipped</TableHead>
-                        <TableHead className="text-right">Received</TableHead>
-                        <TableHead>Unit</TableHead>
-                        <TableHead>Batch</TableHead>
-                        <TableHead>Discrepancy</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedTransfer.lines.map((line) => {
-                        const hasDiscrepancy =
-                          line.shippedQty !== undefined &&
-                          line.receivedQty !== undefined &&
-                          line.shippedQty !== line.receivedQty;
-                        const diff =
-                          line.shippedQty !== undefined &&
-                          line.receivedQty !== undefined
-                            ? line.receivedQty - line.shippedQty
-                            : null;
-
-                        return (
-                          <TableRow key={line.id}>
-                            <TableCell className="font-mono text-xs text-muted-foreground">
-                              {line.itemCode}
-                            </TableCell>
-                            <TableCell className="text-sm font-medium">
-                              {line.itemName}
-                            </TableCell>
-                            <TableCell className="text-right text-sm">
-                              {line.requestedQty}
-                            </TableCell>
-                            <TableCell className="text-right text-sm">
-                              {line.shippedQty ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-right text-sm">
-                              {line.receivedQty ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-sm">{line.unit}</TableCell>
-                            <TableCell className="font-mono text-xs text-muted-foreground">
-                              {line.batchNumber ?? "—"}
-                            </TableCell>
-                            <TableCell>
-                              {hasDiscrepancy && diff !== null ? (
-                                <span className="text-xs font-semibold text-red-600">
-                                  {diff > 0 ? `+${diff}` : diff} units
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedTransfer(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* New Transfer Dialog */}
-      <Dialog open={newTransferOpen} onOpenChange={setNewTransferOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>New Inter-Warehouse Transfer</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">From Warehouse</label>
-              <Select
-                value={formFrom}
-                onValueChange={(v) => setFormFrom(v ?? warehouses[0]?.id ?? "")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select source warehouse" />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouses.map((wh) => (
-                    <SelectItem key={wh.id} value={wh.id}>
-                      {wh.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">To Warehouse</label>
-              <Select
-                value={formTo}
-                onValueChange={(v) => setFormTo(v ?? warehouses[1]?.id ?? "")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select destination warehouse" />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouses.map((wh) => (
-                    <SelectItem key={wh.id} value={wh.id}>
-                      {wh.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Item</label>
-              <Select
-                value={formItem}
-                onValueChange={(v) => setFormItem(v ?? invItems[0]?.id ?? "")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select item" />
-                </SelectTrigger>
-                <SelectContent>
-                  {invItems.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Quantity</label>
-              <Input
-                type="number"
-                placeholder="Enter quantity"
-                value={formQty}
-                onChange={(e) => setFormQty(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Remarks</label>
-              <Input
-                placeholder="Optional remarks"
-                value={formRemarks}
-                onChange={(e) => setFormRemarks(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNewTransferOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSaveNewTransfer}>Save Transfer</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

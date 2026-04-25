@@ -32,8 +32,11 @@ import {
   CreateQcInspectionSchema,
   InspectionTemplateListQuerySchema,
   IssueQcCertSchema,
+  QcCapaActionListQuerySchema,
   QcCertListQuerySchema,
+  QcEquipmentListQuerySchema,
   QcInspectionListQuerySchema,
+  QcReportsQuerySchema,
   StartQcInspectionSchema,
   UpdateInspectionParameterSchema,
   UpdateInspectionTemplateSchema,
@@ -46,11 +49,16 @@ import type { RequireFeature } from "../quotas/guard.js";
 import type { InspectionTemplatesService } from "./templates.service.js";
 import type { QcInspectionsService } from "./inspections.service.js";
 import type { QcCertsService } from "./certs.service.js";
+import type { QcEquipmentService, QcCapaService } from "./aux.service.js";
+import type { QcReportsService } from "./reports.service.js";
 
 export interface RegisterQcRoutesOptions {
   templates: InspectionTemplatesService;
   inspections: QcInspectionsService;
   certs: QcCertsService;
+  equipment: QcEquipmentService;
+  capa: QcCapaService;
+  reports: QcReportsService;
   guardInternal: AuthGuardOptions;
   requireFeature: RequireFeature;
 }
@@ -385,6 +393,59 @@ export async function registerQcRoutes(
       const { id } = IdParamSchema.parse(req.params);
       await opts.certs.recall(req, id);
       return reply.code(204).send();
+    },
+  );
+
+  // ─── QC Equipment (Phase 5, read-only) ────────────────────────────────────
+
+  app.get(
+    "/qc/equipment",
+    { preHandler: qcInspect },
+    async (req, reply) => {
+      const query = QcEquipmentListQuerySchema.parse(req.query);
+      return reply.send(await opts.equipment.list(req, query));
+    },
+  );
+
+  app.get(
+    "/qc/equipment/:id",
+    { preHandler: qcInspect },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      return reply.send(await opts.equipment.getById(req, id));
+    },
+  );
+
+  // ─── QC CAPA Actions (Phase 5, read-only) ─────────────────────────────────
+
+  app.get(
+    "/qc/capa-actions",
+    { preHandler: qcInspect },
+    async (req, reply) => {
+      const query = QcCapaActionListQuerySchema.parse(req.query);
+      return reply.send(await opts.capa.list(req, query));
+    },
+  );
+
+  app.get(
+    "/qc/capa-actions/:id",
+    { preHandler: qcInspect },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      return reply.send(await opts.capa.getById(req, id));
+    },
+  );
+
+  // ─── QC reports ─────────────────────────────────────────────────────────
+  // Date-window inspection counts + cycle time + cert rollup. `from`/`to`
+  // optional — service defaults to last 90 days when absent.
+
+  app.get(
+    "/qc/reports",
+    { preHandler: qcInspect },
+    async (req, reply) => {
+      const query = QcReportsQuerySchema.parse(req.query);
+      return reply.send(await opts.reports.summary(req, query));
     },
   );
 }

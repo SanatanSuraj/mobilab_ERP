@@ -33,6 +33,7 @@ import {
   CreateQuotationSchema,
   CreateSalesOrderSchema,
   CreateTicketSchema,
+  CrmReportsQuerySchema,
   DealListQuerySchema,
   FinanceApproveSalesOrderSchema,
   LeadListQuerySchema,
@@ -62,6 +63,7 @@ import type { DealsService } from "./deals.service.js";
 import type { TicketsService } from "./tickets.service.js";
 import type { QuotationsService } from "./quotations.service.js";
 import type { SalesOrdersService } from "./sales-orders.service.js";
+import type { CrmReportsService } from "./reports.service.js";
 
 export interface RegisterCrmRoutesOptions {
   accounts: AccountsService;
@@ -71,6 +73,7 @@ export interface RegisterCrmRoutesOptions {
   tickets: TicketsService;
   quotations: QuotationsService;
   salesOrders: SalesOrdersService;
+  reports: CrmReportsService;
   guardInternal: AuthGuardOptions;
   /**
    * Sprint 1C — feature-flag preHandler factory. Every CRM endpoint gates
@@ -303,6 +306,23 @@ export async function registerCrmRoutes(
       const body = ConvertLeadSchema.parse(req.body);
       const result = await opts.leads.convert(req, id, body);
       return reply.code(201).send(result);
+    }
+  );
+
+  // ─── CRM reports (date-windowed pipeline / win-loss / lead funnel) ───────
+
+  app.get(
+    "/crm/reports",
+    {
+      preHandler: [
+        authGuard,
+        requireCrmModule,
+        requirePermission("deals:read"),
+      ],
+    },
+    async (req, reply) => {
+      const query = CrmReportsQuerySchema.parse(req.query);
+      return reply.send(await opts.reports.summary(req, query));
     }
   );
 

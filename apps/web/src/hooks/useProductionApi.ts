@@ -37,26 +37,36 @@ import {
   apiAdvanceWipStage,
   apiCreateBom,
   apiCreateProduct,
+  apiCreateEcn,
   apiCreateWorkOrder,
   apiDeleteBom,
   apiDeleteBomLine,
   apiDeleteProduct,
   apiDeleteWorkOrder,
   apiGetBom,
+  apiGetEcn,
+  apiGetMrp,
   apiGetProduct,
+  apiGetProductionReports,
+  apiGetWipBoard,
   apiGetWorkOrder,
   apiListBomLines,
   apiListBoms,
+  apiListEcns,
   apiListProducts,
   apiListWipStageTemplates,
   apiListWipStages,
   apiListWorkOrders,
+  apiTransitionEcn,
   apiUpdateBom,
   apiUpdateBomLine,
+  apiUpdateEcn,
   apiUpdateProduct,
   apiUpdateWorkOrder,
   type BomListQuery,
+  type EcnListQuery,
   type ProductListQuery,
+  type ProductionReportsQuery,
   type WipStageTemplateListQuery,
   type WorkOrderListQuery,
 } from "@/lib/api/production";
@@ -69,14 +79,21 @@ import type {
   BomVersionWithLines,
   CreateBomLine,
   CreateBomVersion,
+  CreateEcn,
   CreateProduct,
   CreateWorkOrder,
+  EcnTransition,
+  EngineeringChangeNotice,
+  MrpRow,
   Product,
   ProductFamily,
+  ProductionReports,
   UpdateBomLine,
   UpdateBomVersion,
+  UpdateEcn,
   UpdateProduct,
   UpdateWorkOrder,
+  WipBoardCard,
   WipStage,
   WipStageTemplate,
   WorkOrder,
@@ -111,6 +128,22 @@ export const productionApiKeys = {
       ["prod-api", "work-orders", "detail", id] as const,
     stages: (id: string) =>
       ["prod-api", "work-orders", "stages", id] as const,
+  },
+  wipBoard: {
+    all: ["prod-api", "wip-board"] as const,
+  },
+  mrp: {
+    all: ["prod-api", "mrp"] as const,
+  },
+  reports: {
+    all: ["prod-api", "reports"] as const,
+    summary: (q: ProductionReportsQuery) =>
+      ["prod-api", "reports", "summary", q] as const,
+  },
+  ecns: {
+    all: ["prod-api", "ecns"] as const,
+    list: (q: EcnListQuery) => ["prod-api", "ecns", "list", q] as const,
+    detail: (id: string) => ["prod-api", "ecns", "detail", id] as const,
   },
   wipStageTemplates: {
     all: ["prod-api", "wip-stage-templates"] as const,
@@ -361,6 +394,19 @@ export function useApiWipStages(workOrderId: string | undefined) {
   });
 }
 
+/**
+ * WIP kanban — every active WO with its product + stages embedded. The page
+ * groups by `wo.status` into lanes; ordering inside each lane is server-side
+ * (priority then target_date then created_at).
+ */
+export function useApiWipBoard() {
+  return useQuery<WipBoardCard[], Error>({
+    queryKey: productionApiKeys.wipBoard.all,
+    queryFn: () => apiGetWipBoard(),
+    staleTime: 15_000,
+  });
+}
+
 // ─── Work Orders: writes ───────────────────────────────────────────────────
 
 export function useApiCreateWorkOrder() {
@@ -442,3 +488,87 @@ export function useApiWipStageTemplates(productFamily?: ProductFamily) {
 
 // Re-export WipStage type consumers might need alongside the hooks.
 export type { WipStage };
+
+// ─── MRP / reports / ECN ───────────────────────────────────────────────────
+
+/** Component-level shortage rollup across every active WO. */
+export function useApiMrp() {
+  return useQuery<MrpRow[], Error>({
+    queryKey: productionApiKeys.mrp.all,
+    queryFn: () => apiGetMrp(),
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Date-windowed throughput / cycle / yield rollup. Defaults to the last
+ * 90 days when no range is passed.
+ */
+export function useApiProductionReports(q: ProductionReportsQuery = {}) {
+  return useQuery<ProductionReports, Error>({
+    queryKey: productionApiKeys.reports.summary(q),
+    queryFn: () => apiGetProductionReports(q),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiEcns(q: EcnListQuery = {}) {
+  return useQuery({
+    queryKey: productionApiKeys.ecns.list(q),
+    queryFn: () => apiListEcns(q),
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiEcn(id: string | undefined) {
+  return useQuery<EngineeringChangeNotice, Error>({
+    queryKey: id
+      ? productionApiKeys.ecns.detail(id)
+      : ["prod-api", "ecns", "detail", "__none__"],
+    queryFn: () => apiGetEcn(id!),
+    enabled: Boolean(id),
+    staleTime: 30_000,
+  });
+}
+
+// ─── ECN: writes ───────────────────────────────────────────────────────────
+//
+// Every write invalidates the entire ecns namespace (list cache key
+// includes the filter object, so a per-filter targeted invalidation would
+// miss). Detail caches are seeded from the mutation response so the next
+// detail render is instant.
+
+export function useApiCreateEcn() {
+  const qc = useQueryClient();
+  return useMutation<EngineeringChangeNotice, Error, CreateEcn>({
+    mutationFn: (body) => apiCreateEcn(body),
+    onSuccess: (ecn) => {
+      qc.setQueryData(productionApiKeys.ecns.detail(ecn.id), ecn);
+      qc.invalidateQueries({ queryKey: productionApiKeys.ecns.all });
+    },
+  });
+}
+
+export function useApiUpdateEcn(id: string) {
+  const qc = useQueryClient();
+  return useMutation<EngineeringChangeNotice, Error, UpdateEcn>({
+    mutationFn: (body) => apiUpdateEcn(id, body),
+    onSuccess: (ecn) => {
+      qc.setQueryData(productionApiKeys.ecns.detail(id), ecn);
+      qc.invalidateQueries({ queryKey: productionApiKeys.ecns.all });
+    },
+  });
+}
+
+export function useApiTransitionEcn(id: string) {
+  const qc = useQueryClient();
+  return useMutation<EngineeringChangeNotice, Error, EcnTransition>({
+    mutationFn: (body) => apiTransitionEcn(id, body),
+    onSuccess: (ecn) => {
+      qc.setQueryData(productionApiKeys.ecns.detail(id), ecn);
+      qc.invalidateQueries({ queryKey: productionApiKeys.ecns.all });
+    },
+  });
+}

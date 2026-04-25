@@ -14,6 +14,7 @@ import type { ProductionNumberKind } from "@instigenie/contracts";
 
 const PREFIX: Record<ProductionNumberKind, string> = {
   WO: "PID",
+  ECN: "ECN",
 };
 
 export async function nextProductionNumber(

@@ -29,6 +29,7 @@ import {
   apiDeleteBinding,
   apiDeleteItem,
   apiDeleteWarehouse,
+  apiGetInventoryReports,
   apiGetItem,
   apiGetStockForItemAtWarehouse,
   apiGetWarehouse,
@@ -41,6 +42,7 @@ import {
   apiUpdateItem,
   apiUpdateWarehouse,
   apiUpsertBinding,
+  type InventoryReportsQuery,
   type ItemListQuery,
   type ItemWarehouseBindingListQuery,
   type StockLedgerListQuery,
@@ -51,6 +53,7 @@ import {
 import type {
   CreateItem,
   CreateWarehouse,
+  InventoryReports,
   Item,
   ItemWarehouseBinding,
   PostStockLedgerEntry,
@@ -97,6 +100,11 @@ export const inventoryApiKeys = {
       ["inv-api", "summary", "list", q] as const,
     pair: (itemId: string, warehouseId: string) =>
       ["inv-api", "summary", "pair", itemId, warehouseId] as const,
+  },
+  reports: {
+    all: ["inv-api", "reports"] as const,
+    summary: (q: InventoryReportsQuery) =>
+      ["inv-api", "reports", "summary", q] as const,
   },
 };
 
@@ -314,5 +322,20 @@ export function useApiStockForItemAtWarehouse(
     queryFn: () => apiGetStockForItemAtWarehouse(itemId!, warehouseId!),
     enabled: Boolean(itemId && warehouseId),
     staleTime: 10_000,
+  });
+}
+
+// ─── Reports ───────────────────────────────────────────────────────────────
+
+/**
+ * Current valuation + date-windowed movement + top movers. Defaults to the
+ * last 90 days when no range is passed.
+ */
+export function useApiInventoryReports(q: InventoryReportsQuery = {}) {
+  return useQuery<InventoryReports, Error>({
+    queryKey: inventoryApiKeys.reports.summary(q),
+    queryFn: () => apiGetInventoryReports(q),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 }

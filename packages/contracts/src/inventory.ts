@@ -466,3 +466,46 @@ export const StockReservationListQuerySchema = PaginationQuerySchema.extend({
   refDocType: z.string().trim().max(32).optional(),
   refDocId: uuid.optional(),
 });
+
+// ─── Inventory reports (date-windowed stock movement + valuation) ────────────
+
+export const InventoryReportsQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+});
+export type InventoryReportsQuery = z.infer<typeof InventoryReportsQuerySchema>;
+
+export const InventoryReportsSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  /** Current stock valuation — not window-scoped. */
+  valuation: z.object({
+    activeItems: z.number().int().nonnegative(),
+    onHandQty: qtyStr,
+    onHandValue: decimalStr,
+    reservedValue: decimalStr,
+    availableValue: decimalStr,
+    lowStockItems: z.number().int().nonnegative(),
+  }),
+  /** Movement summary by ledger txn_type within the window. */
+  movement: z.object({
+    receipts: qtyStr,
+    issues: qtyStr,
+    adjustments: qtyStr,
+    transfers: qtyStr,
+    scrap: qtyStr,
+    totalTxns: z.number().int().nonnegative(),
+  }),
+  /** Top items by movement volume in the window. */
+  topMovers: z.array(
+    z.object({
+      itemId: uuid,
+      sku: z.string(),
+      name: z.string(),
+      category: z.string(),
+      movedQty: qtyStr,
+      txnCount: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type InventoryReports = z.infer<typeof InventoryReportsSchema>;

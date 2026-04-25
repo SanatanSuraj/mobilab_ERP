@@ -53,25 +53,36 @@ import { DealsService } from "./modules/crm/deals.service.js";
 import { TicketsService } from "./modules/crm/tickets.service.js";
 import { QuotationsService } from "./modules/crm/quotations.service.js";
 import { SalesOrdersService } from "./modules/crm/sales-orders.service.js";
+import { CrmReportsService } from "./modules/crm/reports.service.js";
 import { registerCrmRoutes } from "./modules/crm/routes.js";
 import { ItemsService } from "./modules/inventory/items.service.js";
 import { WarehousesService } from "./modules/inventory/warehouses.service.js";
 import { StockService } from "./modules/inventory/stock.service.js";
 import { ReservationsService } from "./modules/inventory/reservations.service.js";
+import { InventoryReportsService } from "./modules/inventory/reports.service.js";
 import { registerInventoryRoutes } from "./modules/inventory/routes.js";
 import { VendorsService } from "./modules/procurement/vendors.service.js";
 import { IndentsService } from "./modules/procurement/indents.service.js";
 import { PurchaseOrdersService } from "./modules/procurement/purchase-orders.service.js";
 import { GrnsService } from "./modules/procurement/grns.service.js";
+import { ProcurementReportsService } from "./modules/procurement/reports.service.js";
 import { registerProcurementRoutes } from "./modules/procurement/routes.js";
 import { ProductsService } from "./modules/production/products.service.js";
 import { BomsService } from "./modules/production/boms.service.js";
 import { WorkOrdersService } from "./modules/production/work-orders.service.js";
 import { DeviceInstancesService } from "./modules/production/device-instances.service.js";
+import { MrpService } from "./modules/production/mrp.service.js";
+import { ReportsService } from "./modules/production/reports.service.js";
+import { EcnsService } from "./modules/production/ecns.service.js";
 import { registerProductionRoutes } from "./modules/production/routes.js";
 import { InspectionTemplatesService } from "./modules/qc/templates.service.js";
 import { QcInspectionsService } from "./modules/qc/inspections.service.js";
 import { QcCertsService } from "./modules/qc/certs.service.js";
+import {
+  QcCapaService,
+  QcEquipmentService,
+} from "./modules/qc/aux.service.js";
+import { QcReportsService } from "./modules/qc/reports.service.js";
 import { registerQcRoutes } from "./modules/qc/routes.js";
 import { SalesInvoicesService } from "./modules/finance/sales-invoices.service.js";
 import { PurchaseInvoicesService } from "./modules/finance/purchase-invoices.service.js";
@@ -81,6 +92,8 @@ import {
   VendorLedgerService,
 } from "./modules/finance/ledger.service.js";
 import { FinanceOverviewService } from "./modules/finance/overview.service.js";
+import { EwayBillsService } from "./modules/finance/eway-bills.service.js";
+import { FinanceReportsService } from "./modules/finance/reports.service.js";
 import { registerFinanceRoutes } from "./modules/finance/routes.js";
 import { NotificationTemplatesService } from "./modules/notifications/templates.service.js";
 import { NotificationsService } from "./modules/notifications/notifications.service.js";
@@ -199,6 +212,7 @@ export async function buildApp(): Promise<BuiltApp> {
   const ticketsService = new TicketsService(pool);
   const quotationsService = new QuotationsService(pool);
   const salesOrdersService = new SalesOrdersService(pool);
+  const crmReportsService = new CrmReportsService(pool);
 
   // Inventory services — Phase 2 §12.1 #3. Same shape as CRM services: one
   // per domain aggregate, all sharing the RLS-enforced `pool`.
@@ -215,6 +229,7 @@ export async function buildApp(): Promise<BuiltApp> {
   });
   // Phase 3 §3.2 — concurrency-safe reservations on top of stock_summary.
   const reservationsService = new ReservationsService(pool);
+  const inventoryReportsService = new InventoryReportsService(pool);
 
   // Procurement services — Phase 2 §12.1 #4. Vendors + indents + POs + GRNs.
   // GRNs.post() writes to stock_ledger, so these services live downstream
@@ -223,6 +238,7 @@ export async function buildApp(): Promise<BuiltApp> {
   const indentsService = new IndentsService(pool);
   const purchaseOrdersService = new PurchaseOrdersService(pool);
   const grnsService = new GrnsService(pool);
+  const procurementReportsService = new ProcurementReportsService(pool);
 
   // Production services — Phase 2 §12.1 #5 / §13.2. Products + BOMs + WOs.
   // Gated by `module.manufacturing`. BOM activation atomically supersedes the
@@ -232,6 +248,9 @@ export async function buildApp(): Promise<BuiltApp> {
   const bomsService = new BomsService(pool);
   const workOrdersService = new WorkOrdersService(pool);
   const deviceInstancesService = new DeviceInstancesService(pool);
+  const mrpService = new MrpService(pool);
+  const reportsService = new ReportsService(pool);
+  const ecnsService = new EcnsService(pool);
 
   // QC services — Phase 2 §12.1 #6 / §13.4. Inspection templates, inspections
   // with DRAFT → IN_PROGRESS → PASSED/FAILED lifecycle, and append-only
@@ -239,6 +258,9 @@ export async function buildApp(): Promise<BuiltApp> {
   const qcTemplatesService = new InspectionTemplatesService(pool);
   const qcInspectionsService = new QcInspectionsService(pool);
   const qcCertsService = new QcCertsService(pool);
+  const qcEquipmentService = new QcEquipmentService(pool);
+  const qcCapaService = new QcCapaService(pool);
+  const qcReportsService = new QcReportsService(pool);
 
   // Finance services — Phase 2 §12.1 #7 / §13.6. Sales + purchase invoices
   // with DRAFT → POSTED → CANCELLED lifecycle, append-only customer/vendor
@@ -256,6 +278,8 @@ export async function buildApp(): Promise<BuiltApp> {
   const customerLedgerService = new CustomerLedgerService(pool);
   const vendorLedgerService = new VendorLedgerService(pool);
   const financeOverviewService = new FinanceOverviewService(pool);
+  const ewayBillsService = new EwayBillsService(pool);
+  const financeReportsService = new FinanceReportsService(pool);
 
   // Notifications services — Phase 2 §12.1 #8 / §13.7. Record-only in-app
   // feed + template library. No dispatch in Phase 2 (that's Phase 3 event-bus
@@ -394,6 +418,7 @@ export async function buildApp(): Promise<BuiltApp> {
     tickets: ticketsService,
     quotations: quotationsService,
     salesOrders: salesOrdersService,
+    reports: crmReportsService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
@@ -407,6 +432,7 @@ export async function buildApp(): Promise<BuiltApp> {
     warehouses: warehousesService,
     stock: stockService,
     reservations: reservationsService,
+    reports: inventoryReportsService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
@@ -420,6 +446,7 @@ export async function buildApp(): Promise<BuiltApp> {
     indents: indentsService,
     purchaseOrders: purchaseOrdersService,
     grns: grnsService,
+    reports: procurementReportsService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
@@ -433,6 +460,9 @@ export async function buildApp(): Promise<BuiltApp> {
     boms: bomsService,
     workOrders: workOrdersService,
     deviceInstances: deviceInstancesService,
+    mrp: mrpService,
+    reports: reportsService,
+    ecns: ecnsService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
@@ -445,6 +475,9 @@ export async function buildApp(): Promise<BuiltApp> {
     templates: qcTemplatesService,
     inspections: qcInspectionsService,
     certs: qcCertsService,
+    equipment: qcEquipmentService,
+    capa: qcCapaService,
+    reports: qcReportsService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
@@ -460,6 +493,8 @@ export async function buildApp(): Promise<BuiltApp> {
     customerLedger: customerLedgerService,
     vendorLedger: vendorLedgerService,
     overview: financeOverviewService,
+    ewayBills: ewayBillsService,
+    reports: financeReportsService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,

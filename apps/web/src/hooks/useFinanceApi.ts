@@ -71,11 +71,18 @@ import {
   apiCreatePayment,
   apiVoidPayment,
   apiDeletePayment,
+  // E-way bills (Phase 5)
+  apiListEwayBills,
+  apiGetEwayBill,
+  // Reports
+  apiGetFinanceReports,
   type SalesInvoiceListQuery,
   type PurchaseInvoiceListQuery,
   type CustomerLedgerListQuery,
   type VendorLedgerListQuery,
   type PaymentListQuery,
+  type EwayBillListQuery,
+  type FinanceReportsQuery,
 } from "@/lib/api/finance";
 
 import type {
@@ -103,6 +110,7 @@ import type {
   Payment,
   CreatePayment,
   VoidPayment,
+  FinanceReports,
 } from "@instigenie/contracts";
 
 // ─── Query Keys ────────────────────────────────────────────────────────────
@@ -157,6 +165,18 @@ export const financeApiKeys = {
       ["finance-api", "payments", "list", q] as const,
     detail: (id: string) =>
       ["finance-api", "payments", "detail", id] as const,
+  },
+  ewayBills: {
+    all: ["finance-api", "ewayBills"] as const,
+    list: (q: EwayBillListQuery) =>
+      ["finance-api", "ewayBills", "list", q] as const,
+    detail: (id: string) =>
+      ["finance-api", "ewayBills", "detail", id] as const,
+  },
+  reports: {
+    all: ["finance-api", "reports"] as const,
+    summary: (q: FinanceReportsQuery) =>
+      ["finance-api", "reports", "summary", q] as const,
   },
 };
 
@@ -718,5 +738,42 @@ export function useApiDeletePayment() {
       qc.invalidateQueries({ queryKey: financeApiKeys.payments.all });
       qc.invalidateQueries({ queryKey: financeApiKeys.overview });
     },
+  });
+}
+
+// ─── E-Way Bills (Phase 5, read-only) ─────────────────────────────────────
+
+export function useApiEwayBills(query: EwayBillListQuery = {}) {
+  return useQuery({
+    queryKey: financeApiKeys.ewayBills.list(query),
+    queryFn: () => apiListEwayBills(query),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useApiEwayBill(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? financeApiKeys.ewayBills.detail(id)
+      : ["finance-api", "ewayBills", "detail", "__none__"],
+    queryFn: () => apiGetEwayBill(id!),
+    enabled: Boolean(id),
+    staleTime: 60_000,
+  });
+}
+
+// ─── Reports ───────────────────────────────────────────────────────────────
+
+/**
+ * Date-windowed P&L / AR / AP / top-customers roll-up. Defaults to the last
+ * 90 days when no range is passed.
+ */
+export function useApiFinanceReports(q: FinanceReportsQuery = {}) {
+  return useQuery<FinanceReports, Error>({
+    queryKey: financeApiKeys.reports.summary(q),
+    queryFn: () => apiGetFinanceReports(q),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 }

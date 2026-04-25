@@ -1,280 +1,372 @@
 "use client";
 
-// TODO(phase-5): GST reports (GSTR-1 outward, ITC inward) have no backend
-// routes yet. Expected routes:
-//   GET /finance/gst/gstr1?period=YYYY-MM  - outward supplies
-//   GET /finance/gst/itc?period=YYYY-MM    - input tax credit
-//   POST /finance/gst/gstr1/export         - generate JSON for portal upload
-// Mock imports left in place until the GST slice ships in
-// apps/api/src/modules/finance.
+/**
+ * GST Reports — derives GSTR-1 / GSTR-3B summary from sales_invoices and
+ * purchase_invoices.
+ *
+ * The GSTN return engine (filing JSON, error codes, ITC reconciliation)
+ * is a Phase-5 task. Until then this page rolls up the same numbers an
+ * accountant would punch into the offline tool: taxable value, tax
+ * collected, tax paid, net liability, period-over-period.
+ *
+ * Reuses useApiSalesInvoices + useApiPurchaseInvoices — no new endpoints.
+ */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
+import { KPICard } from "@/components/shared/kpi-card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FileText, Calculator, Receipt, IndianRupee } from "lucide-react";
-import { gstr1Entries, itcEntries, salesInvoices } from "@/data/finance-mock";
-import { formatCurrency } from "@/data/mock";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  useApiSalesInvoices,
+  useApiPurchaseInvoices,
+} from "@/hooks/useFinanceApi";
+import type { SalesInvoice, PurchaseInvoice } from "@instigenie/contracts";
+import {
+  IndianRupee,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Calculator,
+} from "lucide-react";
 
-import type { GSTR1Entry, ITCEntry } from "@/data/finance-mock";
+function n(v: string | null | undefined): number {
+  if (v == null) return 0;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
+
+function inr(v: number): string {
+  if (v >= 1_00_00_000)
+    return `₹${(v / 1_00_00_000).toLocaleString("en-IN", {
+      maximumFractionDigits: 2,
+    })}Cr`;
+  if (v >= 1_00_000)
+    return `₹${(v / 1_00_000).toLocaleString("en-IN", {
+      maximumFractionDigits: 2,
+    })}L`;
+  return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+
+type Period = "thisMonth" | "lastMonth" | "fy";
+
+function periodRange(p: Period): { from: string; to: string; label: string } {
+  const now = new Date();
+  if (p === "thisMonth") {
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const to = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      label: from.toLocaleString("en-IN", { month: "long", year: "numeric" }),
+    };
+  }
+  if (p === "lastMonth") {
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const to = new Date(now.getFullYear(), now.getMonth(), 0);
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      label: from.toLocaleString("en-IN", { month: "long", year: "numeric" }),
+    };
+  }
+  // Indian FY: April–March.
+  const fyStartYear = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+  const from = new Date(fyStartYear, 3, 1);
+  const to = new Date(fyStartYear + 1, 2, 31);
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10),
+    label: `FY ${fyStartYear}-${String(fyStartYear + 1).slice(2)}`,
+  };
+}
+
+function inDateRange(iso: string | null, from: string, to: string): boolean {
+  if (!iso) return false;
+  const d = iso.slice(0, 10);
+  return d >= from && d <= to;
+}
 
 export default function GSTReportsPage() {
-  // GSTR-1 totals
-  const gstr1Totals = useMemo(() => {
-    return gstr1Entries.reduce(
-      (acc, e) => ({
-        taxableValue: acc.taxableValue + e.taxableValue,
-        cgst: acc.cgst + e.cgst,
-        sgst: acc.sgst + e.sgst,
-        igst: acc.igst + e.igst,
-        totalTax: acc.totalTax + e.totalTax,
-        invoiceValue: acc.invoiceValue + e.invoiceValue,
+  const [period, setPeriod] = useState<Period>("thisMonth");
+  const range = periodRange(period);
+
+  const salesQuery = useApiSalesInvoices(
+    useMemo(
+      () => ({
+        limit: 200,
+        sortBy: "invoiceDate" as const,
+        sortDir: "desc" as const,
       }),
-      { taxableValue: 0, cgst: 0, sgst: 0, igst: 0, totalTax: 0, invoiceValue: 0 }
-    );
-  }, []);
-
-  // GSTR-3B summary derived from mock data
-  const gstr3bSummary = useMemo(() => {
-    const totalOutward = salesInvoices.reduce((sum, si) => sum + si.subtotal, 0);
-    const totalCgst = salesInvoices.reduce((sum, si) => sum + si.totalCgst, 0);
-    const totalSgst = salesInvoices.reduce((sum, si) => sum + si.totalSgst, 0);
-    const totalIgst = salesInvoices.reduce((sum, si) => sum + si.totalIgst, 0);
-    const totalTaxLiability = totalCgst + totalSgst + totalIgst;
-    const totalItcAvailable = itcEntries
-      .filter((e) => e.status === "eligible")
-      .reduce((sum, e) => sum + e.totalItc, 0);
-    const netPayable = totalTaxLiability - totalItcAvailable;
-
-    return {
-      totalOutward,
-      totalCgst,
-      totalSgst,
-      totalIgst,
-      totalTaxLiability,
-      totalItcAvailable,
-      netPayable,
-    };
-  }, []);
-
-  // ITC totals
-  const itcTotals = useMemo(() => {
-    return itcEntries.reduce(
-      (acc, e) => ({
-        taxableValue: acc.taxableValue + e.taxableValue,
-        igst: acc.igst + e.igst,
-        cgst: acc.cgst + e.cgst,
-        sgst: acc.sgst + e.sgst,
-        totalItc: acc.totalItc + e.totalItc,
+      []
+    )
+  );
+  const purchasesQuery = useApiPurchaseInvoices(
+    useMemo(
+      () => ({
+        limit: 200,
+        sortBy: "invoiceDate" as const,
+        sortDir: "desc" as const,
       }),
-      { taxableValue: 0, igst: 0, cgst: 0, sgst: 0, totalItc: 0 }
-    );
-  }, []);
+      []
+    )
+  );
 
-  const gstr1Columns: Column<GSTR1Entry>[] = [
-    { key: "invoiceNumber", header: "Invoice No.", sortable: true, render: (e) => <span className="text-sm font-mono">{e.invoiceNumber}</span> },
-    { key: "invoiceDate", header: "Date", sortable: true, render: (e) => <span className="text-sm">{e.invoiceDate}</span> },
-    { key: "customerGstin", header: "Customer GSTIN", render: (e) => <span className="text-sm font-mono">{e.customerGstin}</span> },
-    { key: "customerName", header: "Customer", render: (e) => <span className="text-sm">{e.customerName}</span> },
-    { key: "taxableValue", header: "Taxable Value", className: "text-right", render: (e) => <span className="text-sm">{formatCurrency(e.taxableValue)}</span> },
-    { key: "cgst", header: "CGST", className: "text-right", render: (e) => <span className="text-sm">{formatCurrency(e.cgst)}</span> },
-    { key: "sgst", header: "SGST", className: "text-right", render: (e) => <span className="text-sm">{formatCurrency(e.sgst)}</span> },
-    { key: "igst", header: "IGST", className: "text-right", render: (e) => <span className="text-sm">{formatCurrency(e.igst)}</span> },
-    { key: "totalTax", header: "Total Tax", className: "text-right", render: (e) => <span className="text-sm font-medium">{formatCurrency(e.totalTax)}</span> },
-    { key: "invoiceValue", header: "Invoice Value", className: "text-right", sortable: true, render: (e) => <span className="text-sm font-medium">{formatCurrency(e.invoiceValue)}</span> },
+  if (salesQuery.isLoading || purchasesQuery.isLoading) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+        <PageHeader
+          title="GST Reports"
+          description="GSTR-1 outward supplies, GSTR-3B summary, ITC register"
+        />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  const sales = (salesQuery.data?.data ?? []).filter((s) =>
+    inDateRange(s.invoiceDate, range.from, range.to)
+  );
+  const purchases = (purchasesQuery.data?.data ?? []).filter((p) =>
+    inDateRange(p.invoiceDate, range.from, range.to)
+  );
+
+  const outwardTaxable = sales.reduce(
+    (acc, s) => acc + n(s.subtotal) - n(s.discountTotal),
+    0
+  );
+  const outwardTax = sales.reduce((acc, s) => acc + n(s.taxTotal), 0);
+  const inwardTax = purchases.reduce((acc, p) => acc + n(p.taxTotal), 0);
+  const netLiability = Math.max(0, outwardTax - inwardTax);
+
+  const salesColumns: Column<SalesInvoice>[] = [
+    {
+      key: "invoiceNumber",
+      header: "Invoice #",
+      render: (r) => (
+        <span className="font-mono text-xs font-bold">{r.invoiceNumber}</span>
+      ),
+    },
+    {
+      key: "invoiceDate",
+      header: "Date",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">{r.invoiceDate}</span>
+      ),
+    },
+    {
+      key: "customerName",
+      header: "Customer",
+      render: (r) => (
+        <div>
+          <p className="text-sm leading-tight">{r.customerName ?? "—"}</p>
+          {r.customerGstin && (
+            <p className="font-mono text-[10px] text-muted-foreground">
+              {r.customerGstin}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "placeOfSupply",
+      header: "POS",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">
+          {r.placeOfSupply ?? "—"}
+        </span>
+      ),
+    },
+    {
+      key: "subtotal",
+      header: "Taxable",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono">
+          {inr(n(r.subtotal) - n(r.discountTotal))}
+        </span>
+      ),
+    },
+    {
+      key: "taxTotal",
+      header: "GST",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono text-amber-700">
+          {inr(n(r.taxTotal))}
+        </span>
+      ),
+    },
+    {
+      key: "grandTotal",
+      header: "Total",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono font-semibold">
+          {inr(n(r.grandTotal))}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => <StatusBadge status={r.status} />,
+    },
   ];
 
-  const itcColumns: Column<ITCEntry>[] = [
-    { key: "vendorGstin", header: "Vendor GSTIN", render: (e) => <span className="text-sm font-mono">{e.vendorGstin}</span> },
-    { key: "vendorName", header: "Vendor Name", sortable: true, render: (e) => <span className="text-sm">{e.vendorName}</span> },
-    { key: "invoiceNumber", header: "Invoice No.", render: (e) => <span className="text-sm font-mono">{e.invoiceNumber}</span> },
-    { key: "invoiceDate", header: "Date", sortable: true, render: (e) => <span className="text-sm">{e.invoiceDate}</span> },
-    { key: "taxableValue", header: "Taxable Value", className: "text-right", render: (e) => <span className="text-sm">{formatCurrency(e.taxableValue)}</span> },
-    { key: "igst", header: "IGST", className: "text-right", render: (e) => <span className="text-sm">{formatCurrency(e.igst)}</span> },
-    { key: "cgst", header: "CGST", className: "text-right", render: (e) => <span className="text-sm">{formatCurrency(e.cgst)}</span> },
-    { key: "sgst", header: "SGST", className: "text-right", render: (e) => <span className="text-sm">{formatCurrency(e.sgst)}</span> },
-    { key: "totalItc", header: "Total ITC", className: "text-right", render: (e) => <span className="text-sm font-medium">{formatCurrency(e.totalItc)}</span> },
-    { key: "status", header: "Status", render: (e) => <StatusBadge status={e.status} /> },
+  const purchaseColumns: Column<PurchaseInvoice>[] = [
+    {
+      key: "invoiceNumber",
+      header: "Invoice #",
+      render: (r) => (
+        <span className="font-mono text-xs font-bold">{r.invoiceNumber}</span>
+      ),
+    },
+    {
+      key: "invoiceDate",
+      header: "Date",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">{r.invoiceDate}</span>
+      ),
+    },
+    {
+      key: "vendorName",
+      header: "Vendor",
+      render: (r) => (
+        <div>
+          <p className="text-sm leading-tight">{r.vendorName ?? "—"}</p>
+          {r.vendorGstin && (
+            <p className="font-mono text-[10px] text-muted-foreground">
+              {r.vendorGstin}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "subtotal",
+      header: "Taxable",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono">
+          {inr(n(r.subtotal) - n(r.discountTotal))}
+        </span>
+      ),
+    },
+    {
+      key: "taxTotal",
+      header: "ITC",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono text-green-700">
+          {inr(n(r.taxTotal))}
+        </span>
+      ),
+    },
+    {
+      key: "grandTotal",
+      header: "Total",
+      className: "text-right",
+      render: (r) => (
+        <span className="text-sm font-mono font-semibold">
+          {inr(n(r.grandTotal))}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => <StatusBadge status={r.status} />,
+    },
   ];
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
       <PageHeader
         title="GST Reports"
-        description="GSTR-1, GSTR-3B summary, and Input Tax Credit register"
+        description={`GSTR-1 outward supplies, GSTR-3B summary, ITC — ${range.label}`}
       />
 
-      <Tabs defaultValue="gstr1">
-        <TabsList>
-          <TabsTrigger value="gstr1">GSTR-1</TabsTrigger>
-          <TabsTrigger value="gstr3b">GSTR-3B</TabsTrigger>
-          <TabsTrigger value="itc">ITC Register</TabsTrigger>
-        </TabsList>
+      <div className="flex items-center justify-end">
+        <Select
+          value={period}
+          onValueChange={(v) => setPeriod((v ?? "thisMonth") as Period)}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Period" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="thisMonth">This Month</SelectItem>
+            <SelectItem value="lastMonth">Last Month</SelectItem>
+            <SelectItem value="fy">Current FY</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
-        {/* GSTR-1 Tab */}
-        <TabsContent value="gstr1" className="mt-4 space-y-4">
-          <DataTable<GSTR1Entry>
-            data={gstr1Entries}
-            columns={gstr1Columns}
-            searchKey="invoiceNumber"
-            searchPlaceholder="Search by invoice number..."
-            pageSize={10}
-          />
-          <Card>
-            <CardContent className="p-4">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableBody>
-                    <TableRow className="font-semibold bg-muted/30 hover:bg-muted/30">
-                      <TableCell className="text-sm" colSpan={4}>Totals</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(gstr1Totals.taxableValue)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(gstr1Totals.cgst)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(gstr1Totals.sgst)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(gstr1Totals.igst)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(gstr1Totals.totalTax)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(gstr1Totals.invoiceValue)}</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <KPICard
+          title="Outward Taxable"
+          value={inr(outwardTaxable)}
+          icon={ArrowUpFromLine}
+          iconColor="text-blue-600"
+        />
+        <KPICard
+          title="GST Collected"
+          value={inr(outwardTax)}
+          icon={IndianRupee}
+          iconColor="text-amber-600"
+        />
+        <KPICard
+          title="Inward / ITC"
+          value={inr(inwardTax)}
+          icon={ArrowDownToLine}
+          iconColor="text-green-600"
+        />
+        <KPICard
+          title="Net GST Liability"
+          value={inr(netLiability)}
+          icon={Calculator}
+          iconColor="text-red-600"
+        />
+      </div>
 
-        {/* GSTR-3B Tab */}
-        <TabsContent value="gstr3b" className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <Receipt className="h-4 w-4" />
-                  Total Outward Supplies
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold">{formatCurrency(gstr3bSummary.totalOutward)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <Calculator className="h-4 w-4" />
-                  Total Tax Liability
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold">{formatCurrency(gstr3bSummary.totalTaxLiability)}</p>
-                <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-                  <span>CGST: {formatCurrency(gstr3bSummary.totalCgst)}</span>
-                  <span>SGST: {formatCurrency(gstr3bSummary.totalSgst)}</span>
-                  <span>IGST: {formatCurrency(gstr3bSummary.totalIgst)}</span>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  ITC Available
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold text-green-700">{formatCurrency(gstr3bSummary.totalItcAvailable)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <IndianRupee className="h-4 w-4" />
-                  Net Tax Payable
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold text-amber-700">{formatCurrency(gstr3bSummary.netPayable)}</p>
-              </CardContent>
-            </Card>
-          </div>
+      <div>
+        <h2 className="text-lg font-semibold mb-2">
+          GSTR-1 — Outward Supplies ({sales.length})
+        </h2>
+        <DataTable<SalesInvoice>
+          data={sales}
+          columns={salesColumns}
+          searchKey="invoiceNumber"
+          searchPlaceholder="Search invoice #..."
+          pageSize={10}
+        />
+      </div>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">GSTR-3B Summary Breakdown</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableHead>Particulars</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow>
-                    <TableCell className="text-sm">Total Outward Supplies (Taxable Value)</TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(gstr3bSummary.totalOutward)}</TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-sm pl-8">CGST</TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(gstr3bSummary.totalCgst)}</TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-sm pl-8">SGST</TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(gstr3bSummary.totalSgst)}</TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-sm pl-8">IGST</TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(gstr3bSummary.totalIgst)}</TableCell>
-                  </TableRow>
-                  <TableRow className="font-medium">
-                    <TableCell className="text-sm">Total Tax Liability</TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(gstr3bSummary.totalTaxLiability)}</TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-sm text-green-700">Less: ITC Available</TableCell>
-                    <TableCell className="text-right text-sm text-green-700">{formatCurrency(gstr3bSummary.totalItcAvailable)}</TableCell>
-                  </TableRow>
-                  <TableRow className="font-bold bg-muted/30 hover:bg-muted/30">
-                    <TableCell className="text-sm">Net Tax Payable</TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(gstr3bSummary.netPayable)}</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ITC Register Tab */}
-        <TabsContent value="itc" className="mt-4 space-y-4">
-          <DataTable<ITCEntry>
-            data={itcEntries}
-            columns={itcColumns}
-            searchKey="vendorName"
-            searchPlaceholder="Search by vendor..."
-            pageSize={10}
-          />
-          <Card>
-            <CardContent className="p-4">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableBody>
-                    <TableRow className="font-semibold bg-muted/30 hover:bg-muted/30">
-                      <TableCell className="text-sm" colSpan={4}>Totals</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(itcTotals.taxableValue)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(itcTotals.igst)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(itcTotals.cgst)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(itcTotals.sgst)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(itcTotals.totalItc)}</TableCell>
-                      <TableCell></TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      <div>
+        <h2 className="text-lg font-semibold mb-2">
+          ITC — Inward Supplies ({purchases.length})
+        </h2>
+        <DataTable<PurchaseInvoice>
+          data={purchases}
+          columns={purchaseColumns}
+          searchKey="invoiceNumber"
+          searchPlaceholder="Search invoice #..."
+          pageSize={10}
+        />
+      </div>
     </div>
   );
 }

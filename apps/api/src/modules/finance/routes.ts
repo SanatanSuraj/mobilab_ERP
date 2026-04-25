@@ -39,6 +39,8 @@ import {
   CreateSalesInvoiceLineSchema,
   CreateSalesInvoiceSchema,
   CustomerLedgerListQuerySchema,
+  EwayBillListQuerySchema,
+  FinanceReportsQuerySchema,
   PaymentListQuerySchema,
   PostPurchaseInvoiceSchema,
   PostSalesInvoiceSchema,
@@ -61,6 +63,8 @@ import type {
   VendorLedgerService,
 } from "./ledger.service.js";
 import type { FinanceOverviewService } from "./overview.service.js";
+import type { EwayBillsService } from "./eway-bills.service.js";
+import type { FinanceReportsService } from "./reports.service.js";
 
 export interface RegisterFinanceRoutesOptions {
   salesInvoices: SalesInvoicesService;
@@ -69,6 +73,8 @@ export interface RegisterFinanceRoutesOptions {
   customerLedger: CustomerLedgerService;
   vendorLedger: VendorLedgerService;
   overview: FinanceOverviewService;
+  ewayBills: EwayBillsService;
+  reports: FinanceReportsService;
   guardInternal: AuthGuardOptions;
 }
 
@@ -447,6 +453,39 @@ export async function registerFinanceRoutes(
       const { id } = IdParamSchema.parse(req.params);
       await opts.payments.remove(req, id);
       return reply.code(204).send();
+    },
+  );
+
+  // ─── E-Way Bills (Phase 5, read-only) ─────────────────────────────────────
+
+  app.get(
+    "/finance/eway-bills",
+    { preHandler: siRead },
+    async (req, reply) => {
+      const query = EwayBillListQuerySchema.parse(req.query);
+      return reply.send(await opts.ewayBills.list(req, query));
+    },
+  );
+
+  app.get(
+    "/finance/eway-bills/:id",
+    { preHandler: siRead },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      return reply.send(await opts.ewayBills.getById(req, id));
+    },
+  );
+
+  // ─── Finance reports ───────────────────────────────────────────────────────
+  // Date-window P&L / ageing / top customers roll-up. `from`/`to` optional —
+  // service defaults to last 90 days when absent.
+
+  app.get(
+    "/finance/reports",
+    { preHandler: siRead },
+    async (req, reply) => {
+      const query = FinanceReportsQuerySchema.parse(req.query);
+      return reply.send(await opts.reports.summary(req, query));
     },
   );
 }

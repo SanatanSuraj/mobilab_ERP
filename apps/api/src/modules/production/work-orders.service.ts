@@ -26,9 +26,11 @@ import type {
   AdvanceWipStage,
   CreateWorkOrder,
   UpdateWorkOrder,
+  WipBoardCard,
   WipStage,
   WipStageTemplate,
   WorkOrder,
+  WorkOrderListItem,
   WorkOrderListQuerySchema,
   WorkOrderWithStages,
 } from "@instigenie/contracts";
@@ -75,7 +77,7 @@ export class WorkOrdersService {
   async list(
     req: FastifyRequest,
     query: WorkOrderListQuery
-  ): Promise<ReturnType<typeof paginated<WorkOrder>>> {
+  ): Promise<ReturnType<typeof paginated<WorkOrderListItem>>> {
     return withRequest(req, this.pool, async (client) => {
       const plan = planPagination(query, WO_SORTS, "createdAt");
       const { data, total } = await workOrdersRepo.list(
@@ -105,6 +107,12 @@ export class WorkOrdersService {
       if (!header) throw new NotFoundError("work order");
       const stages = await workOrdersRepo.listStages(client, id);
       return { ...header, stages };
+    });
+  }
+
+  async listForBoard(req: FastifyRequest): Promise<WipBoardCard[]> {
+    return withRequest(req, this.pool, async (client) => {
+      return workOrdersRepo.listForBoard(client);
     });
   }
 

@@ -1,108 +1,210 @@
 "use client";
 
-// TODO(phase-5): E-Way bills module has no backend routes yet. Expected
-// routes:
-//   GET  /finance/eway-bills - list bills with status filter
-//   POST /finance/eway-bills - generate bill (calls external e-way portal)
-//   POST /finance/eway-bills/:id/cancel
-//   POST /finance/eway-bills/:id/extend
-// Mock imports left in place until the e-way slice ships in
-// apps/api/src/modules/finance.
+/**
+ * GST E-way bill register.
+ *
+ * One row per generated EWB (above the value threshold for inter/intra-state
+ * shipments). Read-only Phase-5 surface — writes happen via SQL seed for
+ * now; real GSTN-portal integration is a Phase-6 task.
+ */
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
-import { StatusBadge } from "@/components/shared/status-badge";
 import { KPICard } from "@/components/shared/kpi-card";
-import { Button } from "@/components/ui/button";
-import { FileText, CheckCircle, AlertTriangle, Truck, Loader2 } from "lucide-react";
-import { ewayBills, getFinCustomerById } from "@/data/finance-mock";
-import { formatCurrency } from "@/data/mock";
-import { toast } from "sonner";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useApiEwayBills } from "@/hooks/useFinanceApi";
+import type {
+  EwayBill,
+  EwbStatus,
+  EwbTransportMode,
+} from "@instigenie/contracts";
+import {
+  Truck,
+  CheckCircle2,
+  Ban,
+  Hourglass,
+} from "lucide-react";
 
-import type { EWayBill } from "@/data/finance-mock";
+function formatDate(iso: string | null): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function formatINR(value: string): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
+type StatusFilter = EwbStatus | "all";
+type ModeFilter = EwbTransportMode | "all";
 
 export default function EwayBillsPage() {
-  const [generating, setGenerating] = useState(false);
+  const [status, setStatus] = useState<StatusFilter>("all");
+  const [mode, setMode] = useState<ModeFilter>("all");
 
-  const totalEwbs = ewayBills.length;
-  const activeEwbs = ewayBills.filter((e) => e.status === "active").length;
-  const expiredEwbs = ewayBills.filter((e) => e.status === "expired").length;
+  const query = useApiEwayBills(
+    useMemo(
+      () => ({
+        limit: 200,
+        sortBy: "generatedAt" as const,
+        sortDir: "desc" as const,
+        status: status === "all" ? undefined : status,
+        transportMode: mode === "all" ? undefined : mode,
+      }),
+      [status, mode],
+    ),
+  );
 
-  function handleGenerateEwb() {
-    setGenerating(true);
-    setTimeout(() => {
-      setGenerating(false);
-      const fakeEwb = `2714 ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)}`;
-      toast.success(`E-Way Bill generated successfully: ${fakeEwb}`);
-    }, 2000);
+  if (query.isLoading) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+        <PageHeader
+          title="E-Way Bill Management"
+          description="Generated e-way bills for goods movement above the GST threshold"
+        />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
   }
 
-  const columns: Column<EWayBill>[] = [
+  const rows = query.data?.data ?? [];
+
+  const total = rows.length;
+  const active = rows.filter((r) => r.status === "ACTIVE").length;
+  const cancelled = rows.filter((r) => r.status === "CANCELLED").length;
+  const expired = rows.filter((r) => r.status === "EXPIRED").length;
+  const totalValue = rows.reduce((sum, r) => {
+    const n = Number(r.invoiceValue);
+    return Number.isFinite(n) ? sum + n : sum;
+  }, 0);
+
+  const columns: Column<EwayBill>[] = [
     {
       key: "ewbNumber",
-      header: "EWB Number",
-      sortable: true,
-      render: (ewb) => <span className="text-sm font-mono">{ewb.ewbNumber}</span>,
+      header: "EWB #",
+      render: (r) => (
+        <span className="font-mono text-xs font-bold">{r.ewbNumber}</span>
+      ),
     },
     {
-      key: "invoiceRef",
-      header: "Invoice Ref",
-      sortable: true,
-      render: (ewb) => <span className="text-sm font-mono">{ewb.invoiceRef}</span>,
+      key: "invoiceNumber",
+      header: "Invoice #",
+      render: (r) => (
+        <div className="space-y-0.5">
+          <div className="font-mono text-xs">{r.invoiceNumber}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {formatDate(r.invoiceDate)}
+          </div>
+        </div>
+      ),
     },
     {
-      key: "customerId",
-      header: "Customer",
-      render: (ewb) => {
-        const customer = getFinCustomerById(ewb.customerId);
-        return <span className="text-sm">{customer?.name ?? "Unknown"}</span>;
-      },
+      key: "consignee",
+      header: "Consignee",
+      render: (r) => (
+        <div className="space-y-0.5">
+          <div className="text-sm">{r.consigneeName ?? "—"}</div>
+          {r.consigneeGstin && (
+            <div className="text-[11px] font-mono text-muted-foreground">
+              {r.consigneeGstin}
+            </div>
+          )}
+        </div>
+      ),
     },
     {
-      key: "fromState",
+      key: "route",
       header: "Route",
-      render: (ewb) => (
-        <span className="text-sm text-muted-foreground">
-          {ewb.fromState} &rarr; {ewb.toState}
+      render: (r) => (
+        <div className="text-xs space-y-0.5">
+          <div>
+            <span className="font-mono text-muted-foreground">
+              {r.fromStateCode}
+            </span>
+            {" → "}
+            <span className="font-mono text-muted-foreground">
+              {r.toStateCode}
+            </span>
+          </div>
+          <div className="text-[11px] text-muted-foreground line-clamp-1">
+            {r.fromPlace} → {r.toPlace}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "distanceKm",
+      header: "Distance",
+      render: (r) => (
+        <span className="text-xs font-mono text-muted-foreground">
+          {r.distanceKm} km
         </span>
       ),
     },
     {
-      key: "transporterName",
-      header: "Transporter",
-      render: (ewb) => <span className="text-sm">{ewb.transporterName}</span>,
+      key: "transportMode",
+      header: "Mode",
+      render: (r) => <StatusBadge status={r.transportMode} />,
     },
     {
       key: "vehicleNumber",
       header: "Vehicle",
-      render: (ewb) => <span className="text-sm font-mono">{ewb.vehicleNumber}</span>,
-    },
-    {
-      key: "value",
-      header: "Value",
-      sortable: true,
-      className: "text-right",
-      render: (ewb) => (
-        <span className="text-sm font-medium">{formatCurrency(ewb.value)}</span>
+      render: (r) => (
+        <span className="font-mono text-xs">{r.vehicleNumber ?? "—"}</span>
       ),
     },
     {
-      key: "generatedDate",
-      header: "Generated",
-      sortable: true,
-      render: (ewb) => <span className="text-sm text-muted-foreground">{ewb.generatedDate}</span>,
-    },
-    {
-      key: "validUntil",
-      header: "Valid Until",
-      sortable: true,
-      render: (ewb) => <span className="text-sm text-muted-foreground">{ewb.validUntil}</span>,
+      key: "invoiceValue",
+      header: "Value",
+      render: (r) => (
+        <span className="font-mono text-xs font-semibold">
+          {formatINR(r.invoiceValue)}
+        </span>
+      ),
     },
     {
       key: "status",
       header: "Status",
-      render: (ewb) => <StatusBadge status={ewb.status} />,
+      render: (r) => <StatusBadge status={r.status} />,
+    },
+    {
+      key: "generatedAt",
+      header: "Generated",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">
+          {formatDate(r.generatedAt)}
+        </span>
+      ),
     },
   ];
 
@@ -110,46 +212,81 @@ export default function EwayBillsPage() {
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
       <PageHeader
         title="E-Way Bill Management"
-        description="Generate and track e-way bills for goods movement"
-        actions={
-          <Button onClick={handleGenerateEwb} disabled={generating}>
-            {generating ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Truck className="h-4 w-4 mr-2" />
-                Generate EWB
-              </>
-            )}
-          </Button>
-        }
+        description="Generated e-way bills for goods movement above the GST threshold"
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KPICard title="Total E-Way Bills" value={String(totalEwbs)} icon={FileText} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
-          title="Active"
-          value={String(activeEwbs)}
-          icon={CheckCircle}
-          iconColor="text-green-600"
+          title="Total EWBs"
+          value={String(total)}
+          icon={Truck}
+          iconColor="text-blue-600"
         />
         <KPICard
-          title="Expired"
-          value={String(expiredEwbs)}
-          icon={AlertTriangle}
+          title="Active"
+          value={String(active)}
+          icon={CheckCircle2}
+          iconColor="text-green-700"
+        />
+        <KPICard
+          title="Cancelled / Expired"
+          value={String(cancelled + expired)}
+          icon={Ban}
+          iconColor="text-red-600"
+        />
+        <KPICard
+          title="Total Value"
+          value={
+            new Intl.NumberFormat("en-IN", {
+              style: "currency",
+              currency: "INR",
+              maximumFractionDigits: 0,
+            }).format(totalValue)
+          }
+          icon={Hourglass}
           iconColor="text-amber-600"
         />
       </div>
 
-      <DataTable<EWayBill>
-        data={ewayBills}
+      <DataTable<EwayBill>
+        data={rows}
         columns={columns}
         searchKey="ewbNumber"
-        searchPlaceholder="Search by EWB number..."
-        pageSize={10}
+        searchPlaceholder="Search EWB / invoice / consignee..."
+        pageSize={15}
+        actions={
+          <div className="flex gap-2">
+            <Select
+              value={status}
+              onValueChange={(v) => setStatus((v ?? "all") as StatusFilter)}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="ACTIVE">Active</SelectItem>
+                <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                <SelectItem value="EXPIRED">Expired</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={mode}
+              onValueChange={(v) => setMode((v ?? "all") as ModeFilter)}
+            >
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="Mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Modes</SelectItem>
+                <SelectItem value="ROAD">Road</SelectItem>
+                <SelectItem value="RAIL">Rail</SelectItem>
+                <SelectItem value="AIR">Air</SelectItem>
+                <SelectItem value="SHIP">Ship</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        }
       />
     </div>
   );

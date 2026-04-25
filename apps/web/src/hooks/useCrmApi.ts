@@ -38,6 +38,7 @@ import {
   apiDeleteSalesOrder,
   apiFinanceApproveSalesOrder,
   apiGetAccount,
+  apiGetCrmReports,
   apiGetContact,
   apiGetDeal,
   apiGetLead,
@@ -68,6 +69,7 @@ import {
   type ContactListQuery,
   type ConvertLeadResponse,
   type ConvertQuotationResponse,
+  type CrmReportsQuery,
   type DealListQuery,
   type LeadListQuery,
   type PaginatedResponse,
@@ -86,6 +88,7 @@ import type {
   ConvertLead,
   ConvertQuotation,
   CreateLead,
+  CrmReports,
   CreateQuotation,
   CreateSalesOrder,
   Deal,
@@ -163,6 +166,11 @@ export const crmApiKeys = {
       ["crm-api", "sales-orders", "list", q] as const,
     detail: (id: string) =>
       ["crm-api", "sales-orders", "detail", id] as const,
+  },
+  reports: {
+    all: ["crm-api", "reports"] as const,
+    summary: (q: CrmReportsQuery) =>
+      ["crm-api", "reports", "summary", q] as const,
   },
 };
 
@@ -726,5 +734,20 @@ export function useApiFinanceApproveSalesOrder(id: string) {
       qc.setQueryData(crmApiKeys.salesOrders.detail(id), so);
       qc.invalidateQueries({ queryKey: crmApiKeys.salesOrders.all });
     },
+  });
+}
+
+// ─── Reports ───────────────────────────────────────────────────────────────
+
+/**
+ * Date-windowed pipeline / win-loss / leads / top deals roll-up. Defaults to
+ * the last 90 days when no range is passed.
+ */
+export function useApiCrmReports(q: CrmReportsQuery = {}) {
+  return useQuery<CrmReports, Error>({
+    queryKey: crmApiKeys.reports.summary(q),
+    queryFn: () => apiGetCrmReports(q),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 }

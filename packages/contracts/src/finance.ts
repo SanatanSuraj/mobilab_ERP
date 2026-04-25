@@ -682,3 +682,106 @@ export const FinanceOverviewSchema = z.object({
   currency: z.string(),
 });
 export type FinanceOverview = z.infer<typeof FinanceOverviewSchema>;
+
+// ─── Finance reports (date-windowed P&L + ageing rollup) ─────────────────────
+
+export const FinanceReportsQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+});
+export type FinanceReportsQuery = z.infer<typeof FinanceReportsQuerySchema>;
+
+export const FinanceReportsSchema = z.object({
+  /** Inclusive window — defaults to last 90 days when caller omits range. */
+  from: z.string(),
+  to: z.string(),
+  /** P&L summary across POSTED invoices in the window (by posted_at). */
+  pnl: z.object({
+    revenue: moneyStrNonNeg,
+    expenses: moneyStrNonNeg,
+    grossProfit: z.string(),
+    grossMarginPct: z.number(),
+    paymentsIn: moneyStrNonNeg,
+    paymentsOut: moneyStrNonNeg,
+    cashFlow: z.string(),
+  }),
+  /** AR ageing buckets — current outstanding (not window-scoped). */
+  arAgeing: z.object({
+    current: moneyStrNonNeg,
+    days1to30: moneyStrNonNeg,
+    days31to60: moneyStrNonNeg,
+    days61to90: moneyStrNonNeg,
+    days90Plus: moneyStrNonNeg,
+    total: moneyStrNonNeg,
+  }),
+  /** AP ageing buckets — current outstanding (not window-scoped). */
+  apAgeing: z.object({
+    current: moneyStrNonNeg,
+    days1to30: moneyStrNonNeg,
+    days31to60: moneyStrNonNeg,
+    days61to90: moneyStrNonNeg,
+    days90Plus: moneyStrNonNeg,
+    total: moneyStrNonNeg,
+  }),
+  /** Top customers by invoiced amount in window. */
+  topCustomers: z.array(
+    z.object({
+      customerId: z.string().uuid().nullable(),
+      customerName: z.string(),
+      invoiceCount: z.number().int().nonnegative(),
+      invoicedTotal: moneyStrNonNeg,
+      paidTotal: moneyStrNonNeg,
+    }),
+  ),
+});
+export type FinanceReports = z.infer<typeof FinanceReportsSchema>;
+
+// ─── E-Way Bills (Phase 5) ───────────────────────────────────────────────────
+//
+// GST e-way bill register. Read-only API — writes happen via SQL seed for
+// now (the GSTN integration that issues real EWB numbers is a Phase-6 task).
+
+export const EWB_TRANSPORT_MODES = ["ROAD", "RAIL", "AIR", "SHIP"] as const;
+export const EwbTransportModeSchema = z.enum(EWB_TRANSPORT_MODES);
+export type EwbTransportMode = z.infer<typeof EwbTransportModeSchema>;
+
+export const EWB_STATUSES = ["ACTIVE", "CANCELLED", "EXPIRED"] as const;
+export const EwbStatusSchema = z.enum(EWB_STATUSES);
+export type EwbStatus = z.infer<typeof EwbStatusSchema>;
+
+export const EwayBillSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  ewbNumber: z.string(),
+  invoiceNumber: z.string(),
+  invoiceDate: z.string(),
+  invoiceValue: z.string(),
+  consignorGstin: z.string(),
+  consigneeGstin: z.string().nullable(),
+  consigneeName: z.string().nullable(),
+  fromPlace: z.string(),
+  fromStateCode: z.string(),
+  toPlace: z.string(),
+  toStateCode: z.string(),
+  distanceKm: z.number().int().nonnegative(),
+  transportMode: EwbTransportModeSchema,
+  vehicleNumber: z.string().nullable(),
+  transporterName: z.string().nullable(),
+  transporterId: z.string().nullable(),
+  status: EwbStatusSchema,
+  generatedAt: z.string(),
+  validUntil: z.string().nullable(),
+  cancelledAt: z.string().nullable(),
+  cancellationReason: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type EwayBill = z.infer<typeof EwayBillSchema>;
+
+export const EwayBillListQuerySchema = PaginationQuerySchema.extend({
+  status: EwbStatusSchema.optional(),
+  transportMode: EwbTransportModeSchema.optional(),
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+});

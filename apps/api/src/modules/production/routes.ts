@@ -26,13 +26,18 @@ import {
   BomListQuerySchema,
   CreateBomLineSchema,
   CreateBomVersionSchema,
+  CreateEcnSchema,
   CreateProductSchema,
   CreateWorkOrderSchema,
   DeviceInstanceListQuerySchema,
+  EcnListQuerySchema,
+  EcnTransitionSchema,
   ProductFamilySchema,
   ProductListQuerySchema,
+  ProductionReportsQuerySchema,
   UpdateBomLineSchema,
   UpdateBomVersionSchema,
+  UpdateEcnSchema,
   UpdateProductSchema,
   UpdateWorkOrderSchema,
   WorkOrderListQuerySchema,
@@ -44,12 +49,18 @@ import type { ProductsService } from "./products.service.js";
 import type { BomsService } from "./boms.service.js";
 import type { WorkOrdersService } from "./work-orders.service.js";
 import type { DeviceInstancesService } from "./device-instances.service.js";
+import type { MrpService } from "./mrp.service.js";
+import type { ReportsService } from "./reports.service.js";
+import type { EcnsService } from "./ecns.service.js";
 
 export interface RegisterProductionRoutesOptions {
   products: ProductsService;
   boms: BomsService;
   workOrders: WorkOrdersService;
   deviceInstances: DeviceInstancesService;
+  mrp: MrpService;
+  reports: ReportsService;
+  ecns: EcnsService;
   guardInternal: AuthGuardOptions;
   requireFeature: RequireFeature;
 }
@@ -334,6 +345,17 @@ export async function registerProductionRoutes(
     }
   );
 
+  // WIP kanban — every active WO joined with its product master + embedded
+  // stages[] in one round trip. Read-only; the page derives lane assignment
+  // client-side from wo.status.
+  app.get(
+    "/production/wip-board",
+    { preHandler: woRead },
+    async (req, reply) => {
+      return reply.send({ data: await opts.workOrders.listForBoard(req) });
+    }
+  );
+
   app.post(
     "/production/work-orders/:id/stages/:stageId/advance",
     { preHandler: wipAdvance },
@@ -382,6 +404,87 @@ export async function registerProductionRoutes(
     async (req, reply) => {
       const { id } = IdParamSchema.parse(req.params);
       return reply.send(await opts.deviceInstances.getById(req, id));
+    }
+  );
+
+  // ─── MRP ──────────────────────────────────────────────────────────────────
+  // Aggregates open WOs × bom_lines × stock_summary × open POs into a per-item
+  // shortage roll-up. Reuses the work-orders read permission — buyers acting
+  // on shortages already have it.
+
+  app.get(
+    "/production/mrp",
+    { preHandler: woRead },
+    async (req, reply) => {
+      return reply.send({ data: await opts.mrp.list(req) });
+    }
+  );
+
+  // ─── Production reports ───────────────────────────────────────────────────
+  // Date-window throughput / cycle-time / QC pass-rate roll-up. `from`/`to` are
+  // optional ISO dates; service defaults to last 90 days when absent.
+
+  app.get(
+    "/production/reports",
+    { preHandler: woRead },
+    async (req, reply) => {
+      const query = ProductionReportsQuerySchema.parse(req.query);
+      return reply.send(await opts.reports.summary(req, query));
+    }
+  );
+
+  // ─── ECN (Engineering Change Notices) ────────────────────────────────────
+  //
+  // Read endpoints are gated by bom:read (anyone reviewing change requests
+  // already has BOM read). Writes require bom:edit because every approved
+  // ECN ultimately drives a BOM revision. Transitions to APPROVED gate on
+  // bom:activate — same operator who can flip a BOM live should sign off
+  // on the change.
+
+  app.get(
+    "/production/ecns",
+    { preHandler: bomRead },
+    async (req, reply) => {
+      const query = EcnListQuerySchema.parse(req.query);
+      return reply.send(await opts.ecns.list(req, query));
+    }
+  );
+
+  app.get(
+    "/production/ecns/:id",
+    { preHandler: bomRead },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      return reply.send(await opts.ecns.getById(req, id));
+    }
+  );
+
+  app.post(
+    "/production/ecns",
+    { preHandler: bomEdit },
+    async (req, reply) => {
+      const body = CreateEcnSchema.parse(req.body);
+      return reply.code(201).send(await opts.ecns.create(req, body));
+    }
+  );
+
+  app.patch(
+    "/production/ecns/:id",
+    { preHandler: bomEdit },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = UpdateEcnSchema.parse(req.body);
+      return reply.send(await opts.ecns.update(req, id, body));
+    }
+  );
+
+  app.post(
+    "/production/ecns/:id/transition",
+    { preHandler: bomActivate },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = EcnTransitionSchema.parse(req.body);
+      return reply.send(await opts.ecns.transition(req, id, body));
     }
   );
 }

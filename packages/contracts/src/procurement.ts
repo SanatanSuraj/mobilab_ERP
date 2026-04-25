@@ -512,3 +512,49 @@ export const GrnListQuerySchema = PaginationQuerySchema.extend({
   to: z.string().date().optional(),
   search: z.string().trim().min(1).max(200).optional(),
 });
+
+// ─── Procurement reports (date-windowed PO + vendor rollup) ──────────────────
+
+export const ProcurementReportsQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+});
+export type ProcurementReportsQuery = z.infer<
+  typeof ProcurementReportsQuerySchema
+>;
+
+export const ProcurementReportsSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  /** PO throughput across the window (by order_date). */
+  poThroughput: z.object({
+    total: z.number().int().nonnegative(),
+    draft: z.number().int().nonnegative(),
+    pendingApproval: z.number().int().nonnegative(),
+    approved: z.number().int().nonnegative(),
+    sent: z.number().int().nonnegative(),
+    partiallyReceived: z.number().int().nonnegative(),
+    received: z.number().int().nonnegative(),
+    cancelled: z.number().int().nonnegative(),
+    totalSpend: decimalStr,
+    receivedSpend: decimalStr,
+  }),
+  /** GRN posting cadence and on-time delivery (received vs expected). */
+  delivery: z.object({
+    grnsPosted: z.number().int().nonnegative(),
+    onTimePct: z.number(),
+    avgLeadDays: z.number().nullable(),
+    lateGrns: z.number().int().nonnegative(),
+  }),
+  /** Top vendors by spend (POs) in window. */
+  topVendors: z.array(
+    z.object({
+      vendorId: uuid,
+      vendorName: z.string(),
+      vendorCode: z.string(),
+      poCount: z.number().int().nonnegative(),
+      totalSpend: decimalStr,
+    }),
+  ),
+});
+export type ProcurementReports = z.infer<typeof ProcurementReportsSchema>;

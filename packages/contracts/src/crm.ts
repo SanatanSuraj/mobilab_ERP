@@ -738,3 +738,61 @@ export const FinanceApproveSalesOrderSchema = z.object({
 export type FinanceApproveSalesOrder = z.infer<
   typeof FinanceApproveSalesOrderSchema
 >;
+
+// ─── CRM reports ─────────────────────────────────────────────────────────────
+
+export const CrmReportsQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+});
+export type CrmReportsQuery = z.infer<typeof CrmReportsQuerySchema>;
+
+export const CrmReportsSchema = z.object({
+  /** Inclusive window — defaults to last 90 days when caller omits range. */
+  from: z.string(),
+  to: z.string(),
+  /** Pipeline funnel: deals by stage, opened in window. */
+  pipeline: z.object({
+    discovery: z.number().int().nonnegative(),
+    proposal: z.number().int().nonnegative(),
+    negotiation: z.number().int().nonnegative(),
+    closedWon: z.number().int().nonnegative(),
+    closedLost: z.number().int().nonnegative(),
+    /** Σ(value) of deals not in CLOSED_LOST, weighted by probability. */
+    weightedValue: decimalStr,
+    /** Σ(value) across all stages. */
+    totalValue: decimalStr,
+  }),
+  /** Win-rate over deals that closed (WON+LOST) in the window. */
+  winLoss: z.object({
+    won: z.number().int().nonnegative(),
+    lost: z.number().int().nonnegative(),
+    wonValue: decimalStr,
+    lostValue: decimalStr,
+    winRatePct: z.number(),
+    avgDealSizeWon: decimalStr,
+  }),
+  /** Lead funnel: leads created in window, by terminal status. */
+  leads: z.object({
+    total: z.number().int().nonnegative(),
+    new: z.number().int().nonnegative(),
+    contacted: z.number().int().nonnegative(),
+    qualified: z.number().int().nonnegative(),
+    converted: z.number().int().nonnegative(),
+    lost: z.number().int().nonnegative(),
+    conversionRatePct: z.number(),
+  }),
+  /** Top deals by value, scoped to deals opened in window. */
+  topDeals: z.array(
+    z.object({
+      id: z.string().uuid(),
+      dealNumber: z.string(),
+      title: z.string(),
+      company: z.string(),
+      stage: z.string(),
+      value: decimalStr,
+      probability: z.number().int(),
+    }),
+  ),
+});
+export type CrmReports = z.infer<typeof CrmReportsSchema>;

@@ -116,15 +116,6 @@ function deriveNextStatus(line: AssemblyLine, qcResult?: "PASS" | "FAIL"): Devic
   return qcResult === "PASS" ? "SUB_QC_PASS" : "SUB_QC_FAIL";
 }
 
-import {
-  enhancedWorkOrders,
-  boms,
-  ecns,
-  type EnhancedWorkOrder,
-  type BOM,
-  type ECN,
-} from "@/data/manufacturing-mock";
-
 export interface WOFilters {
   status?: string;
   productCode?: string;
@@ -451,40 +442,5 @@ export const mfgService = {
   async getOEERecords(): Promise<OEERecord[]> {
     // API: return fetch('/api/mfg/oee').then(r => r.json())
     return Promise.resolve(oeeRecords);
-  },
-
-  // ── Generic Work Orders (manufacturing-mock) ──────────────────────────────
-
-  async getWorkOrders(filters?: WOFilters): Promise<EnhancedWorkOrder[]> {
-    // API: return fetch(`/api/manufacturing/work-orders?${qs}`).then(r => r.json())
-    let result = [...enhancedWorkOrders];
-    if (filters?.status && filters.status !== "ALL") {
-      result = result.filter((w) => w.status === filters.status);
-    }
-    return Promise.resolve(result);
-  },
-
-  async getWorkOrder(id: string): Promise<EnhancedWorkOrder | null> {
-    // API: return fetch(`/api/manufacturing/work-orders/${id}`).then(r => r.json())
-    return Promise.resolve(enhancedWorkOrders.find((w) => w.id === id) ?? null);
-  },
-
-  // ── BOM ───────────────────────────────────────────────────────────────────
-
-  async getBOMs(): Promise<BOM[]> {
-    // API: return fetch('/api/manufacturing/bom').then(r => r.json())
-    return Promise.resolve(boms);
-  },
-
-  async getBOM(id: string): Promise<BOM | null> {
-    // API: return fetch(`/api/manufacturing/bom/${id}`).then(r => r.json())
-    return Promise.resolve(boms.find((b) => b.id === id) ?? null);
-  },
-
-  // ── ECN ───────────────────────────────────────────────────────────────────
-
-  async getECNs(): Promise<ECN[]> {
-    // API: return fetch('/api/manufacturing/ecn').then(r => r.json())
-    return Promise.resolve(ecns);
   },
 };

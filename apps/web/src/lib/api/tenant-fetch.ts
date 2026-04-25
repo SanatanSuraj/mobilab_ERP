@@ -104,6 +104,13 @@ export function getTenantOrgId(): string | null {
   return decodeJwtClaims(t)?.org ?? null;
 }
 
+/** Read the logged-in user's UUID (JWT `sub`) from the current access token. */
+export function getTenantUserId(): string | null {
+  const t = getTenantAccessToken();
+  if (!t) return null;
+  return decodeJwtClaims(t)?.sub ?? null;
+}
+
 // ─── Core fetch ──────────────────────────────────────────────────────────────
 
 async function parseJsonOrThrow(res: Response): Promise<unknown> {

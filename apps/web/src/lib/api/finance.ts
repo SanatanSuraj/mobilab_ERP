@@ -57,6 +57,12 @@ import type {
   PaymentType,
   CreatePayment,
   VoidPayment,
+  // E-way bills (Phase 5)
+  EwayBill,
+  EwbStatus,
+  EwbTransportMode,
+  // Reports
+  FinanceReports,
 } from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
@@ -410,4 +416,40 @@ export async function apiVoidPayment(
 /** Soft-delete a VOIDED payment. 409 if the payment is still RECORDED. */
 export async function apiDeletePayment(id: string): Promise<void> {
   return tenantDelete(`/finance/payments/${id}`);
+}
+
+// ─── E-Way Bills (Phase 5, read-only) ────────────────────────────────────────
+
+export interface EwayBillListQuery extends PaginationParams {
+  status?: EwbStatus;
+  transportMode?: EwbTransportMode;
+  /** Inclusive. ISO-8601 date (YYYY-MM-DD). Filters on generated_at. */
+  from?: string;
+  to?: string;
+  search?: string;
+}
+
+export async function apiListEwayBills(
+  q: EwayBillListQuery = {},
+): Promise<PaginatedResponse<EwayBill>> {
+  return tenantGet(`/finance/eway-bills${qs(q)}`);
+}
+
+export async function apiGetEwayBill(id: string): Promise<EwayBill> {
+  return tenantGet(`/finance/eway-bills/${id}`);
+}
+
+// ─── Finance reports ────────────────────────────────────────────────────────
+
+export interface FinanceReportsQuery {
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to 90 days ago. */
+  from?: string;
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to today. */
+  to?: string;
+}
+
+export async function apiGetFinanceReports(
+  q: FinanceReportsQuery = {},
+): Promise<FinanceReports> {
+  return tenantGet(`/finance/reports${qs(q)}`);
 }

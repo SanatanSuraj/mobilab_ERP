@@ -1,28 +1,24 @@
 "use client";
 
-// TODO(phase-5): Serial number tracking has no backend routes yet. Expected
-// routes:
-//   GET  /inventory/serials - list serials with item/warehouse/status filters
-//   GET  /inventory/serials/:id - serial detail + movement history
-//   POST /inventory/serials/:id/status - transition serial state
-// Mock imports left in place until the serials slice ships in
-// apps/api/src/modules/inventory.
+/**
+ * Serial Number Register — derives from stock_ledger rows where serial_no
+ * is populated.
+ *
+ * The dedicated `device_instances` table tracks finished devices through
+ * their post-dispatch lifecycle (warranty, RMA, install). Until that
+ * surface ships an HTTP route, the ledger gives us the dispatched-serial
+ * trail we need: every CUSTOMER_ISSUE / WO_OUTPUT row carries serial_no,
+ * which is the unit of audit.
+ *
+ * Reuses useApiStockLedger — no new endpoint.
+ */
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
-import { StatusBadge } from "@/components/shared/status-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -31,85 +27,143 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  invSerials,
-  invItems,
-  warehouses,
-  formatDate,
-  InvSerial,
-} from "@/data/inventory-mock";
+  useApiItems,
+  useApiStockLedger,
+  useApiWarehouses,
+} from "@/hooks/useInventoryApi";
+import type { StockLedgerEntry, StockTxnType } from "@instigenie/contracts";
 import {
-  Factory,
-  Package,
+  Barcode,
+  PackageCheck,
+  Boxes,
   Truck,
-  RotateCcw,
 } from "lucide-react";
 
-// Module-level lookup maps — built once, never recreated
-const itemMap = new Map(invItems.map((i) => [i.id, i]));
-const warehouseMap = new Map(warehouses.map((w) => [w.id, w]));
+function formatDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
 
-const SERIAL_STATUSES = [
-  "All",
-  "CREATED",
-  "IN_PRODUCTION",
-  "QC_HOLD",
-  "FINISHED",
-  "RESERVED",
-  "DISPATCHED",
-  "RETURNED",
-  "SCRAPPED",
-] as const;
+type StatusFilter = "all" | "DISPATCHED" | "IN_STOCK";
 
 export default function SerialsPage() {
-  const [itemFilter, setItemFilter] = useState("All");
-  const [warehouseFilter, setWarehouseFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [detailSerial, setDetailSerial] = useState<InvSerial | null>(null);
+  const itemsQuery = useApiItems({ limit: 200 });
+  const warehousesQuery = useApiWarehouses({ limit: 100 });
+  const [itemId, setItemId] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
-  // KPI counts — single memoised pass, stable across re-renders
-  const kpiCounts = useMemo(
-    () => ({
-      inProduction: invSerials.filter((s) => s.status === "IN_PRODUCTION")
-        .length,
-      finished: invSerials.filter((s) => s.status === "FINISHED").length,
-      dispatched: invSerials.filter((s) => s.status === "DISPATCHED").length,
-      returnedScrap: invSerials.filter(
-        (s) => s.status === "RETURNED" || s.status === "SCRAPPED"
-      ).length,
-    }),
-    []
+  // CUSTOMER_ISSUE = dispatched serials (negative qty).
+  // WO_OUTPUT     = freshly built serials (positive qty, in stock).
+  const dispatchedQuery = useApiStockLedger(
+    useMemo(
+      () => ({
+        limit: 200,
+        sortBy: "postedAt" as const,
+        sortDir: "desc" as const,
+        txnType: "CUSTOMER_ISSUE" as StockTxnType,
+        itemId: itemId === "all" ? undefined : itemId,
+      }),
+      [itemId]
+    )
+  );
+  const builtQuery = useApiStockLedger(
+    useMemo(
+      () => ({
+        limit: 200,
+        sortBy: "postedAt" as const,
+        sortDir: "desc" as const,
+        txnType: "WO_OUTPUT" as StockTxnType,
+        itemId: itemId === "all" ? undefined : itemId,
+      }),
+      [itemId]
+    )
   );
 
-  const filteredSerials = useMemo(() => {
-    return invSerials.filter((s) => {
-      if (itemFilter !== "All" && s.itemId !== itemFilter) return false;
-      if (warehouseFilter !== "All" && s.warehouseId !== warehouseFilter)
-        return false;
-      if (statusFilter !== "All" && s.status !== statusFilter) return false;
-      return true;
-    });
-  }, [itemFilter, warehouseFilter, statusFilter]);
+  if (
+    dispatchedQuery.isLoading ||
+    builtQuery.isLoading ||
+    itemsQuery.isLoading ||
+    warehousesQuery.isLoading
+  ) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+        <PageHeader
+          title="Serial Number Register"
+          description="Track individual instrument serials through their complete lifecycle"
+        />
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
 
-  const columns: Column<InvSerial>[] = useMemo(
-    () => [
+  const dispatched = (dispatchedQuery.data?.data ?? []).filter(
+    (r) => r.serialNo
+  );
+  const built = (builtQuery.data?.data ?? []).filter((r) => r.serialNo);
+
+  // De-dupe by serial_no — a serial may be built (WO_OUTPUT) AND dispatched
+  // (CUSTOMER_ISSUE). The dispatched row is the authoritative latest state.
+  const dispatchedSerials = new Set(dispatched.map((r) => r.serialNo!));
+  const inStock = built.filter((r) => !dispatchedSerials.has(r.serialNo!));
+
+  const allRows = [
+    ...dispatched.map((r) => ({ row: r, status: "DISPATCHED" as const })),
+    ...inStock.map((r) => ({ row: r, status: "IN_STOCK" as const })),
+  ].sort(
+    (a, b) =>
+      new Date(b.row.postedAt).getTime() - new Date(a.row.postedAt).getTime()
+  );
+
+  const rows =
+    statusFilter === "all"
+      ? allRows
+      : allRows.filter((r) => r.status === statusFilter);
+
+  const items = itemsQuery.data?.data ?? [];
+  const warehouses = warehousesQuery.data?.data ?? [];
+  const itemById = new Map(items.map((i) => [i.id, i]));
+  const warehouseById = new Map(warehouses.map((w) => [w.id, w]));
+  const serialisedItems = items.filter((i) => i.isSerialised);
+
+  const totalSerials = allRows.length;
+  const dispatchedCount = dispatched.length;
+  const inStockCount = inStock.length;
+  const itemsWithSerials = new Set(allRows.map((r) => r.row.itemId)).size;
+
+  type Row = (typeof allRows)[number];
+  const columns: Column<Row>[] = [
     {
-      key: "serialNumber",
-      header: "Serial Number",
-      sortable: true,
-      render: (s) => (
-        <span className="font-mono text-xs font-bold">{s.serialNumber}</span>
+      key: "serial",
+      header: "Serial #",
+      render: ({ row }) => (
+        <span className="font-mono text-xs font-bold">{row.serialNo}</span>
       ),
     },
     {
-      key: "itemId",
+      key: "item",
       header: "Item",
-      render: (s) => {
-        const item = itemMap.get(s.itemId);
+      render: ({ row }) => {
+        const item = itemById.get(row.itemId);
         return (
           <div>
-            <p className="text-sm font-medium">{item?.name ?? s.itemId}</p>
-            <p className="text-xs font-mono text-muted-foreground">
-              {item?.itemCode}
+            <p className="text-sm leading-tight">
+              {item?.name ?? row.itemId.slice(0, 8)}
+            </p>
+            <p className="font-mono text-xs text-muted-foreground">
+              {item?.sku ?? "—"}
             </p>
           </div>
         );
@@ -118,331 +172,123 @@ export default function SerialsPage() {
     {
       key: "status",
       header: "Status",
-      render: (s) => <StatusBadge status={s.status} />,
+      render: ({ status }) => (
+        <Badge
+          variant="outline"
+          className={`text-xs ${
+            status === "DISPATCHED"
+              ? "bg-blue-50 text-blue-700 border-blue-200"
+              : "bg-green-50 text-green-700 border-green-200"
+          }`}
+        >
+          {status === "DISPATCHED" ? "Dispatched" : "In Stock"}
+        </Badge>
+      ),
     },
     {
-      key: "warehouseId",
+      key: "warehouse",
       header: "Warehouse",
-      render: (s) => (
-        <span className="text-sm">
-          {warehouseMap.get(s.warehouseId)?.name ?? s.warehouseId}
+      render: ({ row }) => {
+        const wh = warehouseById.get(row.warehouseId);
+        return (
+          <span className="text-xs text-muted-foreground">
+            {wh ? wh.code : row.warehouseId.slice(0, 8)}
+          </span>
+        );
+      },
+    },
+    {
+      key: "destination",
+      header: "Destination / Reason",
+      render: ({ row }) => (
+        <span className="text-xs text-muted-foreground line-clamp-2">
+          {row.reason ?? "—"}
         </span>
       ),
     },
     {
-      key: "workOrderId",
-      header: "Work Order",
-      render: (s) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {s.workOrderId ?? "—"}
+      key: "postedAt",
+      header: "Date",
+      render: ({ row }) => (
+        <span className="text-xs text-muted-foreground">
+          {formatDate(row.postedAt)}
         </span>
       ),
     },
-    {
-      key: "components",
-      header: "Component Links",
-      render: (s) => (
-        <div className="flex flex-wrap gap-1">
-          {s.pcbId && (
-            <span className="font-mono text-[10px] bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5">
-              PCB: {s.pcbId}
-            </span>
-          )}
-          {s.mechId && (
-            <span className="font-mono text-[10px] bg-purple-50 text-purple-700 border border-purple-200 rounded px-1.5 py-0.5">
-              M: {s.mechId}
-            </span>
-          )}
-          {s.sensorId && (
-            <span className="font-mono text-[10px] bg-green-50 text-green-700 border border-green-200 rounded px-1.5 py-0.5">
-              S: {s.sensorId}
-            </span>
-          )}
-          {!s.pcbId && !s.mechId && !s.sensorId && (
-            <span className="text-xs text-muted-foreground">—</span>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: "accountName",
-      header: "Account",
-      render: (s) => (
-        <span className="text-sm text-muted-foreground">
-          {s.accountName ?? "—"}
-        </span>
-      ),
-    },
-    {
-      key: "manufacturedDate",
-      header: "Manufactured",
-      render: (s) => (
-        <span className="text-sm text-muted-foreground">
-          {s.manufacturedDate ? formatDate(s.manufacturedDate) : "—"}
-        </span>
-      ),
-    },
-    {
-      key: "dispatchedDate",
-      header: "Dispatched",
-      render: (s) => (
-        <span className="text-sm text-muted-foreground">
-          {s.dispatchedDate ? formatDate(s.dispatchedDate) : "—"}
-        </span>
-      ),
-    },
-    {
-      key: "qcCertUrl",
-      header: "QC Cert",
-      render: (s) =>
-        s.qcCertUrl ? (
-          <Badge
-            variant="outline"
-            className="bg-blue-50 text-blue-700 border-blue-200 text-xs cursor-pointer"
-          >
-            View Cert
-          </Badge>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        ),
-    },
-  ],
-    []
-  );
+  ];
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
+    <div className="p-6 max-w-[1400px] mx-auto space-y-6">
       <PageHeader
         title="Serial Number Register"
         description="Track individual instrument serials through their complete lifecycle"
       />
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
-          title="In Production"
-          value={String(kpiCounts.inProduction)}
-          icon={Factory}
+          title="Total Serials"
+          value={String(totalSerials)}
+          icon={Barcode}
           iconColor="text-blue-600"
         />
         <KPICard
-          title="Finished (In Stock)"
-          value={String(kpiCounts.finished)}
-          icon={Package}
+          title="Dispatched"
+          value={String(dispatchedCount)}
+          icon={Truck}
+          iconColor="text-amber-600"
+        />
+        <KPICard
+          title="In Stock"
+          value={String(inStockCount)}
+          icon={PackageCheck}
           iconColor="text-green-600"
         />
         <KPICard
-          title="Dispatched"
-          value={String(kpiCounts.dispatched)}
-          icon={Truck}
-          iconColor="text-indigo-600"
-        />
-        <KPICard
-          title="Returned / Scrapped"
-          value={String(kpiCounts.returnedScrap)}
-          icon={RotateCcw}
-          iconColor="text-orange-600"
+          title="Serialised SKUs"
+          value={String(itemsWithSerials)}
+          icon={Boxes}
+          iconColor="text-purple-600"
         />
       </div>
 
-      {/* Filter Bar */}
-      <div className="flex flex-wrap gap-3 mb-4">
-        <Select
-          value={itemFilter}
-          onValueChange={(v) => setItemFilter(v ?? "All")}
-        >
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder="Item" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="All">All Items</SelectItem>
-            {invItems
-              .filter((i) => i.trackingType === "SERIAL")
-              .map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.name}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={warehouseFilter}
-          onValueChange={(v) => setWarehouseFilter(v ?? "All")}
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Warehouse" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="All">All Warehouses</SelectItem>
-            {warehouses.map((wh) => (
-              <SelectItem key={wh.id} value={wh.id}>
-                {wh.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v ?? "All")}
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            {SERIAL_STATUSES.map((s) => (
-              <SelectItem key={s} value={s}>
-                {s === "All"
-                  ? "All Statuses"
-                  : s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <DataTable<InvSerial>
-        data={filteredSerials}
+      <DataTable<Row>
+        data={rows}
         columns={columns}
-        searchKey="serialNumber"
-        searchPlaceholder="Search by serial number..."
-        onRowClick={(s) => setDetailSerial(s)}
+        searchPlaceholder="Search serial / reason..."
+        pageSize={15}
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select
+              value={statusFilter}
+              onValueChange={(v) =>
+                setStatusFilter((v ?? "all") as StatusFilter)
+              }
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="DISPATCHED">Dispatched</SelectItem>
+                <SelectItem value="IN_STOCK">In Stock</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={itemId} onValueChange={(v) => setItemId(v ?? "all")}>
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Item" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Serialised Items</SelectItem>
+                {serialisedItems.map((i) => (
+                  <SelectItem key={i.id} value={i.id}>
+                    {i.sku} — {i.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        }
       />
-
-      {/* Detail Dialog */}
-      <Dialog
-        open={!!detailSerial}
-        onOpenChange={(open) => !open && setDetailSerial(null)}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-mono">
-              {detailSerial?.serialNumber}
-            </DialogTitle>
-          </DialogHeader>
-          {detailSerial && (
-            <div className="space-y-4">
-              {/* Item info */}
-              <div>
-                <p className="text-xs text-muted-foreground mb-1 font-medium uppercase tracking-wide">
-                  Item
-                </p>
-                <p className="font-semibold">
-                  {itemMap.get(detailSerial.itemId)?.name}
-                </p>
-                <p className="text-xs font-mono text-muted-foreground">
-                  {itemMap.get(detailSerial.itemId)?.itemCode}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Status:</span>{" "}
-                  <StatusBadge status={detailSerial.status} />
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Warehouse:</span>{" "}
-                  <span className="font-medium">
-                    {warehouseMap.get(detailSerial.warehouseId)?.name}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Work Order:</span>{" "}
-                  <span className="font-mono text-xs">
-                    {detailSerial.workOrderId ?? "—"}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Account:</span>{" "}
-                  <span className="font-medium">
-                    {detailSerial.accountName ?? "—"}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Manufactured:</span>{" "}
-                  <span className="font-medium">
-                    {detailSerial.manufacturedDate
-                      ? formatDate(detailSerial.manufacturedDate)
-                      : "—"}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Dispatched:</span>{" "}
-                  <span className="font-medium">
-                    {detailSerial.dispatchedDate
-                      ? formatDate(detailSerial.dispatchedDate)
-                      : "—"}
-                  </span>
-                </div>
-                {detailSerial.deliveryChallanId && (
-                  <div>
-                    <span className="text-muted-foreground">
-                      Delivery Challan:
-                    </span>{" "}
-                    <span className="font-mono text-xs">
-                      {detailSerial.deliveryChallanId}
-                    </span>
-                  </div>
-                )}
-                {detailSerial.qcCertUrl && (
-                  <div>
-                    <span className="text-muted-foreground">QC Cert:</span>{" "}
-                    <Badge
-                      variant="outline"
-                      className="bg-blue-50 text-blue-700 border-blue-200 text-xs ml-1"
-                    >
-                      {detailSerial.qcCertUrl}
-                    </Badge>
-                  </div>
-                )}
-              </div>
-
-              {/* Component Traceability */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">
-                    Component Traceability
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="text-center p-3 rounded-lg bg-blue-50 border border-blue-100">
-                      <p className="text-xs text-blue-600 font-medium mb-1">
-                        PCB ID
-                      </p>
-                      <p className="text-xs font-mono font-bold text-blue-800">
-                        {detailSerial.pcbId ?? "—"}
-                      </p>
-                    </div>
-                    <div className="text-center p-3 rounded-lg bg-purple-50 border border-purple-100">
-                      <p className="text-xs text-purple-600 font-medium mb-1">
-                        Mech ID
-                      </p>
-                      <p className="text-xs font-mono font-bold text-purple-800">
-                        {detailSerial.mechId ?? "—"}
-                      </p>
-                    </div>
-                    <div className="text-center p-3 rounded-lg bg-green-50 border border-green-100">
-                      <p className="text-xs text-green-600 font-medium mb-1">
-                        Sensor ID
-                      </p>
-                      <p className="text-xs font-mono font-bold text-green-800">
-                        {detailSerial.sensorId ?? "—"}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDetailSerial(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

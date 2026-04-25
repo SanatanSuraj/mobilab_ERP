@@ -47,8 +47,18 @@ import type {
   // Certs
   QcCert,
   IssueQcCert,
+  // Equipment + CAPA (Phase 5)
+  QcEquipment,
+  QcEquipmentCategory,
+  QcEquipmentStatus,
+  QcCapaAction,
+  CapaSourceType,
+  CapaSeverity,
+  CapaStatus,
   // Shared
   ProductFamily,
+  // Reports
+  QcReports,
 } from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
@@ -333,4 +343,56 @@ export async function apiIssueQcCert(body: IssueQcCert): Promise<QcCert> {
 /** Soft-delete ("recall") a certificate. Admin action. */
 export async function apiRecallQcCert(id: string): Promise<void> {
   return tenantDelete(`/qc/certs/${id}`);
+}
+
+// ─── QC Equipment (Phase 5, read-only) ───────────────────────────────────────
+
+export interface QcEquipmentListQuery extends PaginationParams {
+  category?: QcEquipmentCategory;
+  status?: QcEquipmentStatus;
+  search?: string;
+}
+
+export async function apiListQcEquipment(
+  q: QcEquipmentListQuery = {}
+): Promise<PaginatedResponse<QcEquipment>> {
+  return tenantGet(`/qc/equipment${qs(q)}`);
+}
+
+export async function apiGetQcEquipment(id: string): Promise<QcEquipment> {
+  return tenantGet(`/qc/equipment/${id}`);
+}
+
+// ─── QC CAPA Actions (Phase 5, read-only) ────────────────────────────────────
+
+export interface QcCapaActionListQuery extends PaginationParams {
+  status?: CapaStatus;
+  severity?: CapaSeverity;
+  sourceType?: CapaSourceType;
+  search?: string;
+}
+
+export async function apiListQcCapaActions(
+  q: QcCapaActionListQuery = {}
+): Promise<PaginatedResponse<QcCapaAction>> {
+  return tenantGet(`/qc/capa-actions${qs(q)}`);
+}
+
+export async function apiGetQcCapaAction(id: string): Promise<QcCapaAction> {
+  return tenantGet(`/qc/capa-actions/${id}`);
+}
+
+// ─── QC reports ─────────────────────────────────────────────────────────────
+
+export interface QcReportsQuery {
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to 90 days ago. */
+  from?: string;
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to today. */
+  to?: string;
+}
+
+export async function apiGetQcReports(
+  q: QcReportsQuery = {}
+): Promise<QcReports> {
+  return tenantGet(`/qc/reports${qs(q)}`);
 }

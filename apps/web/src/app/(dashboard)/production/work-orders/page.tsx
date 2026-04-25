@@ -3,21 +3,15 @@
 /**
  * Work Orders — reads /production/work-orders via useApiWorkOrders.
  *
- * Contract deltas vs the older manufacturing-mock prototype:
- *   - Status vocabulary: PLANNED / MATERIAL_CHECK / IN_PROGRESS / QC_HOLD /
- *     REWORK / COMPLETED / CANCELLED (matches DB CHECK constraint).
- *   - quantity is a decimal string ("5.000"). Priority is LOW/NORMAL/HIGH/
- *     CRITICAL.
- *   - Every WO is anchored to a product (productId) + BOM (bomId) — we
- *     resolve product details via useApiProducts for display.
- *   - PIDs are server-generated as PID-YYYY-NNNN when the `pid` field is
- *     omitted; the list dialog always omits it.
- *   - Device serials, lot number, deviceSerials[], currentStageIndex,
- *     reworkCount — all server-maintained. MRP lines, component
- *     assignments, stage notes were prototype-only and live in Phase 3.
+ * The list endpoint joins products + embeds wip_stages, so each row carries
+ * `productName`/`productCode`/`productFamily`/`stages[]` directly — no second
+ * lookup needed to render. `useApiProducts` is still loaded for the create
+ * dialog and the product-filter dropdown (those need the full catalogue).
  *
- * Clicking a row routes to /production/work-orders/:id (detail page with
- * WIP stage tracker + stage-advance actions).
+ * Status vocabulary: PLANNED / MATERIAL_CHECK / IN_PROGRESS / QC_HOLD /
+ * REWORK / COMPLETED / CANCELLED. Priority: LOW / NORMAL / HIGH / CRITICAL.
+ * PIDs are server-generated as PID-YYYY-NNNN when omitted from the create
+ * payload. Clicking a row routes to /production/work-orders/:id.
  */
 
 import { useMemo, useState } from "react";
@@ -55,7 +49,7 @@ import {
   WO_STATUSES,
   type WoPriority,
   type WoStatus,
-  type WorkOrder,
+  type WorkOrderListItem,
 } from "@instigenie/contracts";
 import {
   AlertCircle,
@@ -96,7 +90,7 @@ const WO_PRIORITY_TONE: Record<WoPriority, string> = {
   CRITICAL: "bg-red-50 text-red-700 border-red-200",
 };
 
-function isOverdue(wo: WorkOrder): boolean {
+function isOverdue(wo: WorkOrderListItem): boolean {
   if (!wo.targetDate) return false;
   if (wo.status === "COMPLETED" || wo.status === "CANCELLED") return false;
   const target = new Date(wo.targetDate).getTime();
@@ -191,7 +185,7 @@ export default function WorkOrdersPage() {
   const completed = wos.filter((w) => w.status === "COMPLETED").length;
   const overdue = wos.filter(isOverdue).length;
 
-  const columns: Column<WorkOrder>[] = [
+  const columns: Column<WorkOrderListItem>[] = [
     {
       key: "pid",
       header: "PID",
@@ -202,30 +196,19 @@ export default function WorkOrdersPage() {
       ),
     },
     {
-      key: "productId",
+      key: "productName",
       header: "Product",
-      render: (w) => {
-        const product = products.find((p) => p.id === w.productId);
-        return (
-          <div className="space-y-0.5">
-            <div className="text-sm font-medium">
-              {product?.name ?? (
-                <span className="font-mono text-xs text-muted-foreground">
-                  {w.productId.slice(0, 8)}…
-                </span>
-              )}
-            </div>
-            {product && (
-              <Badge
-                variant="outline"
-                className="text-[10px] text-muted-foreground"
-              >
-                {product.family.replace(/_/g, " ")}
-              </Badge>
-            )}
-          </div>
-        );
-      },
+      render: (w) => (
+        <div className="space-y-0.5">
+          <div className="text-sm font-medium">{w.productName}</div>
+          <Badge
+            variant="outline"
+            className="text-[10px] text-muted-foreground font-mono"
+          >
+            {w.productCode}
+          </Badge>
+        </div>
+      ),
     },
     {
       key: "bomVersionLabel",
@@ -300,11 +283,23 @@ export default function WorkOrdersPage() {
     {
       key: "currentStageIndex",
       header: "Stage",
-      render: (w) => (
-        <span className="text-xs text-muted-foreground tabular-nums">
-          #{w.currentStageIndex + 1}
-        </span>
-      ),
+      render: (w) => {
+        const total = w.stages.length;
+        const completed = w.stages.filter((s) => s.status === "COMPLETED").length;
+        const current = w.stages[w.currentStageIndex];
+        return (
+          <div className="space-y-0.5">
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {completed}/{total || "?"}
+            </span>
+            {current && (
+              <div className="text-[10px] text-muted-foreground/80 truncate max-w-[120px]">
+                {current.stageName}
+              </div>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -381,7 +376,7 @@ export default function WorkOrdersPage() {
         />
       </div>
 
-      <DataTable<WorkOrder>
+      <DataTable<WorkOrderListItem>
         data={wos}
         columns={columns}
         searchKey="pid"

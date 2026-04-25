@@ -36,6 +36,8 @@ import type {
   // Stock summary
   StockSummary,
   StockSummaryRow,
+  // Reports
+  InventoryReports,
 } from "@instigenie/contracts";
 
 import type { PaginatedResponse, PaginationParams } from "./crm";
@@ -217,4 +219,19 @@ export async function apiGetStockForItemAtWarehouse(
   warehouseId: string
 ): Promise<StockSummary> {
   return tenantGet(`/inventory/stock/summary/${itemId}/${warehouseId}`);
+}
+
+// ─── Inventory reports ──────────────────────────────────────────────────────
+
+export interface InventoryReportsQuery {
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to 90 days ago. */
+  from?: string;
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to today. */
+  to?: string;
+}
+
+export async function apiGetInventoryReports(
+  q: InventoryReportsQuery = {}
+): Promise<InventoryReports> {
+  return tenantGet(`/inventory/reports${qs(q)}`);
 }

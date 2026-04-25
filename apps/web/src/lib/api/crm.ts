@@ -58,6 +58,8 @@ import type {
   UpdateSalesOrder,
   TransitionSalesOrderStatus,
   FinanceApproveSalesOrder,
+  // Reports
+  CrmReports,
 } from "@instigenie/contracts";
 
 import {
@@ -484,4 +486,19 @@ export async function apiFinanceApproveSalesOrder(
   body: FinanceApproveSalesOrder
 ): Promise<SalesOrder> {
   return tenantPost(`/crm/sales-orders/${id}/finance-approve`, body);
+}
+
+// ─── CRM reports ────────────────────────────────────────────────────────────
+
+export interface CrmReportsQuery {
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to 90 days ago. */
+  from?: string;
+  /** Inclusive ISO-8601 date (YYYY-MM-DD). Defaults to today. */
+  to?: string;
+}
+
+export async function apiGetCrmReports(
+  q: CrmReportsQuery = {}
+): Promise<CrmReports> {
+  return tenantGet(`/crm/reports${qs(q)}`);
 }

@@ -30,6 +30,7 @@ import {
   ConsumeReservationRequestSchema,
   CreateItemSchema,
   CreateWarehouseSchema,
+  InventoryReportsQuerySchema,
   ItemListQuerySchema,
   ItemWarehouseBindingListQuerySchema,
   PostStockLedgerEntrySchema,
@@ -51,6 +52,7 @@ import type { ItemsService } from "./items.service.js";
 import type { WarehousesService } from "./warehouses.service.js";
 import type { StockService } from "./stock.service.js";
 import type { ReservationsService } from "./reservations.service.js";
+import type { InventoryReportsService } from "./reports.service.js";
 import { UnauthorizedError } from "@instigenie/errors";
 import { requireUser } from "../../context/request-context.js";
 
@@ -59,6 +61,7 @@ export interface RegisterInventoryRoutesOptions {
   warehouses: WarehousesService;
   stock: StockService;
   reservations: ReservationsService;
+  reports: InventoryReportsService;
   guardInternal: AuthGuardOptions;
   requireFeature: RequireFeature;
 }
@@ -533,6 +536,25 @@ export async function registerInventoryRoutes(
       const body = ConsumeReservationRequestSchema.parse(req.body ?? {});
       const result = await opts.reservations.consume(req, id, body);
       return reply.code(201).send(result);
+    }
+  );
+
+  // ─── Inventory reports ─────────────────────────────────────────────────────
+  // Current valuation + date-windowed movement + top movers. `from`/`to`
+  // optional — service defaults to last 90 days when absent.
+
+  app.get(
+    "/inventory/reports",
+    {
+      preHandler: [
+        authGuard,
+        requireInventoryModule,
+        requirePermission("inventory:read"),
+      ],
+    },
+    async (req, reply) => {
+      const query = InventoryReportsQuerySchema.parse(req.query);
+      return reply.send(await opts.reports.summary(req, query));
     }
   );
 }

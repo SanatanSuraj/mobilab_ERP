@@ -1,296 +1,422 @@
 "use client";
 
-// TODO(phase-5): Financial reports (P&L, ageing) have no dedicated backend
-// aggregation yet. useApiSalesInvoices / useApiPurchaseInvoices /
-// useApiCustomerLedger / useApiVendorLedger exist, but ageing / P&L must be
-// computed server-side for correctness. Expected routes:
-//   GET /finance/reports/pl?from=&to=
-//   GET /finance/reports/receivables-ageing?asOf=
-//   GET /finance/reports/payables-ageing?asOf=
-// Mock imports left in place until the reporting slice ships in
-// apps/api/src/modules/finance.
+/**
+ * Finance reports.
+ *
+ * Server returns a single rollup keyed on a date window (defaults to last
+ * 90d when from/to omitted). All math is server-side; the page is a KPI +
+ * AR/AP ageing + top-customers layout with date pickers.
+ */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";
+import { DataTable, Column } from "@/components/shared/data-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { TrendingUp, Clock, AlertCircle, IndianRupee, Building2 } from "lucide-react";
-import { StatusBadge } from "@/components/shared/status-badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useApiFinanceReports } from "@/hooks/useFinanceApi";
+import type { FinanceReports } from "@instigenie/contracts";
 import {
-  getReceivablesAgeing,
-  getPayablesAgeing,
-  salesInvoices,
-  purchaseInvoices,
-  getFinCustomerById,
-  getVendorById,
-} from "@/data/finance-mock";
-import { formatCurrency } from "@/data/mock";
+  AlertCircle,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Building2,
+  Clock,
+  IndianRupee,
+  Loader2,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
 
-interface PLRow {
-  label: string;
-  amount: number;
-  isHeader?: boolean;
-  isBold?: boolean;
-  indent?: boolean;
+type CustomerRow = FinanceReports["topCustomers"][number];
+
+function fmtMoney(s: string): string {
+  const n = Number(s);
+  if (!Number.isFinite(n)) return s;
+  return n.toLocaleString("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  });
 }
 
-export default function FinancialReportsPage() {
-  // P&L mock data derived from invoices
-  const plData = useMemo((): PLRow[] => {
-    const revenue = salesInvoices.reduce((sum, si) => sum + si.subtotal, 0);
-    const cogs = Math.round(revenue * 0.45);
-    const grossProfit = revenue - cogs;
-    const salaries = 480000;
-    const rent = 120000;
-    const utilities = 35000;
-    const marketing = 65000;
-    const depreciation = 42000;
-    const totalOpex = salaries + rent + utilities + marketing + depreciation;
-    const operatingProfit = grossProfit - totalOpex;
-    const otherIncome = 18500;
-    const pbt = operatingProfit + otherIncome;
-    const tax = Math.round(pbt * 0.25);
-    const pat = pbt - tax;
+function fmtPct(n: number): string {
+  return `${n.toFixed(1)}%`;
+}
 
-    return [
-      { label: "Revenue", amount: 0, isHeader: true },
-      { label: "Sales Revenue", amount: revenue, indent: true },
-      { label: "Total Revenue", amount: revenue, isBold: true },
-      { label: "", amount: 0 },
-      { label: "Cost of Goods Sold", amount: 0, isHeader: true },
-      { label: "Material & Manufacturing Costs", amount: cogs, indent: true },
-      { label: "Total COGS", amount: cogs, isBold: true },
-      { label: "", amount: 0 },
-      { label: "Gross Profit", amount: grossProfit, isBold: true },
-      { label: "", amount: 0 },
-      { label: "Operating Expenses", amount: 0, isHeader: true },
-      { label: "Salaries & Wages", amount: salaries, indent: true },
-      { label: "Rent & Facilities", amount: rent, indent: true },
-      { label: "Utilities", amount: utilities, indent: true },
-      { label: "Marketing & Sales", amount: marketing, indent: true },
-      { label: "Depreciation", amount: depreciation, indent: true },
-      { label: "Total Operating Expenses", amount: totalOpex, isBold: true },
-      { label: "", amount: 0 },
-      { label: "Operating Profit (EBIT)", amount: operatingProfit, isBold: true },
-      { label: "", amount: 0 },
-      { label: "Other Income", amount: otherIncome, indent: true },
-      { label: "", amount: 0 },
-      { label: "Profit Before Tax (PBT)", amount: pbt, isBold: true },
-      { label: "Income Tax (25%)", amount: tax, indent: true },
-      { label: "", amount: 0 },
-      { label: "Profit After Tax (PAT)", amount: pat, isBold: true },
-    ];
-  }, []);
+export default function FinanceReportsPage() {
+  const today = new Date().toISOString().slice(0, 10);
+  const ninetyAgo = new Date(Date.now() - 90 * 86400000)
+    .toISOString()
+    .slice(0, 10);
 
-  const receivablesAgeing = useMemo(() => getReceivablesAgeing(), []);
-  const payablesAgeing = useMemo(() => getPayablesAgeing(), []);
+  const [fromInput, setFromInput] = useState(ninetyAgo);
+  const [toInput, setToInput] = useState(today);
+  const [committed, setCommitted] = useState<{
+    from: string;
+    to: string;
+  }>({ from: ninetyAgo, to: today });
 
-  // Outstanding invoices grouped by customer
-  const receivablesBreakdown = useMemo(() => {
-    const outstanding = salesInvoices.filter(
-      (si) => si.status !== "paid" && si.status !== "cancelled"
+  const query = useApiFinanceReports(committed);
+  const data = query.data;
+
+  const dirty = fromInput !== committed.from || toInput !== committed.to;
+
+  function apply() {
+    setCommitted({ from: fromInput, to: toInput });
+  }
+
+  function reset() {
+    setFromInput(ninetyAgo);
+    setToInput(today);
+    setCommitted({ from: ninetyAgo, to: today });
+  }
+
+  const customerColumns: Column<CustomerRow>[] = useMemo(
+    () => [
+      {
+        key: "customerName",
+        header: "Customer",
+        render: (r) => (
+          <span className="text-sm font-medium">{r.customerName}</span>
+        ),
+      },
+      {
+        key: "invoiceCount",
+        header: "Invoices",
+        className: "text-right",
+        render: (r) => (
+          <span className="tabular-nums text-sm">{r.invoiceCount}</span>
+        ),
+      },
+      {
+        key: "invoicedTotal",
+        header: "Invoiced",
+        className: "text-right",
+        render: (r) => (
+          <span className="tabular-nums text-sm font-semibold">
+            {fmtMoney(r.invoicedTotal)}
+          </span>
+        ),
+      },
+      {
+        key: "paidTotal",
+        header: "Paid",
+        className: "text-right",
+        render: (r) => (
+          <span className="tabular-nums text-sm text-muted-foreground">
+            {fmtMoney(r.paidTotal)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  if (query.isLoading && !data) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+        <PageHeader
+          title="Financial Reports"
+          description="P&L summary, AR/AP ageing, and top customers"
+        />
+        <Skeleton className="h-20" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-64" />
+      </div>
     );
-    const grouped: Record<string, { customer: string; invoices: typeof outstanding }> = {};
-    outstanding.forEach((si) => {
-      const cust = getFinCustomerById(si.customerId);
-      const name = cust?.name ?? "Unknown";
-      if (!grouped[si.customerId]) {
-        grouped[si.customerId] = { customer: name, invoices: [] };
-      }
-      grouped[si.customerId].invoices.push(si);
-    });
-    return Object.values(grouped);
-  }, []);
+  }
 
-  // Outstanding purchase invoices grouped by vendor
-  const payablesBreakdown = useMemo(() => {
-    const outstanding = purchaseInvoices.filter((pi) => pi.status !== "paid");
-    const grouped: Record<string, { vendor: string; invoices: typeof outstanding }> = {};
-    outstanding.forEach((pi) => {
-      const vend = getVendorById(pi.vendorId);
-      const name = vend?.name ?? "Unknown";
-      if (!grouped[pi.vendorId]) {
-        grouped[pi.vendorId] = { vendor: name, invoices: [] };
-      }
-      grouped[pi.vendorId].invoices.push(pi);
-    });
-    return Object.values(grouped);
-  }, []);
-
-  const ageingIcons = [Clock, AlertCircle, AlertCircle, AlertCircle];
+  if (query.isError || !data) {
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+        <PageHeader
+          title="Financial Reports"
+          description="P&L summary, AR/AP ageing, and top customers"
+        />
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-red-600">
+            Failed to load finance reports.{" "}
+            {query.error ? String(query.error) : ""}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
       <PageHeader
         title="Financial Reports"
-        description="Profit & Loss, Receivables Ageing, and Payables Ageing"
+        description="P&L summary, AR/AP ageing, and top customers"
       />
 
-      <Tabs defaultValue="pl">
-        <TabsList>
-          <TabsTrigger value="pl">P&L Statement</TabsTrigger>
-          <TabsTrigger value="receivables">Receivables Ageing</TabsTrigger>
-          <TabsTrigger value="payables">Payables Ageing</TabsTrigger>
-        </TabsList>
-
-        {/* P&L Tab */}
-        <TabsContent value="pl" className="mt-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Profit & Loss Statement</CardTitle>
-              <p className="text-xs text-muted-foreground">For the period Jan 2026 - Feb 2026</p>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableHead>Particulars</TableHead>
-                    <TableHead className="text-right w-[180px]">Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {plData.map((row, idx) => {
-                    if (row.label === "" && row.amount === 0) {
-                      return (
-                        <TableRow key={idx} className="hover:bg-transparent">
-                          <TableCell colSpan={2} className="py-1" />
-                        </TableRow>
-                      );
-                    }
-                    return (
-                      <TableRow
-                        key={idx}
-                        className={row.isBold ? "bg-muted/20 hover:bg-muted/30" : ""}
-                      >
-                        <TableCell
-                          className={`text-sm ${row.isHeader ? "font-semibold text-muted-foreground uppercase text-xs tracking-wide" : ""} ${row.isBold ? "font-semibold" : ""} ${row.indent ? "pl-8" : ""}`}
-                        >
-                          {row.label}
-                        </TableCell>
-                        <TableCell className={`text-right text-sm ${row.isBold ? "font-semibold" : ""} ${row.isHeader ? "" : ""}`}>
-                          {row.isHeader ? "" : formatCurrency(row.amount)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Receivables Ageing Tab */}
-        <TabsContent value="receivables" className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {receivablesAgeing.map((bucket, idx) => (
-              <KPICard
-                key={bucket.label}
-                title={`${bucket.label} (${bucket.range})`}
-                value={formatCurrency(bucket.amount)}
-                change={`${bucket.count} invoice${bucket.count !== 1 ? "s" : ""}`}
-                trend="neutral"
-                icon={ageingIcons[idx]}
+      {/* Date range */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-end gap-4 flex-wrap">
+            <div className="space-y-1.5">
+              <Label className="text-xs">From</Label>
+              <Input
+                type="date"
+                value={fromInput}
+                onChange={(e) => setFromInput(e.target.value)}
+                className="w-44"
+                max={toInput}
               />
-            ))}
-          </div>
-
-          {receivablesBreakdown.map((group) => (
-            <Card key={group.customer}>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-muted-foreground" />
-                  {group.customer}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableHead>Invoice No.</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Due Date</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                      <TableHead className="text-right">Paid</TableHead>
-                      <TableHead className="text-right">Outstanding</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {group.invoices.map((inv) => (
-                      <TableRow key={inv.id}>
-                        <TableCell className="text-sm font-mono">{inv.invoiceNumber}</TableCell>
-                        <TableCell className="text-sm">{inv.invoiceDate}</TableCell>
-                        <TableCell className="text-sm">{inv.dueDate}</TableCell>
-                        <TableCell><StatusBadge status={inv.status} /></TableCell>
-                        <TableCell className="text-right text-sm">{formatCurrency(inv.grandTotal)}</TableCell>
-                        <TableCell className="text-right text-sm">{formatCurrency(inv.paidAmount)}</TableCell>
-                        <TableCell className="text-right text-sm font-medium">
-                          {formatCurrency(inv.grandTotal - inv.paidAmount)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          ))}
-        </TabsContent>
-
-        {/* Payables Ageing Tab */}
-        <TabsContent value="payables" className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {payablesAgeing.map((bucket, idx) => (
-              <KPICard
-                key={bucket.label}
-                title={`${bucket.label} (${bucket.range})`}
-                value={formatCurrency(bucket.amount)}
-                change={`${bucket.count} invoice${bucket.count !== 1 ? "s" : ""}`}
-                trend="neutral"
-                icon={ageingIcons[idx]}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">To</Label>
+              <Input
+                type="date"
+                value={toInput}
+                onChange={(e) => setToInput(e.target.value)}
+                className="w-44"
+                min={fromInput}
+                max={today}
               />
-            ))}
+            </div>
+            <Button onClick={apply} disabled={!dirty}>
+              {query.isFetching ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
+              Apply
+            </Button>
+            <Button variant="ghost" onClick={reset} className="text-xs">
+              Last 90 days
+            </Button>
+            <span className="ml-auto text-xs text-muted-foreground">
+              Window:{" "}
+              <span className="font-mono">
+                {data.from} → {data.to}
+              </span>
+            </span>
           </div>
+        </CardContent>
+      </Card>
 
-          {payablesBreakdown.map((group) => (
-            <Card key={group.vendor}>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-muted-foreground" />
-                  {group.vendor}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableHead>Invoice No.</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Due Date</TableHead>
-                      <TableHead>PO Ref</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {group.invoices.map((inv) => (
-                      <TableRow key={inv.id}>
-                        <TableCell className="text-sm font-mono">{inv.invoiceNumber}</TableCell>
-                        <TableCell className="text-sm">{inv.invoiceDate}</TableCell>
-                        <TableCell className="text-sm">{inv.dueDate}</TableCell>
-                        <TableCell className="text-sm font-mono">{inv.poRef}</TableCell>
-                        <TableCell><StatusBadge status={inv.status} /></TableCell>
-                        <TableCell className="text-right text-sm font-medium">{formatCurrency(inv.grandTotal)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          ))}
-        </TabsContent>
-      </Tabs>
+      {/* P&L KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KPICard
+          title="Revenue"
+          value={fmtMoney(data.pnl.revenue)}
+          icon={IndianRupee}
+          iconColor="text-green-600"
+        />
+        <KPICard
+          title="Expenses"
+          value={fmtMoney(data.pnl.expenses)}
+          icon={TrendingDown}
+          iconColor="text-red-600"
+        />
+        <KPICard
+          title="Gross Profit"
+          value={fmtMoney(data.pnl.grossProfit)}
+          icon={TrendingUp}
+          iconColor="text-blue-600"
+          change={fmtPct(data.pnl.grossMarginPct)}
+          trend={data.pnl.grossMarginPct >= 0 ? "up" : "down"}
+        />
+        <KPICard
+          title="Net Cash Flow"
+          value={fmtMoney(data.pnl.cashFlow)}
+          icon={Wallet}
+          iconColor={
+            Number(data.pnl.cashFlow) >= 0 ? "text-green-600" : "text-red-600"
+          }
+        />
+      </div>
+
+      {/* Cash flow detail */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Wallet className="h-4 w-4" />
+            Cash Movement (window)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-6 p-6 pt-0">
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+              <ArrowDownCircle className="h-3 w-3 text-green-600" />
+              Payments In
+            </div>
+            <div className="text-2xl font-bold tabular-nums text-green-600">
+              {fmtMoney(data.pnl.paymentsIn)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+              <ArrowUpCircle className="h-3 w-3 text-red-600" />
+              Payments Out
+            </div>
+            <div className="text-2xl font-bold tabular-nums text-red-600">
+              {fmtMoney(data.pnl.paymentsOut)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              Net Cash Flow
+            </div>
+            <div
+              className={`text-2xl font-bold tabular-nums ${
+                Number(data.pnl.cashFlow) >= 0
+                  ? "text-green-600"
+                  : "text-red-600"
+              }`}
+            >
+              {fmtMoney(data.pnl.cashFlow)}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* AR Ageing */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            Receivables Ageing (current outstanding)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 lg:grid-cols-6 gap-4 p-6 pt-0">
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              Current
+            </div>
+            <div className="text-lg font-bold tabular-nums">
+              {fmtMoney(data.arAgeing.current)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              1–30 days
+            </div>
+            <div className="text-lg font-bold tabular-nums">
+              {fmtMoney(data.arAgeing.days1to30)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              31–60 days
+            </div>
+            <div className="text-lg font-bold tabular-nums text-amber-600">
+              {fmtMoney(data.arAgeing.days31to60)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              61–90 days
+            </div>
+            <div className="text-lg font-bold tabular-nums text-orange-600">
+              {fmtMoney(data.arAgeing.days61to90)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+              <AlertCircle className="h-3 w-3 text-red-600" />
+              90+ days
+            </div>
+            <div className="text-lg font-bold tabular-nums text-red-600">
+              {fmtMoney(data.arAgeing.days90Plus)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              Total AR
+            </div>
+            <div className="text-lg font-bold tabular-nums text-blue-600">
+              {fmtMoney(data.arAgeing.total)}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* AP Ageing */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            Payables Ageing (current outstanding)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 lg:grid-cols-6 gap-4 p-6 pt-0">
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              Current
+            </div>
+            <div className="text-lg font-bold tabular-nums">
+              {fmtMoney(data.apAgeing.current)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              1–30 days
+            </div>
+            <div className="text-lg font-bold tabular-nums">
+              {fmtMoney(data.apAgeing.days1to30)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              31–60 days
+            </div>
+            <div className="text-lg font-bold tabular-nums text-amber-600">
+              {fmtMoney(data.apAgeing.days31to60)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              61–90 days
+            </div>
+            <div className="text-lg font-bold tabular-nums text-orange-600">
+              {fmtMoney(data.apAgeing.days61to90)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+              <AlertCircle className="h-3 w-3 text-red-600" />
+              90+ days
+            </div>
+            <div className="text-lg font-bold tabular-nums text-red-600">
+              {fmtMoney(data.apAgeing.days90Plus)}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">
+              Total AP
+            </div>
+            <div className="text-lg font-bold tabular-nums text-blue-600">
+              {fmtMoney(data.apAgeing.total)}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Top customers */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Building2 className="h-4 w-4" />
+            Top Customers by Invoiced Amount
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DataTable<CustomerRow>
+            data={data.topCustomers}
+            columns={customerColumns}
+            pageSize={10}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }
