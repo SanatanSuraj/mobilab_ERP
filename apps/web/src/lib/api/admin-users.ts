@@ -21,11 +21,18 @@ import type {
   InviteUserResponse,
   ListInvitationsQuery,
   ListInvitationsResponse,
+  ListUsersQuery,
+  ListUsersResponse,
+  UpdateUserRequest,
+  UpdateUserResponse,
+  UserSummary,
 } from "@instigenie/contracts";
 import {
   API_BASE_URL,
   ApiProblem,
+  tenantDelete,
   tenantGet,
+  tenantPatch,
   tenantPost,
 } from "./tenant-fetch";
 import type { Problem } from "@instigenie/contracts";
@@ -53,6 +60,20 @@ export async function apiListInvitations(
   );
 }
 
+/** GET /admin/users — active members (joined from users + memberships + roles). */
+export async function apiListUsers(
+  query: Partial<ListUsersQuery> = {},
+): Promise<ListUsersResponse> {
+  const params = new URLSearchParams();
+  if (query.status) params.set("status", query.status);
+  if (query.search) params.set("search", query.search);
+  if (query.roleId) params.set("roleId", query.roleId);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.offset !== undefined) params.set("offset", String(query.offset));
+  const qs = params.toString();
+  return tenantGet<ListUsersResponse>(`/admin/users${qs ? `?${qs}` : ""}`);
+}
+
 /**
  * POST /admin/users/invitations/:id/revoke — soft-revoke by stamping
  * metadata.revokedAt; the row stays for audit/history. Returns the updated
@@ -66,6 +87,36 @@ export async function apiRevokeInvitation(
     {},
   );
   return res.invitation;
+}
+
+/** DELETE /admin/users/invitations/:id — hard delete the row. */
+export async function apiDeleteInvitation(id: string): Promise<void> {
+  await tenantDelete(`/admin/users/invitations/${id}`);
+}
+
+/**
+ * PATCH /admin/users/:id — update a member's name / role / membership.
+ * At least one field must be provided. Returns the updated UserSummary so
+ * the UI can patch its cache in one render.
+ */
+export async function apiUpdateUser(
+  id: string,
+  body: UpdateUserRequest,
+): Promise<UserSummary> {
+  const res = await tenantPatch<UpdateUserResponse>(
+    `/admin/users/${id}`,
+    body,
+  );
+  return res.user;
+}
+
+/**
+ * DELETE /admin/users/:id — remove a member from this org. Soft-delete on
+ * the backend (membership flipped to REMOVED). Returns void; the caller
+ * should invalidate the users list.
+ */
+export async function apiDeleteUser(id: string): Promise<void> {
+  await tenantDelete(`/admin/users/${id}`);
 }
 
 // ─── Public accept surface (plain fetch, no bearer) ─────────────────────────

@@ -236,10 +236,11 @@ export async function buildApp(): Promise<BuiltApp> {
   // Procurement services — Phase 2 §12.1 #4. Vendors + indents + POs + GRNs.
   // GRNs.post() writes to stock_ledger, so these services live downstream
   // of StockService (which is accessed via stockRepo from the shared pool).
+  // PoApprovalsService is constructed below, after ApprovalsService, so
+  // submit-for-approval can dispatch into the central approvals workflow.
   const vendorsService = new VendorsService(pool);
   const indentsService = new IndentsService(pool);
   const purchaseOrdersService = new PurchaseOrdersService(pool);
-  const poApprovalsService = new PoApprovalsService(pool);
   const grnsService = new GrnsService(pool);
   const procurementReportsService = new ProcurementReportsService(pool);
 
@@ -299,6 +300,19 @@ export async function buildApp(): Promise<BuiltApp> {
     pool,
     esignature: esignatureService,
   });
+
+  // PoApprovalsService takes a reference to ApprovalsService so submit-for-
+  // approval can open an approval_request inside the same transaction as
+  // the DRAFT→PENDING_APPROVAL flip. The reverse edge (approval decision
+  // → PO header update) is wired below via registerFinaliser to break the
+  // construction-time circular dependency between the two services.
+  const poApprovalsService = new PoApprovalsService({
+    pool,
+    approvals: approvalsService,
+  });
+  approvalsService.registerFinaliser("purchase_order", (client, ctx) =>
+    poApprovalsService.applyDecisionFromApprovals(client, ctx),
+  );
 
   // Sprint 3 — vendor-admin stack. Uses the BYPASSRLS `vendorPool`, shares
   // the same TokenFactory (vendor tokens are a different audience within

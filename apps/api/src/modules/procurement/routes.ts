@@ -30,6 +30,7 @@ import {
   ProcurementReportsQuerySchema,
   PurchaseOrderListQuerySchema,
   RejectPurchaseOrderSchema,
+  SubmitPurchaseOrderForApprovalSchema,
   UpdateGrnLineSchema,
   UpdateGrnSchema,
   UpdateIndentLineSchema,
@@ -313,6 +314,20 @@ export async function registerProcurementRoutes(
   // PO `version` for optimistic concurrency. Allowed transitions:
   //   { DRAFT, PENDING_APPROVAL } → APPROVED | REJECTED
   // Any other source state → 409 invalid_state_transition.
+
+  // Submit a DRAFT PO into the central approvals workflow. Opens an
+  // approval_request and flips the PO to PENDING_APPROVAL atomically.
+  // The eventual decision arrives through /approvals/:id/act, which
+  // dispatches into `applyDecisionFromApprovals` to update the header.
+  app.post(
+    "/procurement/purchase-orders/:id/submit-for-approval",
+    { preHandler: write },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = SubmitPurchaseOrderForApprovalSchema.parse(req.body);
+      return reply.send(await opts.poApprovals.submitForApproval(req, id, body));
+    }
+  );
 
   app.post(
     "/procurement/purchase-orders/:id/approve",

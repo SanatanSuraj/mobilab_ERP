@@ -176,6 +176,16 @@ export const MOCK_PERMISSIONS_BY_ROLE: Record<UserRole, Permission[]> = {
 /** Default org for dev/demo — real value comes from JWT claims. */
 const MOCK_ORG_ID = "org_instigenie";
 
+/**
+ * In dev/test we pre-populate the store with a fake PRODUCTION_MANAGER
+ * persona so demos and Storybook-style screens render without a login
+ * round-trip. In production this MUST be off — booting every fresh visitor
+ * as an authenticated PM is the ultimate rug-pull and would also light up
+ * UI that depends on can(...) reading mock permissions instead of the real
+ * /api/auth/me/permissions response.
+ */
+const ENABLE_MOCK_AUTH = process.env.NODE_ENV !== "production";
+
 // ─── Store Shape ─────────────────────────────────────────────────────────────
 
 type AuthStore = {
@@ -214,10 +224,17 @@ export const useAuthStore = create<AuthStore>()(
   persist(
     (set, get) => ({
       // ── Initial state ──────────────────────────────────────────────────
-      user: MOCK_USERS_BY_ROLE.PRODUCTION_MANAGER,
-      role: "PRODUCTION_MANAGER",
-      orgId: MOCK_ORG_ID,
-      _permSet: new Set(MOCK_PERMISSIONS_BY_ROLE.PRODUCTION_MANAGER),
+      // Dev/test boots into a PRODUCTION_MANAGER persona so the dashboards
+      // are visitable without a login round-trip. Production starts blank —
+      // the auth-redirect guard then kicks the user to /auth/login.
+      user: ENABLE_MOCK_AUTH
+        ? MOCK_USERS_BY_ROLE.PRODUCTION_MANAGER
+        : null,
+      role: ENABLE_MOCK_AUTH ? "PRODUCTION_MANAGER" : null,
+      orgId: ENABLE_MOCK_AUTH ? MOCK_ORG_ID : null,
+      _permSet: ENABLE_MOCK_AUTH
+        ? new Set(MOCK_PERMISSIONS_BY_ROLE.PRODUCTION_MANAGER)
+        : new Set(),
       isPermLoading: false,
 
       // ── fetchPermissions ───────────────────────────────────────────────
@@ -282,8 +299,10 @@ export const useAuthStore = create<AuthStore>()(
 
       // After rehydration: rebuild _permSet from persisted role.
       // This runs synchronously before the first render that reads can().
+      // Dev seeds from the mock map; prod leaves the set empty and lets
+      // fetchPermissions() populate it from the real backend on next call.
       onRehydrateStorage: () => (state) => {
-        if (state?.role) {
+        if (state?.role && ENABLE_MOCK_AUTH) {
           state._permSet = new Set(MOCK_PERMISSIONS_BY_ROLE[state.role] ?? []);
         }
       },

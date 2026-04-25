@@ -413,6 +413,23 @@ export const ApprovePurchaseOrderSchema = z.object({
 });
 export type ApprovePurchaseOrder = z.infer<typeof ApprovePurchaseOrderSchema>;
 
+/**
+ * Body for `POST /procurement/purchase-orders/:id/submit-for-approval` —
+ * flips a DRAFT PO into PENDING_APPROVAL and creates an approval_request
+ * row tied to this PO. The actual decision then comes through
+ * `POST /approvals/:id/act`, which dispatches back to update the PO header.
+ *
+ * `notes` is forwarded to the approval_request (not the PO header), so
+ * approvers see the submitter's rationale on the inbox row.
+ */
+export const SubmitPurchaseOrderForApprovalSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  notes: z.string().trim().max(2000).optional(),
+});
+export type SubmitPurchaseOrderForApproval = z.infer<
+  typeof SubmitPurchaseOrderForApprovalSchema
+>;
+
 export const RejectPurchaseOrderSchema = z.object({
   expectedVersion: z.number().int().positive(),
   /** Required for REJECT — auditors expect a reason. */

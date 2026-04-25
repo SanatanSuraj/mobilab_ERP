@@ -4,18 +4,15 @@
  * Admin → Users & Roles.
  *
  * Backend reality (apps/api/src/modules/admin-users/routes.ts):
+ *   - GET  /admin/users                              — active members (real)
  *   - POST /admin/users/invite                       — create + queue email
  *   - GET  /admin/users/invitations                  — list (status filter)
  *   - POST /admin/users/invitations/:id/revoke       — revoke open invite
  *
- * There is intentionally NO `GET /admin/users` endpoint, so the "Members"
- * view here is derived from invitations whose status is ACCEPTED — the
- * only signal the API exposes about staff membership. The bootstrap admin
- * and any seeded user that didn't go through the invitation flow will
- * NOT appear in this list; that is called out in a banner.
- *
  * Data model used here:
- *   - useApiInvitations({ status: "ACCEPTED" })  → Members tab
+ *   - useApiUsers()                               → Members tab (canonical:
+ *                                                   includes bootstrap +
+ *                                                   pre-invite seeded users)
  *   - useApiInvitations()                         → open pipeline
  *                                                   (PENDING + EXPIRED + REVOKED)
  *   - useApiRevokeInvitation()                    → revoke action
@@ -48,18 +45,24 @@ import {
   Loader2,
   MailX,
   Clock,
-  Info,
   RefreshCw,
+  Pencil,
+  Trash2,
+  Ban,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { InviteUserDialog } from "@/components/admin-users/InviteUserDialog";
+import { EditUserDialog } from "@/components/admin-users/EditUserDialog";
 import {
+  useApiDeleteInvitation,
+  useApiDeleteUser,
   useApiInvitations,
   useApiRevokeInvitation,
+  useApiUsers,
 } from "@/hooks/useAdminUsersApi";
 import { ApiProblem } from "@/lib/api/tenant-fetch";
-import type { InvitationSummary } from "@instigenie/contracts";
+import type { InvitationSummary, UserSummary } from "@instigenie/contracts";
 
 const ROLE_LABELS: Record<UserRole, string> = {
   SUPER_ADMIN: "Super Admin",
@@ -115,19 +118,20 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export default function UsersRolesPage() {
-  const { role: currentRole } = useAuthStore();
+  const { user: currentUser, role: currentRole } = useAuthStore();
   const [activeTab, setActiveTab] = useState<"users" | "roles">("users");
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [editing, setEditing] = useState<UserSummary | null>(null);
 
   // Permission gate — both queries are gated on enabled so role-switch in
   // dev doesn't fire 403s. Queries auto-refetch when `enabled` flips.
   const isAdmin = currentRole === "SUPER_ADMIN";
 
-  const membersQuery = useApiInvitations(
-    isAdmin ? { status: "ACCEPTED", limit: 200 } : { status: "ACCEPTED" },
-  );
+  const membersQuery = useApiUsers(isAdmin ? { limit: 200 } : {});
   const pipelineQuery = useApiInvitations(isAdmin ? { limit: 200 } : {});
   const revokeMutation = useApiRevokeInvitation();
+  const deleteInvitationMutation = useApiDeleteInvitation();
+  const deleteUserMutation = useApiDeleteUser();
 
   if (!isAdmin) {
     return (
@@ -156,11 +160,15 @@ export default function UsersRolesPage() {
   const members = membersQuery.data?.items ?? [];
   const pipeline = pipelineQuery.data?.items ?? [];
 
-  // Role-usage tally for the Role Definitions tab — derived from accepted
-  // invitations only; bootstrap admin / seeded users won't be reflected.
+  // Role-usage tally for the Role Definitions tab — drawn from the canonical
+  // members list (users + memberships + user_roles), so bootstrap and seeded
+  // users are now included.
   const roleCount = Object.entries(
     members.reduce(
-      (acc, m) => ({ ...acc, [m.roleId]: (acc[m.roleId] ?? 0) + 1 }),
+      (acc, m) => {
+        for (const r of m.roles) acc[r] = (acc[r] ?? 0) + 1;
+        return acc;
+      },
       {} as Record<string, number>,
     ),
   ).sort((a, b) => b[1] - a[1]);
@@ -177,9 +185,47 @@ export default function UsersRolesPage() {
     });
   }
 
+  function handleDeleteInvitation(invitation: InvitationSummary) {
+    if (deleteInvitationMutation.isPending) return;
+    const ok = window.confirm(
+      `Permanently delete the invitation for ${invitation.email}? This cannot be undone.`,
+    );
+    if (!ok) return;
+    deleteInvitationMutation.mutate(invitation.id, {
+      onSuccess: () => {
+        toast.success(`Deleted invite to ${invitation.email}.`);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Could not delete invite."));
+      },
+    });
+  }
+
+  function handleRemoveMember(u: UserSummary) {
+    if (deleteUserMutation.isPending) return;
+    const ok = window.confirm(
+      `Remove ${u.name || u.email} from this organisation? Their role grants and active sessions will be revoked. They can be re-invited later.`,
+    );
+    if (!ok) return;
+    deleteUserMutation.mutate(u.id, {
+      onSuccess: () => {
+        toast.success(`Removed ${u.email} from the organisation.`);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Could not remove member."));
+      },
+    });
+  }
+
   return (
     <div className="p-6 max-w-[1200px] mx-auto space-y-6">
       <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+      <EditUserDialog
+        user={editing}
+        onOpenChange={(next) => {
+          if (!next) setEditing(null);
+        }}
+      />
 
       <div className="flex items-center justify-between">
         <div>
@@ -194,16 +240,6 @@ export default function UsersRolesPage() {
           Invite User
         </Button>
       </div>
-
-      <p className="text-xs text-muted-foreground bg-blue-50 border border-blue-100 rounded-md px-3 py-2 flex items-start gap-2">
-        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <span>
-          The Members list is derived from accepted invitations. Bootstrap
-          admin or seeded users that did not join via an invitation link will
-          not appear here. To extend this view, add a{" "}
-          <code className="mx-0.5">GET /admin/users</code> route on the API.
-        </span>
-      </p>
 
       <div className="flex gap-2 border-b pb-0">
         {(["users", "roles"] as const).map((tab) => (
@@ -251,13 +287,13 @@ export default function UsersRolesPage() {
               <p className="text-2xl font-bold mt-1">
                 {membersQuery.isPending
                   ? "—"
-                  : new Set(members.map((m) => m.roleId)).size}
+                  : new Set(members.flatMap((m) => m.roles)).size}
               </p>
             </Card>
           </div>
 
           <MembersCard
-            invitations={members}
+            users={members}
             loading={membersQuery.isPending}
             fetching={membersQuery.isFetching}
             error={
@@ -268,7 +304,15 @@ export default function UsersRolesPage() {
                   )
                 : null
             }
+            currentUserId={currentUser?.id ?? null}
+            removingId={
+              deleteUserMutation.isPending
+                ? (deleteUserMutation.variables ?? null)
+                : null
+            }
             onRefresh={() => void membersQuery.refetch()}
+            onEdit={(u) => setEditing(u)}
+            onRemove={handleRemoveMember}
           />
 
           <PipelineCard
@@ -288,7 +332,13 @@ export default function UsersRolesPage() {
                 ? (revokeMutation.variables ?? null)
                 : null
             }
+            deletingId={
+              deleteInvitationMutation.isPending
+                ? (deleteInvitationMutation.variables ?? null)
+                : null
+            }
             onRevoke={handleRevoke}
+            onDelete={handleDeleteInvitation}
             onRefresh={() => void pipelineQuery.refetch()}
           />
         </div>
@@ -320,7 +370,8 @@ export default function UsersRolesPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => {
-              const usage = members.filter((m) => m.roleId === role).length;
+              const usage = members.filter((m) => m.roles.includes(role))
+                .length;
               return (
                 <Card key={role} className="overflow-hidden">
                   <CardHeader className="pb-2 pt-4 px-4">
@@ -358,19 +409,27 @@ export default function UsersRolesPage() {
 // ─── Members card ─────────────────────────────────────────────────────────
 
 interface MembersCardProps {
-  invitations: InvitationSummary[];
+  users: UserSummary[];
   loading: boolean;
   fetching: boolean;
   error: string | null;
+  currentUserId: string | null;
+  removingId: string | null;
   onRefresh: () => void;
+  onEdit: (user: UserSummary) => void;
+  onRemove: (user: UserSummary) => void;
 }
 
 function MembersCard({
-  invitations,
+  users,
   loading,
   fetching,
   error,
+  currentUserId,
+  removingId,
   onRefresh,
+  onEdit,
+  onRemove,
 }: MembersCardProps) {
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
@@ -378,8 +437,8 @@ function MembersCard({
         <div>
           <h3 className="text-sm font-semibold">Members</h3>
           <p className="text-xs text-muted-foreground">
-            {invitations.length} accepted invitation
-            {invitations.length === 1 ? "" : "s"}
+            {users.length} active member
+            {users.length === 1 ? "" : "s"}
           </p>
         </div>
         <Button
@@ -408,49 +467,119 @@ function MembersCard({
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading members…
         </p>
-      ) : invitations.length === 0 ? (
+      ) : users.length === 0 ? (
         <p className="px-4 py-8 text-sm text-muted-foreground text-center">
-          No members yet. Invitations show up here once accepted.
+          No active members yet.
         </p>
       ) : (
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Roles</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Joined</TableHead>
+              <TableHead className="w-44 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {invitations.map((m) => {
-              const roleLabel =
-                ROLE_LABELS[m.roleId as UserRole] ?? m.roleId;
+            {users.map((u) => {
+              const initials = (u.name || u.email).slice(0, 2).toUpperCase();
+              const isSuspended = u.membershipStatus === "SUSPENDED";
+              const isSelf = currentUserId === u.id;
+              const isRemoving = removingId === u.id;
               return (
-                <TableRow key={m.id} className="hover:bg-muted/20">
+                <TableRow key={u.id} className="hover:bg-muted/20">
                   <TableCell>
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
-                        {m.email.slice(0, 2).toUpperCase()}
+                        {initials}
                       </div>
-                      <span className="text-sm font-medium break-all">
-                        {m.email}
-                      </span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-sm font-medium break-all">
+                          {u.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground break-all">
+                          {u.email}
+                        </span>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {u.roles.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">
+                          —
+                        </span>
+                      ) : (
+                        u.roles.map((r) => (
+                          <span
+                            key={r}
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
+                              ROLE_COLORS[r as UserRole] ??
+                              "bg-gray-50 text-gray-600 border-gray-200"
+                            }`}
+                          >
+                            {ROLE_LABELS[r as UserRole] ?? r}
+                          </span>
+                        ))
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>
                     <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
-                        ROLE_COLORS[m.roleId as UserRole] ??
-                        "bg-gray-50 text-gray-600 border-gray-200"
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
+                        isSuspended
+                          ? "bg-red-50 text-red-700 border-red-200"
+                          : "bg-green-50 text-green-700 border-green-200"
                       }`}
                     >
-                      {roleLabel}
+                      {isSuspended ? (
+                        <>
+                          <Ban className="h-3 w-3" /> Suspended
+                        </>
+                      ) : (
+                        "Active"
+                      )}
                     </span>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {m.acceptedAt
-                      ? new Date(m.acceptedAt).toLocaleString()
+                    {u.joinedAt
+                      ? new Date(u.joinedAt).toLocaleDateString()
                       : "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => onEdit(u)}
+                        disabled={isRemoving}
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-destructive hover:text-destructive"
+                        disabled={isSelf || isRemoving}
+                        title={
+                          isSelf
+                            ? "You cannot remove your own membership"
+                            : "Remove this member from the organisation"
+                        }
+                        onClick={() => onRemove(u)}
+                      >
+                        {isRemoving ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <>
+                            <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -470,7 +599,9 @@ interface PipelineCardProps {
   fetching: boolean;
   error: string | null;
   revokingId: string | null;
+  deletingId: string | null;
   onRevoke: (invitation: InvitationSummary) => void;
+  onDelete: (invitation: InvitationSummary) => void;
   onRefresh: () => void;
 }
 
@@ -480,7 +611,9 @@ function PipelineCard({
   fetching,
   error,
   revokingId,
+  deletingId,
   onRevoke,
+  onDelete,
   onRefresh,
 }: PipelineCardProps) {
   const pending = invitations.filter((i) => i.status === "PENDING");
@@ -535,7 +668,7 @@ function PipelineCard({
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Expires</TableHead>
-              <TableHead className="w-24"></TableHead>
+              <TableHead className="w-44 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -543,6 +676,7 @@ function PipelineCard({
               const roleLabel =
                 ROLE_LABELS[invite.roleId as UserRole] ?? invite.roleId;
               const isRevoking = revokingId === invite.id;
+              const isDeleting = deletingId === invite.id;
               return (
                 <TableRow key={invite.id} className="hover:bg-muted/20">
                   <TableCell className="text-sm font-medium break-all">
@@ -568,27 +702,41 @@ function PipelineCard({
                     </span>
                   </TableCell>
                   <TableCell className="text-right">
-                    {invite.status === "PENDING" ? (
+                    <div className="flex items-center justify-end gap-1">
+                      {invite.status === "PENDING" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isRevoking || isDeleting}
+                          onClick={() => onRevoke(invite)}
+                          className="h-7 text-xs"
+                        >
+                          {isRevoking ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <>
+                              <MailX className="h-3.5 w-3.5 mr-1" /> Revoke
+                            </>
+                          )}
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
-                        disabled={isRevoking}
-                        onClick={() => onRevoke(invite)}
-                        className="h-7 text-xs"
+                        disabled={isDeleting || isRevoking}
+                        onClick={() => onDelete(invite)}
+                        className="h-7 text-xs text-destructive hover:text-destructive"
+                        title="Permanently delete this invitation row"
                       >
-                        {isRevoking ? (
+                        {isDeleting ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
                           <>
-                            <MailX className="h-3.5 w-3.5 mr-1" /> Revoke
+                            <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
                           </>
                         )}
                       </Button>
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground pr-2">
-                        —
-                      </span>
-                    )}
+                    </div>
                   </TableCell>
                 </TableRow>
               );

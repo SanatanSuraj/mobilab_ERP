@@ -10,7 +10,11 @@
  */
 
 import type { Pool, PoolClient } from "pg";
-import type { Role } from "@instigenie/contracts";
+import type {
+  EditableMembershipStatus,
+  MembershipStatus,
+  Role,
+} from "@instigenie/contracts";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -160,6 +164,26 @@ export async function listInvitations(
 }
 
 /**
+ * Hard-delete an invitation row. Used by the admin "Delete" action on the
+ * invitations card to clear EXPIRED / REVOKED / ACCEPTED entries that no
+ * longer carry useful audit value. Returns true if a row was removed.
+ *
+ * Membership / users are NOT touched — those rows live independently of
+ * the invitation that created them. Deleting an ACCEPTED invitation is
+ * therefore safe (the joined user keeps their access).
+ */
+export async function deleteInvitation(
+  client: PoolClient,
+  invitationId: string,
+): Promise<boolean> {
+  const res = await client.query(
+    `DELETE FROM user_invitations WHERE id = $1`,
+    [invitationId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/**
  * Mark an invitation as revoked. We don't delete the row — we stamp
  * metadata.revokedAt + metadata.revokedBy so the audit trail survives.
  * Returns the updated row, or null if nothing matched.
@@ -181,6 +205,264 @@ export async function revokeInvitation(
     [invitationId, revokedByUserId],
   );
   return rows[0] ?? null;
+}
+
+// ─── Active members listing ────────────────────────────────────────────────
+
+/**
+ * Hydrated row for the admin /admin/users endpoint. Joined from users +
+ * memberships (for status/joined_at) + user_roles (aggregated). Identity_id
+ * is denormalised from `users.identity_id` so the UI can disambiguate
+ * cross-tenant the same human, but it's nullable in the contract for
+ * forward-compat.
+ */
+export interface UserListRow {
+  id: string;
+  org_id: string;
+  identity_id: string;
+  email: string;
+  name: string;
+  is_active: boolean;
+  membership_status: MembershipStatus;
+  roles: Role[];
+  joined_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ListUsersArgs {
+  status?: MembershipStatus;
+  search?: string;
+  roleId?: Role;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * List active members of the tenant. Default scope (no status filter) is
+ * ACTIVE only — the dashboard's Members card is the only caller and it
+ * doesn't want INVITED stubs polluting the list (those live on the
+ * Invitations tab instead). REMOVED rows are always hidden.
+ *
+ * Search runs against email + name. Role filter narrows to users that
+ * hold the specified role in this org.
+ */
+export async function listUsers(
+  client: PoolClient,
+  args: ListUsersArgs,
+): Promise<{ items: UserListRow[]; total: number }> {
+  const clauses: string[] = [`m.status <> 'REMOVED'`];
+  const params: unknown[] = [];
+
+  if (args.status) {
+    params.push(args.status);
+    clauses.push(`m.status = $${params.length}`);
+  } else {
+    clauses.push(`m.status = 'ACTIVE'`);
+  }
+
+  if (args.search) {
+    params.push(`%${args.search}%`);
+    clauses.push(
+      `(u.email ILIKE $${params.length} OR u.name ILIKE $${params.length})`,
+    );
+  }
+
+  if (args.roleId) {
+    params.push(args.roleId);
+    clauses.push(
+      `EXISTS (SELECT 1 FROM user_roles ur
+                 WHERE ur.user_id = u.id AND ur.role_id = $${params.length})`,
+    );
+  }
+
+  const where = `WHERE ${clauses.join(" AND ")}`;
+  const baseFrom = `FROM users u
+                    JOIN memberships m
+                      ON m.identity_id = u.identity_id AND m.org_id = u.org_id`;
+
+  const limitParamIdx = params.length + 1;
+  const offsetParamIdx = params.length + 2;
+  const pageParams = [...params, args.limit, args.offset];
+
+  const [countRes, rowsRes] = await Promise.all([
+    client.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total ${baseFrom} ${where}`,
+      params,
+    ),
+    client.query<{
+      id: string;
+      org_id: string;
+      identity_id: string;
+      email: string;
+      name: string;
+      is_active: boolean;
+      membership_status: MembershipStatus;
+      roles: Role[] | null;
+      joined_at: Date | null;
+      created_at: Date;
+      updated_at: Date;
+    }>(
+      `SELECT u.id, u.org_id, u.identity_id, u.email, u.name, u.is_active,
+              m.status AS membership_status,
+              COALESCE(
+                (SELECT array_agg(ur.role_id ORDER BY ur.role_id)
+                   FROM user_roles ur
+                  WHERE ur.user_id = u.id),
+                '{}'::text[]
+              ) AS roles,
+              m.joined_at,
+              u.created_at, u.updated_at
+         ${baseFrom}
+         ${where}
+         ORDER BY u.created_at DESC, u.id DESC
+         LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
+      pageParams,
+    ),
+  ]);
+
+  return {
+    total: Number(countRes.rows[0]?.total ?? "0"),
+    items: rowsRes.rows.map((r) => ({
+      ...r,
+      roles: r.roles ?? [],
+    })),
+  };
+}
+
+/**
+ * Single-user lookup using the same join shape as `listUsers`. Returns
+ * null when the user doesn't exist OR was REMOVED (callers should treat
+ * removed users as 404 — the row is kept for audit, not for editing).
+ */
+export async function getUserById(
+  client: PoolClient,
+  userId: string,
+): Promise<UserListRow | null> {
+  const { rows } = await client.query<{
+    id: string;
+    org_id: string;
+    identity_id: string;
+    email: string;
+    name: string;
+    is_active: boolean;
+    membership_status: MembershipStatus;
+    roles: Role[] | null;
+    joined_at: Date | null;
+    created_at: Date;
+    updated_at: Date;
+  }>(
+    `SELECT u.id, u.org_id, u.identity_id, u.email, u.name, u.is_active,
+            m.status AS membership_status,
+            COALESCE(
+              (SELECT array_agg(ur.role_id ORDER BY ur.role_id)
+                 FROM user_roles ur
+                WHERE ur.user_id = u.id),
+              '{}'::text[]
+            ) AS roles,
+            m.joined_at,
+            u.created_at, u.updated_at
+       FROM users u
+       JOIN memberships m
+         ON m.identity_id = u.identity_id AND m.org_id = u.org_id
+      WHERE u.id = $1 AND m.status <> 'REMOVED'
+      LIMIT 1`,
+    [userId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return { ...row, roles: row.roles ?? [] };
+}
+
+export interface UpdateUserArgs {
+  name?: string;
+  roleId?: Role;
+  membershipStatus?: EditableMembershipStatus;
+}
+
+/**
+ * Apply an admin edit to a user. Three independent fields:
+ *   - name              → users.name
+ *   - membershipStatus  → memberships.status (ACTIVE | SUSPENDED only)
+ *   - roleId            → user_roles: replace the existing rows for this
+ *                         user with one row carrying the new role
+ *
+ * Runs sequentially in the caller's transaction; the caller is expected to
+ * have set the org GUC via withRequest. `is_active` on users tracks the
+ * "soft block" flag the auth layer reads, so SUSPENDED also clears
+ * is_active and ACTIVE re-enables it — keeping the two flags in sync.
+ */
+export async function updateUser(
+  client: PoolClient,
+  userId: string,
+  orgId: string,
+  args: UpdateUserArgs,
+): Promise<void> {
+  if (args.name !== undefined) {
+    await client.query(
+      `UPDATE users SET name = $2, updated_at = now() WHERE id = $1`,
+      [userId, args.name],
+    );
+  }
+
+  if (args.membershipStatus !== undefined) {
+    const isActive = args.membershipStatus === "ACTIVE";
+    await client.query(
+      `UPDATE memberships
+          SET status = $2, updated_at = now()
+        WHERE user_id = $1`,
+      [userId, args.membershipStatus],
+    );
+    await client.query(
+      `UPDATE users SET is_active = $2, updated_at = now() WHERE id = $1`,
+      [userId, isActive],
+    );
+  }
+
+  if (args.roleId !== undefined) {
+    await client.query(`DELETE FROM user_roles WHERE user_id = $1`, [userId]);
+    await client.query(
+      `INSERT INTO user_roles (user_id, role_id, org_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, role_id) DO NOTHING`,
+      [userId, args.roleId, orgId],
+    );
+  }
+}
+
+/**
+ * Soft-delete a member from the org. We don't drop the `users` row — it's
+ * referenced by FK from POs, BOMs, audit_log, etc. Instead:
+ *
+ *   1. memberships.status = 'REMOVED' (hides from listUsers/getUserById)
+ *   2. users.is_active   = false      (auth guard reads this)
+ *   3. user_roles cleared             (revokes permissions on still-live tokens)
+ *   4. refresh_tokens cleared         (forces a re-login that will then 403)
+ *
+ * The user can be re-invited later — the accept flow's upsert flips the
+ * membership row back to ACTIVE without creating a new users row.
+ *
+ * Returns true if a membership row was flipped (i.e. the user was actually
+ * an active member); false if nothing changed.
+ */
+export async function removeMember(
+  client: PoolClient,
+  userId: string,
+): Promise<boolean> {
+  const res = await client.query(
+    `UPDATE memberships
+        SET status = 'REMOVED', updated_at = now()
+      WHERE user_id = $1 AND status <> 'REMOVED'`,
+    [userId],
+  );
+  if ((res.rowCount ?? 0) === 0) return false;
+  await client.query(
+    `UPDATE users SET is_active = false, updated_at = now() WHERE id = $1`,
+    [userId],
+  );
+  await client.query(`DELETE FROM user_roles WHERE user_id = $1`, [userId]);
+  await client.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [userId]);
+  return true;
 }
 
 // ─── Accept flow (cross-tenant + tenant-scoped halves) ────────────────────

@@ -39,6 +39,7 @@ import type {
   CreateApprovalChainDefinition,
   CreateApprovalRequest,
 } from "@instigenie/contracts";
+import type { RequestUser } from "../../context/request-context.js";
 import { paginated } from "@instigenie/contracts";
 import {
   ConflictError,
@@ -106,6 +107,24 @@ export interface ApprovalsServiceDeps {
   esignature?: EsignatureService;
 }
 
+/**
+ * Context handed to a finaliser when an approval request reaches a
+ * terminal status (APPROVED or REJECTED) inside `act()`. Runs in the
+ * same transaction as the act() write — finalisers MUST NOT call
+ * `withRequest` or open new transactions.
+ */
+export interface ApprovalFinaliserContext {
+  request: ApprovalRequest;
+  finalStatus: "APPROVED" | "REJECTED";
+  actor: RequestUser;
+  comment: string | null;
+}
+
+export type ApprovalFinaliser = (
+  client: pg.PoolClient,
+  ctx: ApprovalFinaliserContext,
+) => Promise<void>;
+
 /** Type-guard for the overloaded constructor. pg.Pool has no `pool` own
  *  key, so this discriminates cleanly without instanceof coupling. */
 function isApprovalsServiceDeps(
@@ -117,6 +136,16 @@ function isApprovalsServiceDeps(
 export class ApprovalsService {
   private readonly pool: pg.Pool;
   private readonly esignature: EsignatureService | null;
+  /**
+   * Per-entity-type finalisers, registered by the bootstrap so that when
+   * `act()` ratifies a request (APPROVED or REJECTED) the corresponding
+   * domain row (PO header, invoice, etc.) is updated atomically. A missing
+   * dispatcher is not an error — it just means the entity doesn't yet wire
+   * back into a domain module (the original /approvals/* surface remained
+   * read-only for those types).
+   */
+  private readonly finalisers: Map<ApprovalEntityType, ApprovalFinaliser> =
+    new Map();
 
   // Two accepted shapes so Phase 3 gates (which pre-date §4.2 and hand
   // the service a bare pool) keep compiling. Phase 4 callers pass a
@@ -133,6 +162,23 @@ export class ApprovalsService {
       this.pool = deps;
       this.esignature = null;
     }
+  }
+
+  /**
+   * Register a finaliser for a given entity type. Call this from the
+   * bootstrap once both this service and the domain service exist —
+   * deferred registration avoids the constructor cycle that would arise
+   * from passing the domain service into this one's constructor.
+   *
+   * Re-registering an entity type replaces the previous handler; the
+   * bootstrap calls each registration exactly once at startup so there's
+   * no churn at runtime.
+   */
+  registerFinaliser(
+    entityType: ApprovalEntityType,
+    fn: ApprovalFinaliser,
+  ): void {
+    this.finalisers.set(entityType, fn);
   }
 
   // ── Chain definitions ─────────────────────────────────────────────────────
@@ -250,6 +296,27 @@ export class ApprovalsService {
     input: CreateApprovalRequest,
   ): Promise<ApprovalRequestDetail> {
     const user = requireUser(req);
+    return withRequest(req, this.pool, async (client) => {
+      return this.createRequestForEntity(client, user, input);
+    });
+  }
+
+  /**
+   * BYO-client variant of `createRequest`. Domain services that need to
+   * dispatch into approvals as part of their own transaction (e.g. PO
+   * submit-for-approval flipping status DRAFT → PENDING_APPROVAL while
+   * also opening the approval_request) call this directly instead of
+   * `createRequest`, which would open a separate connection / break
+   * atomicity.
+   *
+   * The caller is responsible for having set up the org GUC on the
+   * client (i.e. running inside `withRequest` / `withOrg`).
+   */
+  async createRequestForEntity(
+    client: pg.PoolClient,
+    user: RequestUser,
+    input: CreateApprovalRequest,
+  ): Promise<ApprovalRequestDetail> {
     const actorRole = user.roles[0] ?? null;
 
     // Entity-type / amount validation.
@@ -260,12 +327,6 @@ export class ApprovalsService {
         );
       }
       if (input.entityType === "deal_discount") {
-        // input.amount is a decimal string — parse via decimal.js so we
-        // never coerce money-adjacent values through Number(). Here it's
-        // actually a percentage, not a currency amount, but the same
-        // precision argument applies: the approval chain band lookup later
-        // compares string-formatted min/max_amount and any float drift here
-        // would shift which chain fires.
         let pct;
         try {
           pct = m(input.amount);
@@ -283,10 +344,6 @@ export class ApprovalsService {
           );
         }
       } else {
-        // Decimal.js parse; `m()` throws MoneyTypeError on non-numeric
-        // input, which we surface as ValidationError — keeping the public
-        // contract identical to the old `Number.isNaN(...)` check but
-        // without dropping precision on the way through.
         let amt;
         try {
           amt = m(input.amount);
@@ -304,65 +361,63 @@ export class ApprovalsService {
       }
     }
 
-    return withRequest(req, this.pool, async (client) => {
-      // Reject if there's already a PENDING request for the same entity.
-      const existing = await approvalsRepo.getRequestByEntity(
-        client,
-        input.entityType,
-        input.entityId,
+    // Reject if there's already a PENDING request for the same entity.
+    const existing = await approvalsRepo.getRequestByEntity(
+      client,
+      input.entityType,
+      input.entityId,
+    );
+    if (existing) {
+      throw new ConflictError(
+        "an approval request is already pending for this entity",
+        { requestId: existing.id },
       );
-      if (existing) {
+    }
+
+    const chain = await approvalsRepo.resolveChain(
+      client,
+      input.entityType,
+      input.amount ?? null,
+    );
+    if (!chain) {
+      throw new NotFoundError(
+        `no approval chain configured for entity_type=${input.entityType}${
+          input.amount ? ` amount=${input.amount}` : ""
+        }`,
+      );
+    }
+
+    try {
+      const { request, steps } = await approvalsRepo.createRequestWithSteps(
+        client,
+        user.orgId,
+        user.id,
+        actorRole,
+        {
+          chainDefId: chain.id,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          amount: input.amount ?? null,
+          currency: input.currency,
+          notes: input.notes ?? null,
+          steps: chain.steps,
+        },
+      );
+      const transitions = await approvalsRepo.listTransitionsForRequest(
+        client,
+        request.id,
+      );
+      return { request, steps, transitions };
+    } catch (err) {
+      // Partial-unique index collision on entity_pending — race with a
+      // concurrent create() for the same entity.
+      if (pgCodeOf(err) === "23505") {
         throw new ConflictError(
           "an approval request is already pending for this entity",
-          { requestId: existing.id },
         );
       }
-
-      const chain = await approvalsRepo.resolveChain(
-        client,
-        input.entityType,
-        input.amount ?? null,
-      );
-      if (!chain) {
-        throw new NotFoundError(
-          `no approval chain configured for entity_type=${input.entityType}${
-            input.amount ? ` amount=${input.amount}` : ""
-          }`,
-        );
-      }
-
-      try {
-        const { request, steps } = await approvalsRepo.createRequestWithSteps(
-          client,
-          user.orgId,
-          user.id,
-          actorRole,
-          {
-            chainDefId: chain.id,
-            entityType: input.entityType,
-            entityId: input.entityId,
-            amount: input.amount ?? null,
-            currency: input.currency,
-            notes: input.notes ?? null,
-            steps: chain.steps,
-          },
-        );
-        const transitions = await approvalsRepo.listTransitionsForRequest(
-          client,
-          request.id,
-        );
-        return { request, steps, transitions };
-      } catch (err) {
-        // Partial-unique index collision on entity_pending — race with a
-        // concurrent create() for the same entity.
-        if (pgCodeOf(err) === "23505") {
-          throw new ConflictError(
-            "an approval request is already pending for this entity",
-          );
-        }
-        throw err;
-      }
-    });
+      throw err;
+    }
   }
 
   /**
@@ -516,6 +571,23 @@ export class ApprovalsService {
           requestFinalStatus: finalStatus ?? progressed.status,
         },
       });
+
+      // Dispatch into the domain module when the request just reached a
+      // terminal status. Runs inside the same transaction so a finaliser
+      // failure (e.g. PO no longer in an approvable state) rolls back the
+      // step decision + transition log together — the approval request
+      // never finalises against a domain row that wouldn't accept it.
+      if (finalStatus !== null) {
+        const finaliser = this.finalisers.get(request.entityType);
+        if (finaliser) {
+          await finaliser(client, {
+            request: { ...request, status: finalStatus },
+            finalStatus,
+            actor: user,
+            comment: payload.comment ?? null,
+          });
+        }
+      }
 
       // Fresh snapshot for the response. Still inside the outer txn, so
       // the just-written rows are visible here.

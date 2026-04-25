@@ -178,6 +178,98 @@ export const AcceptInviteResponseSchema = z.object({
 });
 export type AcceptInviteResponse = z.infer<typeof AcceptInviteResponseSchema>;
 
+// ─── GET /admin/users ──────────────────────────────────────────────────────
+//
+// Active members of the tenant — distinct from invitations. The members
+// list reads from `users` JOIN `user_roles` with the org GUC applied.
+// Used by the admin/users page Members tab so it doesn't need to derive
+// the list from ACCEPTED invitations (which loses pre-invitation seeded
+// users and bootstrap admins).
+
+export const MEMBERSHIP_STATUSES = ["ACTIVE", "INVITED", "SUSPENDED"] as const;
+export const MembershipStatusSchema = z.enum(MEMBERSHIP_STATUSES);
+export type MembershipStatus = z.infer<typeof MembershipStatusSchema>;
+
+export const UserSummarySchema = z.object({
+  id: z.string().uuid(),
+  orgId: z.string().uuid(),
+  identityId: z.string().uuid().nullable(),
+  email: z.string().email(),
+  name: z.string(),
+  isActive: z.boolean(),
+  membershipStatus: MembershipStatusSchema,
+  /** All roles held by this user in this org. Often a single role. */
+  roles: z.array(z.enum(ROLES)),
+  /** ISO8601. Pulled from `memberships.joined_at`. */
+  joinedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type UserSummary = z.infer<typeof UserSummarySchema>;
+
+export const ListUsersQuerySchema = z
+  .object({
+    /** Filter by membership status. Default: ACTIVE only. */
+    status: MembershipStatusSchema.optional(),
+    /** Free-text match on name + email. */
+    search: z.string().trim().min(1).max(200).optional(),
+    /** Filter by a single role. */
+    roleId: z.enum(ROLES).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
+  })
+  .strict();
+export type ListUsersQuery = z.infer<typeof ListUsersQuerySchema>;
+
+export const ListUsersResponseSchema = z.object({
+  items: z.array(UserSummarySchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+});
+export type ListUsersResponse = z.infer<typeof ListUsersResponseSchema>;
+
+// ─── PATCH /admin/users/:id ────────────────────────────────────────────────
+//
+// Admin-side edit. All fields optional but at least one must be provided.
+// `roleId` swaps the user's single role grant — the existing user_roles
+// rows for this user (in this org) are replaced. CUSTOMER is rejected
+// server-side, mirroring the invite flow.
+//
+// `membershipStatus` is constrained to ACTIVE | SUSPENDED here:
+// INVITED is a state the invite flow assigns; REMOVED has its own
+// off-boarding path (not exposed yet) and would orphan user_roles if
+// triggered casually.
+
+export const EditableMembershipStatusSchema = z.enum(["ACTIVE", "SUSPENDED"]);
+export type EditableMembershipStatus = z.infer<
+  typeof EditableMembershipStatusSchema
+>;
+
+export const UpdateUserRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    roleId: z.enum(ROLES).optional(),
+    membershipStatus: EditableMembershipStatusSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.roleId !== undefined ||
+      v.membershipStatus !== undefined,
+    {
+      message:
+        "provide at least one of name, roleId, or membershipStatus to update",
+    },
+  );
+export type UpdateUserRequest = z.infer<typeof UpdateUserRequestSchema>;
+
+export const UpdateUserResponseSchema = z.object({
+  user: UserSummarySchema,
+});
+export type UpdateUserResponse = z.infer<typeof UpdateUserResponseSchema>;
+
 // ─── Outbox payload ────────────────────────────────────────────────────────
 //
 // Emitted by the invite route, consumed by the worker handler

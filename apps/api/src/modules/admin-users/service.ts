@@ -35,6 +35,11 @@ import {
   type InvitationSummary,
   type ListInvitationsQuery,
   type ListInvitationsResponse,
+  type ListUsersQuery,
+  type ListUsersResponse,
+  type UpdateUserRequest,
+  type UpdateUserResponse,
+  type UserSummary,
   type AcceptInvitePreviewResponse,
   type AcceptInviteRequest,
   type AcceptInviteResponse,
@@ -48,18 +53,24 @@ import type { TokenFactory } from "../auth/tokens.js";
 import type { TenantStatusService } from "../tenants/service.js";
 import {
   acceptInvitationTx,
+  deleteInvitation,
   findActiveInvitationByEmail,
   findIdentityByEmail,
+  getUserById,
   insertIdentity,
   insertInvitation,
   listInvitations,
+  listUsers,
   loadInvitationByTokenHash,
   loadOrgName,
   loadUserSummary,
+  removeMember,
   revokeInvitation,
+  updateUser,
   type InvitationListRow,
   type InvitationRow,
   type InvitationWithOrgRow,
+  type UserListRow,
 } from "./repository.js";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -103,6 +114,22 @@ function toSummary(
       metadata: meta,
     }),
     createdAt: row.created_at.toISOString(),
+  };
+}
+
+function toUserSummary(row: UserListRow): UserSummary {
+  return {
+    id: row.id,
+    orgId: row.org_id,
+    identityId: row.identity_id,
+    email: row.email,
+    name: row.name,
+    isActive: row.is_active,
+    membershipStatus: row.membership_status,
+    roles: row.roles,
+    joinedAt: row.joined_at ? row.joined_at.toISOString() : null,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
   };
 }
 
@@ -274,6 +301,106 @@ export class AdminUsersService {
         offset: query.offset,
         items: items.map((r) => toSummary(r)),
       };
+    });
+  }
+
+  // ─── GET /admin/users ─────────────────────────────────────────────────
+
+  async listUsers(
+    req: FastifyRequest,
+    query: ListUsersQuery,
+  ): Promise<ListUsersResponse> {
+    return withRequest(req, this.deps.pool, async (client) => {
+      const { items, total } = await listUsers(client, query);
+      return {
+        total,
+        limit: query.limit,
+        offset: query.offset,
+        items: items.map(toUserSummary),
+      };
+    });
+  }
+
+  // ─── PATCH /admin/users/:id ───────────────────────────────────────────
+
+  async updateUser(
+    req: FastifyRequest,
+    userId: string,
+    input: UpdateUserRequest,
+  ): Promise<UpdateUserResponse> {
+    const actor = requireUser(req);
+
+    // Mirror the invite-side guard: CUSTOMER is portal-only, never grant
+    // it to a tenant member through the staff edit form.
+    if (input.roleId === "CUSTOMER") {
+      throw new ValidationError(
+        "CUSTOMER role cannot be assigned via tenant edit",
+      );
+    }
+
+    return withRequest(req, this.deps.pool, async (client) => {
+      const existing = await getUserById(client, userId);
+      if (!existing) throw new NotFoundError("user");
+
+      // Scope sanity: RLS guarantees we only see our org's rows, but a
+      // cross-org id would 404 above; this is a belt-and-braces check.
+      if (existing.org_id !== actor.orgId) {
+        throw new NotFoundError("user");
+      }
+
+      await updateUser(client, userId, actor.orgId, {
+        name: input.name,
+        roleId: input.roleId,
+        membershipStatus: input.membershipStatus,
+      });
+
+      const updated = await getUserById(client, userId);
+      if (!updated) throw new NotFoundError("user");
+      return { user: toUserSummary(updated) };
+    });
+  }
+
+  // ─── DELETE /admin/users/invitations/:id ──────────────────────────────
+
+  async deleteInvitation(
+    req: FastifyRequest,
+    invitationId: string,
+  ): Promise<void> {
+    const removed = await withRequest(
+      req,
+      this.deps.pool,
+      async (client) => {
+        return deleteInvitation(client, invitationId);
+      },
+    );
+    if (!removed) throw new NotFoundError("invitation");
+  }
+
+  // ─── DELETE /admin/users/:id ──────────────────────────────────────────
+
+  /**
+   * Remove a member from this org. Soft-delete: the users row stays (FKs
+   * from POs, audit logs, etc.) but membership is flipped to REMOVED, the
+   * is_active flag is cleared, role grants are revoked, and refresh
+   * tokens are nuked so an existing session can't keep working.
+   *
+   * Refuses self-delete — an admin pulling their own membership while
+   * logged in would lock the org out if they happen to be the last
+   * SUPER_ADMIN. Caller can re-invite via the standard flow.
+   */
+  async removeMember(req: FastifyRequest, userId: string): Promise<void> {
+    const actor = requireUser(req);
+    if (actor.id === userId) {
+      throw new ValidationError("you cannot remove your own membership");
+    }
+    await withRequest(req, this.deps.pool, async (client) => {
+      const existing = await getUserById(client, userId);
+      if (!existing) throw new NotFoundError("user");
+      if (existing.org_id !== actor.orgId) {
+        throw new NotFoundError("user");
+      }
+      const ok = await removeMember(client, userId);
+      if (!ok) throw new NotFoundError("user");
     });
   }
 

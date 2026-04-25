@@ -21,6 +21,8 @@ import {
   AcceptInviteRequestSchema,
   InviteUserRequestSchema,
   ListInvitationsQuerySchema,
+  ListUsersQuerySchema,
+  UpdateUserRequestSchema,
 } from "@instigenie/contracts";
 import { createAuthGuard, requirePermission } from "../auth/guard.js";
 import type { AuthGuardOptions } from "../auth/guard.js";
@@ -61,6 +63,59 @@ export async function registerAdminUsersRoutes(
       const query = ListInvitationsQuerySchema.parse(req.query ?? {});
       const result = await opts.service.list(req, query);
       return reply.code(200).send(result);
+    },
+  );
+
+  // Active members of the tenant — distinct from invitations. The Members
+  // tab uses this so it doesn't need to derive the list from ACCEPTED
+  // invitations (which loses pre-invite seeded users + bootstrap admins).
+  app.get(
+    "/admin/users",
+    { preHandler: inviteGuards },
+    async (req, reply) => {
+      const query = ListUsersQuerySchema.parse(req.query ?? {});
+      const result = await opts.service.listUsers(req, query);
+      return reply.code(200).send(result);
+    },
+  );
+
+  // Edit a member's name / role / membership status. At least one field
+  // is required (enforced in the schema). Reuses `users:invite` so the
+  // admin gate for membership changes is consistent across this surface.
+  app.patch(
+    "/admin/users/:id",
+    { preHandler: inviteGuards },
+    async (req, reply) => {
+      const { id } = RevokeParamsSchema.parse(req.params ?? {});
+      const body = UpdateUserRequestSchema.parse(req.body ?? {});
+      const result = await opts.service.updateUser(req, id, body);
+      return reply.code(200).send(result);
+    },
+  );
+
+  // Remove a member from the org. Soft-delete via memberships.status =
+  // REMOVED + role/refresh-token cleanup. Self-removal is refused.
+  app.delete(
+    "/admin/users/:id",
+    { preHandler: inviteGuards },
+    async (req, reply) => {
+      const { id } = RevokeParamsSchema.parse(req.params ?? {});
+      await opts.service.removeMember(req, id);
+      return reply.code(204).send();
+    },
+  );
+
+  // Hard-delete an invitation row. Used by the admin to clear EXPIRED /
+  // REVOKED / ACCEPTED entries from the invitations card. Memberships
+  // and users are not touched — those rows survive their originating
+  // invitation row.
+  app.delete(
+    "/admin/users/invitations/:id",
+    { preHandler: inviteGuards },
+    async (req, reply) => {
+      const { id } = RevokeParamsSchema.parse(req.params ?? {});
+      await opts.service.deleteInvitation(req, id);
+      return reply.code(204).send();
     },
   );
 
