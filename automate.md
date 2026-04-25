@@ -1,5 +1,23 @@
 # automate.md — End-to-end pipeline completion plan
 
+> **Delivery note (2026-04-25): approvals path diverged from this plan.**
+> Rows referring to `quotation.submitted_for_approval` →
+> `approvals.openQuotationTicket` (Track 1 emit #4, Phase-2 handler #3,
+> Phase-3 gate-43, Track-2 F7) describe a since-superseded design.
+> Quotation-, deal-discount-, and invoice-post approvals are now opened
+> **synchronously** from the originating service inside the same
+> request transaction, via `approvals.createRequestForEntity()`, with a
+> finaliser registered through `approvals.registerFinaliser(...)` that
+> runs in the same tx as `approvals.act()` to flip the entity. There is
+> no outbox event, no worker handler, and no `quotation-approval-requested.ts`.
+> Rationale: a sync open keeps the unique `(entity_type, entity_id)`
+> pending guard, the version bump, and the audit row in a single tx —
+> avoiding the duplicate-ticket race the original "approval module
+> overlap" caveat (Part D §4) flagged. COGS-planning (F7) needs to
+> consume an `approval_requests.created`-style event instead, or read
+> directly from `approval_requests`. Both are fine; pick one when F7
+> lands. The rest of this doc is otherwise as-built.
+
 This doc covers every row in the O2C / P2P / M2M audit that is not ✅ already-automated, broken into three independent tracks that can run in parallel once Track 1 establishes the event bus conventions.
 
 | Track | Category | Rows | Coverage in this doc |

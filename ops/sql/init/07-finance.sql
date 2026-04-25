@@ -58,8 +58,11 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id              uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   invoice_number      text NOT NULL,
+  -- AWAITING_APPROVAL is the state between DRAFT and POSTED while the
+  -- approvals engine is running on the invoice. Edits are locked but the
+  -- ledger has not yet been touched. Mirrors migration 0002.
   status              text NOT NULL DEFAULT 'DRAFT'
-                        CHECK (status IN ('DRAFT', 'POSTED', 'CANCELLED')),
+                        CHECK (status IN ('DRAFT', 'AWAITING_APPROVAL', 'POSTED', 'CANCELLED')),
   -- Optional links back to origin docs
   -- `customer_id` references the CRM `accounts` table which is the customer
   -- master in this codebase. The name column uses the finance nomenclature

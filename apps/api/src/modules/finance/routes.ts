@@ -10,9 +10,10 @@
  *   - overview (flat dashboard KPIs)
  *
  * Permission strategy:
- *   - GET  /finance/sales-invoices/**   → sales_invoices:read
- *   - POST/PATCH/DELETE sales-invoices  → sales_invoices:create
- *   - POST .../post | .../cancel        → sales_invoices:approve
+ *   - GET  /finance/sales-invoices/**             → sales_invoices:read
+ *   - POST/PATCH/DELETE sales-invoices            → sales_invoices:create
+ *   - POST .../submit-for-posting | .../cancel    → sales_invoices:approve
+ *     (terminal POST happens via /approvals/:id/act → invoice finaliser)
  *   - GET  /finance/purchase-invoices/** → purchase_invoices:read
  *   - POST/PATCH/DELETE purchase-invoices → purchase_invoices:create
  *   - POST .../post | .../cancel        → purchase_invoices:approve
@@ -43,9 +44,9 @@ import {
   FinanceReportsQuerySchema,
   PaymentListQuerySchema,
   PostPurchaseInvoiceSchema,
-  PostSalesInvoiceSchema,
   PurchaseInvoiceListQuerySchema,
   SalesInvoiceListQuerySchema,
+  SubmitSalesInvoiceForPostingSchema,
   UpdatePurchaseInvoiceLineSchema,
   UpdatePurchaseInvoiceSchema,
   UpdateSalesInvoiceLineSchema,
@@ -165,12 +166,14 @@ export async function registerFinanceRoutes(
   );
 
   app.post(
-    "/finance/sales-invoices/:id/post",
+    "/finance/sales-invoices/:id/submit-for-posting",
     { preHandler: siApprove },
     async (req, reply) => {
       const { id } = IdParamSchema.parse(req.params);
-      const body = PostSalesInvoiceSchema.parse(req.body);
-      return reply.send(await opts.salesInvoices.post(req, id, body));
+      const body = SubmitSalesInvoiceForPostingSchema.parse(req.body);
+      return reply.send(
+        await opts.salesInvoices.submitForPosting(req, id, body),
+      );
     },
   );
 

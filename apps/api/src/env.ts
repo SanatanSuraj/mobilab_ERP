@@ -39,14 +39,57 @@ function required(name: string): string {
   return v;
 }
 
+/**
+ * Substrings that, if found in JWT_SECRET, indicate the operator copied a
+ * placeholder out of `.env.example` or a quickstart guide instead of
+ * minting a real secret. We refuse to start in production when any of
+ * these appears so the API never signs tokens with a value an attacker
+ * already has.
+ *
+ * We allow them in development/test so the dev compose file can keep its
+ * "instigenie-dev-secret-…" placeholder for local work.
+ */
+const JWT_SECRET_BLOCKLIST = [
+  "changeme",
+  "change-me",
+  "placeholder",
+  "example",
+  "your-secret",
+  "your_secret",
+  "instigenie-dev-secret",
+  "default",
+  "password",
+];
+
 export function loadEnv(): Env {
   const jwtSecret = required("JWT_SECRET");
-  // Cheap guard against accidentally running prod with a dev-length secret.
+  const nodeEnv = process.env.NODE_ENV ?? "development";
+  const isProductionLike = nodeEnv !== "development" && nodeEnv !== "test";
+  // Length floor — applies in every environment so dev/test still get a
+  // real cryptographic secret rather than a 4-char string.
   if (jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must be at least 32 characters");
   }
+  if (isProductionLike) {
+    // Distinct-character check guards against degenerate values like a
+    // 32-char run of "x". An HS256 secret with that little entropy is
+    // brute-forceable; refuse to boot.
+    const distinctChars = new Set(jwtSecret).size;
+    if (distinctChars < 16) {
+      throw new Error(
+        "JWT_SECRET has insufficient entropy (need >= 16 distinct chars in production)",
+      );
+    }
+    const lower = jwtSecret.toLowerCase();
+    for (const banned of JWT_SECRET_BLOCKLIST) {
+      if (lower.includes(banned)) {
+        throw new Error(
+          `JWT_SECRET contains banned placeholder substring "${banned}"; mint a fresh secret in production`,
+        );
+      }
+    }
+  }
   const databaseUrl = required("DATABASE_URL");
-  const nodeEnv = process.env.NODE_ENV ?? "development";
   const esignaturePepper = process.env.ESIGNATURE_PEPPER ?? "";
   if (
     nodeEnv !== "development" &&

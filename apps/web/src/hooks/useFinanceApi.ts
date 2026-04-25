@@ -40,7 +40,7 @@ import {
   apiCreateSalesInvoice,
   apiUpdateSalesInvoice,
   apiDeleteSalesInvoice,
-  apiPostSalesInvoice,
+  apiSubmitSalesInvoiceForPosting,
   apiCancelSalesInvoice,
   apiListSalesInvoiceLines,
   apiAddSalesInvoiceLine,
@@ -92,7 +92,7 @@ import type {
   SalesInvoiceLine,
   CreateSalesInvoice,
   UpdateSalesInvoice,
-  PostSalesInvoice,
+  SubmitSalesInvoiceForPosting,
   CancelSalesInvoice,
   CreateSalesInvoiceLine,
   UpdateSalesInvoiceLine,
@@ -273,13 +273,20 @@ export function useApiDeleteSalesInvoice() {
 }
 
 /**
- * Post (DRAFT → POSTED). Server appends an INVOICE row to customer_ledger +
- * bumps outstanding. Invalidate ledger AND overview so aging buckets refresh.
+ * Submit for posting (DRAFT → AWAITING_APPROVAL). Opens an `invoice`
+ * approval_request — the customer_ledger append happens later, when the
+ * chain's terminal approver acts. We still invalidate overview + ledger
+ * keys here defensively so the UI re-fetches if the act() lands before
+ * the next user-driven refresh.
  */
-export function useApiPostSalesInvoice(id: string) {
+export function useApiSubmitSalesInvoiceForPosting(id: string) {
   const qc = useQueryClient();
-  return useMutation<SalesInvoiceWithLines, Error, PostSalesInvoice>({
-    mutationFn: (body) => apiPostSalesInvoice(id, body),
+  return useMutation<
+    SalesInvoiceWithLines,
+    Error,
+    SubmitSalesInvoiceForPosting
+  >({
+    mutationFn: (body) => apiSubmitSalesInvoiceForPosting(id, body),
     onSuccess: (invoice) => {
       qc.setQueryData(financeApiKeys.salesInvoices.detail(id), invoice);
       qc.invalidateQueries({

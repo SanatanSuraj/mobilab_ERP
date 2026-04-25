@@ -82,3 +82,32 @@ export const auditChainRunDurationMs = new Histogram({
   buckets: [100, 500, 1000, 5000, 15000, 60000, 300000],
   registers: [registry],
 });
+
+/**
+ * DLQ counter — bumped each time a job is parked in a dead-letter table
+ * (e.g. pdf_render_dlq) or when a queue exhausts retries with no DLQ
+ * landing pad. Labelled by queue + reason so the same counter covers all
+ * worker queues.
+ *
+ * Alertmanager rule (abridged):
+ *   increase(instigenie_dlq_writes_total[5m]) > 0   →   warn
+ *   increase(instigenie_dlq_writes_total[15m]) > 5  →   page
+ *
+ * The metric pairs with a structured `log.error({ event: "dlq.write", ... })`
+ * line — operators alert on whichever signal their stack carries best.
+ */
+export const dlqWritesTotal = new Counter({
+  name: "instigenie_dlq_writes_total",
+  help: "Jobs parked in a dead-letter table or terminal-failed without a DLQ.",
+  labelNames: ["queue", "reason"] as const,
+  registers: [registry],
+});
+
+/** Current depth of dead-letter tables. Set by a periodic scraper or by
+ *  the worker on each DLQ write. Useful for "stale DLQ" alerts. */
+export const dlqDepth = new Gauge({
+  name: "instigenie_dlq_depth",
+  help: "Rows in a dead-letter table awaiting manual triage, by table.",
+  labelNames: ["table"] as const,
+  registers: [registry],
+});

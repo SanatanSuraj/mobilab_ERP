@@ -1,19 +1,23 @@
 /**
  * Gate 43 — ARCHITECTURE.md Phase 4 §9.5 "critical-action" e-signature
- * coverage across the three non-approval integration points.
+ * coverage for the stock-side integration points.
  *
  * Gate 42 proved the EsignatureService primitive on an approval-step
- * act() path. §9.5 enumerates FOUR critical actions, and the remaining
- * three route to their own service methods (not approvals):
+ * act() path. §9.5 enumerates FOUR critical actions; QC final pass and
+ * Invoice issue both now flow through approvals.act() (Gate 42 covers
+ * the primitive; the Finance approval-chain seed marks the terminal
+ * step requiresESignature=true and SalesInvoicesService.applyDecision
+ * stamps the HMAC into posted_at). Stock writes do NOT route through
+ * approvals and keep direct e-sig gates on their service methods:
  *
  *   Critical action (§9.5)  │ Service entry point
  *   ────────────────────────┼────────────────────────────────────────
  *   QC final pass           │ approvals.act() — Gate 42 covers
- *   Invoice issue           │ SalesInvoicesService.post()            ← THIS GATE
+ *   Invoice issue           │ approvals.act() — Finance chain finaliser
  *   Stock write-off         │ StockService.postEntry(SCRAP)          ← THIS GATE
  *   Device release          │ StockService.postEntry(CUSTOMER_ISSUE) ← THIS GATE
  *
- * For each of the three endpoints we assert the same matrix Gate 42
+ * For each of the two stock endpoints we assert the same matrix Gate 42
  * asserts on approvals:
  *
  *   Missing password   → ValidationError, no state change, hash NULL.
@@ -40,24 +44,20 @@
  *   v_it_res (RES-1K)        — 1,336 on hand, used for SCRAP runs.
  *   v_it_ecg (ECG-MONITOR-V2) — 18 on hand, used for CUSTOMER_ISSUE.
  *
- * Cleanup: invoices with numbers starting "GATE-43-" and their line +
- * ledger rows are hard-deleted in beforeEach. stock_ledger rows are
- * append-only by contract and accumulate across runs; we never assert
- * absolute counts so drift doesn't matter.
+ * Cleanup: stock_ledger rows are append-only by contract and accumulate
+ * across runs; we never assert absolute counts so drift doesn't matter
+ * and no beforeEach is required.
  */
 
 import { createHmac } from "node:crypto";
 import {
   afterAll,
   beforeAll,
-  beforeEach,
   describe,
   expect,
   it,
 } from "vitest";
 import pg from "pg";
-import { withOrg } from "@instigenie/db";
-import { SalesInvoicesService } from "@instigenie/api/finance/sales-invoices";
 import { StockService } from "@instigenie/api/inventory/stock";
 import { EsignatureService } from "@instigenie/api/esignature";
 import {
@@ -97,9 +97,9 @@ function makeRequest(args: {
   identityId: string | null;
   role: Role;
 }): ServiceReq {
-  // Empty perm set is fine — SalesInvoicesService.post and
-  // StockService.postEntry never call hasPermission(); the permission
-  // gate lives on the HTTP route, not the service.
+  // Empty perm set is fine — StockService.postEntry never calls
+  // hasPermission(); the permission gate lives on the HTTP route,
+  // not the service.
   const perms = new Set<Permission>();
   return {
     user: {
@@ -138,38 +138,9 @@ function recomputeHash(args: {
   return mac.digest("hex");
 }
 
-/**
- * Create a DRAFT invoice with one line — the minimal shape required to
- * reach the POST precondition checks. invoiceNumber is supplied so we
- * don't consume a finance-sequence slot per run.
- */
-async function makeDraftInvoice(
-  service: SalesInvoicesService,
-  req: ServiceReq,
-  suffix: string,
-): Promise<{ id: string; version: number }> {
-  const detail = await service.create(req, {
-    invoiceNumber: `GATE-43-${suffix}`,
-    customerName: `Gate 43 Test Customer ${suffix}`,
-    invoiceDate: "2026-04-23",
-    currency: "INR",
-    lines: [
-      {
-        description: "Gate 43 test line",
-        quantity: "1.000",
-        unitPrice: "1000.00",
-        taxRatePercent: "18",
-      },
-    ],
-  });
-  return { id: detail.id, version: detail.version };
-}
-
 describe("gate-43 (arch phase 4.2c / §9.5): critical-action e-signatures", () => {
   let pool: pg.Pool;
   let esignature: EsignatureService;
-  let invoicesWithEsig: SalesInvoicesService;
-  let invoicesBarePool: SalesInvoicesService;
   let stockWithEsig: StockService;
   let stockBarePool: StockService;
 
@@ -177,188 +148,12 @@ describe("gate-43 (arch phase 4.2c / §9.5): critical-action e-signatures", () =
     pool = makeTestPool();
     await waitForPg(pool);
     esignature = new EsignatureService({ pool, pepper: TEST_PEPPER });
-    invoicesWithEsig = new SalesInvoicesService({ pool, esignature });
-    invoicesBarePool = new SalesInvoicesService(pool);
     stockWithEsig = new StockService({ pool, esignature });
     stockBarePool = new StockService(pool);
   });
 
   afterAll(async () => {
     await pool.end();
-  });
-
-  beforeEach(async () => {
-    await withOrg(pool, DEV_ORG_ID, async (client) => {
-      await client.query(
-        `SELECT set_config('app.current_user', $1, true)`,
-        [USER_ID],
-      );
-      // Clear any GATE-43-* invoices + lines + ledger reversals from
-      // prior runs so invoice_number uniqueness and line seq arithmetic
-      // start fresh. Lines first because sales_invoices FK depends on
-      // it ON DELETE RESTRICT.
-      await client.query(
-        `DELETE FROM sales_invoice_lines
-          WHERE invoice_id IN (
-            SELECT id FROM sales_invoices
-             WHERE invoice_number LIKE 'GATE-43-%'
-          )`,
-      );
-      await client.query(
-        `DELETE FROM customer_ledger
-          WHERE reference_number LIKE 'GATE-43-%'`,
-      );
-      await client.query(
-        `DELETE FROM sales_invoices WHERE invoice_number LIKE 'GATE-43-%'`,
-      );
-    });
-  });
-
-  // ────────────────────────────────────────────────────────────────────
-  // 43.A — SalesInvoicesService.post  (§9.5 "invoice issue")
-  // ────────────────────────────────────────────────────────────────────
-  describe("43.A invoice POST", () => {
-    it("43.A.1 missing password → ValidationError; stays DRAFT; signature_hash NULL", async () => {
-      const { id, version } = await makeDraftInvoice(
-        invoicesWithEsig,
-        qcRequest(),
-        "A01",
-      );
-      await expect(
-        invoicesWithEsig.post(qcRequest(), id, {
-          expectedVersion: version,
-          eSignatureReason: "I, QC Inspector, certify invoice A01 for issue.",
-          // no eSignaturePassword
-        }),
-      ).rejects.toBeInstanceOf(ValidationError);
-
-      const after = await invoicesWithEsig.getById(qcRequest(), id);
-      expect(after.status).toBe("DRAFT");
-      expect(after.signatureHash).toBeNull();
-      expect(after.postedAt).toBeNull();
-    });
-
-    it("43.A.2 missing reason → ValidationError; stays DRAFT", async () => {
-      const { id, version } = await makeDraftInvoice(
-        invoicesWithEsig,
-        qcRequest(),
-        "A02",
-      );
-      await expect(
-        invoicesWithEsig.post(qcRequest(), id, {
-          expectedVersion: version,
-          eSignaturePassword: PASSWORD,
-          // no eSignatureReason
-        }),
-      ).rejects.toBeInstanceOf(ValidationError);
-
-      const after = await invoicesWithEsig.getById(qcRequest(), id);
-      expect(after.status).toBe("DRAFT");
-      expect(after.signatureHash).toBeNull();
-    });
-
-    it("43.A.3 wrong password → UnauthorizedError; stays DRAFT; no HMAC written", async () => {
-      const { id, version } = await makeDraftInvoice(
-        invoicesWithEsig,
-        qcRequest(),
-        "A03",
-      );
-      await expect(
-        invoicesWithEsig.post(qcRequest(), id, {
-          expectedVersion: version,
-          eSignaturePassword: WRONG_PASSWORD,
-          eSignatureReason: "I, QC Inspector, certify invoice A03 for issue.",
-        }),
-      ).rejects.toBeInstanceOf(UnauthorizedError);
-
-      const after = await invoicesWithEsig.getById(qcRequest(), id);
-      expect(after.status).toBe("DRAFT");
-      expect(after.signatureHash).toBeNull();
-      expect(after.postedAt).toBeNull();
-    });
-
-    it("43.A.4 identityId=null → UnauthorizedError; stays DRAFT", async () => {
-      const { id, version } = await makeDraftInvoice(
-        invoicesWithEsig,
-        qcRequest(),
-        "A04",
-      );
-      await expect(
-        invoicesWithEsig.post(qcRequest(null), id, {
-          expectedVersion: version,
-          eSignaturePassword: PASSWORD,
-          eSignatureReason: "I, QC Inspector, certify invoice A04 for issue.",
-        }),
-      ).rejects.toBeInstanceOf(UnauthorizedError);
-
-      const after = await invoicesWithEsig.getById(qcRequest(), id);
-      expect(after.status).toBe("DRAFT");
-      expect(after.signatureHash).toBeNull();
-    });
-
-    it("43.A.5 deps missing (bare pool) → ValidationError fail-closed; stays DRAFT", async () => {
-      // Use the with-esig service to seed the DRAFT (avoids polluting
-      // the bare-pool invariants), then attempt POST via the bare-pool
-      // service. §9.5 mandates fail-closed on the critical-action path.
-      const { id, version } = await makeDraftInvoice(
-        invoicesWithEsig,
-        qcRequest(),
-        "A05",
-      );
-      await expect(
-        invoicesBarePool.post(qcRequest(), id, {
-          expectedVersion: version,
-          eSignaturePassword: PASSWORD,
-          eSignatureReason: "I, QC Inspector, certify invoice A05 for issue.",
-        }),
-      ).rejects.toBeInstanceOf(ValidationError);
-
-      const after = await invoicesWithEsig.getById(qcRequest(), id);
-      expect(after.status).toBe("DRAFT");
-      expect(after.signatureHash).toBeNull();
-    });
-
-    it("43.A.6 correct password → POSTED; signature_hash is a reproducible HMAC bound to posted_at", async () => {
-      const reason =
-        "I, QC Inspector, certify invoice A06 is ready for issue to the customer.";
-      const { id, version } = await makeDraftInvoice(
-        invoicesWithEsig,
-        qcRequest(),
-        "A06",
-      );
-
-      const actStart = Date.now();
-      const posted = await invoicesWithEsig.post(qcRequest(), id, {
-        expectedVersion: version,
-        eSignaturePassword: PASSWORD,
-        eSignatureReason: reason,
-      });
-      const actEnd = Date.now();
-
-      expect(posted.status).toBe("POSTED");
-      expect(posted.signatureHash).toMatch(/^[0-9a-f]{64}$/);
-      expect(posted.postedAt).not.toBeNull();
-
-      // The hash must recompute from disclosed inputs + pepper.
-      const expected = recomputeHash({
-        reason,
-        identityId: IDENTITY_ID,
-        actedAt: posted.postedAt!,
-        pepper: TEST_PEPPER,
-      });
-      expect(posted.signatureHash).toBe(expected);
-
-      // posted_at came from the server within the wall-clock window.
-      const acted = new Date(posted.postedAt!).getTime();
-      expect(acted).toBeGreaterThanOrEqual(actStart - 1000);
-      expect(acted).toBeLessThanOrEqual(actEnd + 1000);
-
-      // And the DB row on a fresh read matches — proves persistence, not
-      // just return-value plumbing.
-      const refetched = await invoicesWithEsig.getById(qcRequest(), id);
-      expect(refetched.signatureHash).toBe(posted.signatureHash);
-      expect(refetched.postedAt).toBe(posted.postedAt);
-    });
   });
 
   // ────────────────────────────────────────────────────────────────────

@@ -636,7 +636,6 @@ describe("Gate 38.5 — HANDLER_CATALOGUE shape", () => {
       ["sales_order.confirmed", "inventory.reserveForSo"],
       ["sales_order.dispatched", "finance.draftSalesInvoice"],
       ["sales_order.dispatched", "inventory.releaseReservations"],
-      ["quotation.submitted_for_approval", "approvals.openQuotationTicket"],
       ["payment.received", "finance.observeSettlement"],
       // ── Admin-users invite email (outbox-backed notification) ──
       ["user.invite.created", "admin.sendInvitationEmail"],

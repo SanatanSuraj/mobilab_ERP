@@ -621,6 +621,28 @@ export const WorkOrderListQuerySchema = PaginationQuerySchema.extend({
   search: z.string().trim().min(1).max(200).optional(),
 });
 
+// ─── Work-order approval submit ─────────────────────────────────────────────
+
+/**
+ * Payload for POST /production/work-orders/:id/submit-for-approval. The WO
+ * itself doesn't carry a single monetary value (it has a quantity and a
+ * BOM with per-line costs that vary), so the caller supplies the
+ * estimated production value at submit time. The approvals engine uses
+ * that against the `work_order` chain bands (see
+ * ops/sql/seed/14-approvals-dev-data.sql) to pick the right chain
+ * (default <5L, 5L–20L, ≥20L). On approval the finaliser flips the WO
+ * from PLANNED → MATERIAL_CHECK; on rejection → CANCELLED.
+ */
+export const SubmitWorkOrderForApprovalSchema = z.object({
+  estimatedValue: decimalStr,
+  currency: z.string().trim().min(3).max(3).default("INR"),
+  notes: z.string().trim().max(2000).optional(),
+  expectedVersion: z.number().int().positive(),
+});
+export type SubmitWorkOrderForApproval = z.infer<
+  typeof SubmitWorkOrderForApprovalSchema
+>;
+
 // ─── WIP Stage mutations ────────────────────────────────────────────────────
 
 export const AdvanceWipStageSchema = z.object({

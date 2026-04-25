@@ -10,8 +10,10 @@
  *
  * `oee`, `scrapRate`, and `machineUtilization` come back null because the
  * source tables (oee_records, scrap_entries, machine_utilization) don't
- * exist yet. Those sections render <AwaitingBackend/> instead of a fake
- * number — per project policy we never invent data.
+ * exist yet. The dashboard surfaces only the data that IS backed — the
+ * KPI tile shows OEE as "—" if the value is null, and the OEE / scrap /
+ * machine-utilization sections that previously rendered placeholder
+ * cards have been removed (FULL GO audit).
  *
  * No `@/data/*` imports — every datum on this page is server-derived.
  */
@@ -20,7 +22,6 @@ import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";
-import { AwaitingBackend } from "@/components/shared/awaiting-backend";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -35,7 +36,6 @@ import {
   BarChart3,
   ClipboardList,
   Package,
-  TrendingDown,
 } from "lucide-react";
 
 const ACTIVE_WO_STATUSES: ReadonlySet<WoStatus> = new Set([
@@ -313,42 +313,16 @@ export default function ProductionDashboardPage() {
         </Card>
       </div>
 
-      {/* Two-column: OEE Trend + Scrap (both awaiting backend) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold">OEE Trend</h2>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <AwaitingBackend
-            endpoint="GET /production/oee"
-            note="OEE records (availability × performance × quality, per machine + day) need an oee_records table. Once it lands, /production/overview will return a non-null oee value and this section will render the trend table."
-          />
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold">Scrap This Month</h2>
-            <TrendingDown className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <AwaitingBackend
-            endpoint="GET /production/scrap"
-            note="Scrap entries (per-unit write-offs with root cause + value) need a scrap_entries table. /production/overview will populate scrapRate once that ships."
-          />
-        </div>
-      </div>
-
-      {/* Machine utilization — third stub block */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Machine Utilization</h2>
-          <BarChart3 className="h-4 w-4 text-muted-foreground" />
-        </div>
-        <AwaitingBackend
-          endpoint="GET /production/machine-utilization"
-          note="Machine-utilization rollups need a machine_utilization table (or a downtime/uptime ledger). /production/overview will fill machineUtilization once the backing data lands."
-        />
-      </div>
+      {/*
+       * OEE / Scrap / Machine-utilization sections previously rendered
+       * <AwaitingBackend/> placeholders against tables that don't exist
+       * yet (oee_records, scrap_entries, machine_utilization). Per the
+       * production-readiness audit (zero-conditions FULL GO) those
+       * stub cards have been removed — the dashboard now renders only
+       * surfaces backed by real data. The KPI row above still surfaces
+       * `overview.oee` if the backing table is added later (the value
+       * is returned as null today and shows as "—").
+       */}
     </div>
   );
 }

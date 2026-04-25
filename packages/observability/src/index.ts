@@ -19,4 +19,6 @@ export {
   jobDurationMs,
   auditChainBreakTotal,
   auditChainRunDurationMs,
+  dlqWritesTotal,
+  dlqDepth,
 } from "./metrics.js";

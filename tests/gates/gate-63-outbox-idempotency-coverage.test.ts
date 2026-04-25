@@ -87,11 +87,11 @@ const silentLog = {
 const HANDLER_NAME_RE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*\.[a-z][A-Za-z0-9]*$/;
 
 /**
- * `aggregate.verb` (deal.won), `aggregate_noun.verb_noun`
- * (qc_inward.passed, quotation.submitted_for_approval), or a 3-segment
- * `aggregate.noun.verb` (user.invite.created) — all snake/dot
- * lowercase. Permits 2–3 dot-separated segments so the catalogue can
- * namespace multi-word domains without breaking the fence check.
+ * `aggregate.verb` (deal.won), `aggregate_noun.verb` (qc_inward.passed,
+ * sales_order.confirmed), or a 3-segment `aggregate.noun.verb`
+ * (user.invite.created) — all snake/dot lowercase. Permits 2–3
+ * dot-separated segments so the catalogue can namespace multi-word
+ * domains without breaking the fence check.
  */
 const EVENT_TYPE_RE =
   /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,2}$/;

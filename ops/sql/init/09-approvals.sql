@@ -202,3 +202,19 @@ CREATE INDEX IF NOT EXISTS workflow_transitions_org_created_idx
 CREATE INDEX IF NOT EXISTS workflow_transitions_actor_idx
   ON workflow_transitions (org_id, actor_id, created_at DESC)
   WHERE actor_id IS NOT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Deferred FK: deals.discount_request_id → approval_requests.id.
+--
+-- The `deals` table (init/02-crm.sql) carries a discount_request_id column
+-- pointing at the open approval_request for a header-level discount > 15%
+-- approval. We can't declare the FK inline there because approval_requests
+-- does not exist at that point in bootstrap order. ON DELETE SET NULL so a
+-- request can be cleaned up without cascading the deal into limbo.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE deals
+  DROP CONSTRAINT IF EXISTS deals_discount_request_fk;
+ALTER TABLE deals
+  ADD CONSTRAINT deals_discount_request_fk
+    FOREIGN KEY (discount_request_id) REFERENCES approval_requests(id) ON DELETE SET NULL;

@@ -112,12 +112,26 @@ export interface ApprovalsServiceDeps {
  * terminal status (APPROVED or REJECTED) inside `act()`. Runs in the
  * same transaction as the act() write — finalisers MUST NOT call
  * `withRequest` or open new transactions.
+ *
+ * `eSignatureHash` is the HMAC computed for the *terminal* step when it
+ * required an e-signature (see init/09-approvals.sql:152). Finalisers
+ * that need to stamp the hash onto the domain row (e.g. invoice
+ * `signature_hash`) read it here; finalisers that don't care just
+ * ignore the field.
+ *
+ * `actedAt` is the ISO-8601 string that `act()` bound the HMAC against —
+ * a finaliser persisting the hash MUST stamp this same string onto the
+ * domain row's "acted/posted at" column so an auditor recomputing the
+ * HMAC from `(reason || identityId || actedAt)` reproduces the stored
+ * hex deterministically.
  */
 export interface ApprovalFinaliserContext {
   request: ApprovalRequest;
   finalStatus: "APPROVED" | "REJECTED";
   actor: RequestUser;
   comment: string | null;
+  eSignatureHash: string | null;
+  actedAt: string;
 }
 
 export type ApprovalFinaliser = (
@@ -585,6 +599,8 @@ export class ApprovalsService {
             finalStatus,
             actor: user,
             comment: payload.comment ?? null,
+            eSignatureHash,
+            actedAt,
           });
         }
       }

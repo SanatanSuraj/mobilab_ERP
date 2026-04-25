@@ -68,9 +68,30 @@ const currencyCode = z
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-export const INVOICE_STATUSES = ["DRAFT", "POSTED", "CANCELLED"] as const;
+export const INVOICE_STATUSES = [
+  "DRAFT",
+  "AWAITING_APPROVAL",
+  "POSTED",
+  "CANCELLED",
+] as const;
 export const InvoiceStatusSchema = z.enum(INVOICE_STATUSES);
 export type InvoiceStatus = z.infer<typeof InvoiceStatusSchema>;
+
+/**
+ * Purchase invoices do not flow through the approvals engine, so their
+ * status enum is the legacy three-state shape. Sales invoices carry the
+ * extra AWAITING_APPROVAL state above. Keep these distinct so the
+ * TypeScript checker can't mistakenly let an AWAITING_APPROVAL value
+ * reach a purchase-invoice mutator (the DB CHECK constraint on
+ * purchase_invoices.status would reject it at runtime).
+ */
+export const PURCHASE_INVOICE_STATUSES = [
+  "DRAFT",
+  "POSTED",
+  "CANCELLED",
+] as const;
+export const PurchaseInvoiceStatusSchema = z.enum(PURCHASE_INVOICE_STATUSES);
+export type PurchaseInvoiceStatus = z.infer<typeof PurchaseInvoiceStatusSchema>;
 
 export const PURCHASE_INVOICE_MATCH_STATUSES = [
   "PENDING",
@@ -295,21 +316,37 @@ export const UpdateSalesInvoiceSchema = z.object({
 });
 export type UpdateSalesInvoice = z.infer<typeof UpdateSalesInvoiceSchema>;
 
+/**
+ * @deprecated Direct invoice POST was removed when invoice posting moved
+ * behind the central approvals engine. Callers now POST to
+ * `/finance/sales-invoices/:id/submit-for-posting` (see
+ * `SubmitSalesInvoiceForPostingSchema`) and the e-signature is captured at
+ * the chain's terminal step in `/approvals/:id/act`. The schema is kept
+ * exported only so the auto-generated SDK doesn't lose a type symbol that
+ * downstream consumers may still reference; new code should not import it.
+ */
 export const PostSalesInvoiceSchema = z.object({
   expectedVersion: z.number().int().positive(),
   postedAt: z.string().optional(),
-  /**
-   * Phase 4 §9.5 — "Invoice issue" is a critical action requiring
-   * password re-entry. The server HMAC-SHA256s (eSignatureReason ||
-   * userIdentityId || postedAt) with ESIGNATURE_PEPPER and stores the
-   * hex on sales_invoices.signature_hash. Optional at the contract
-   * layer so pre-§4.2c tooling still parses; the service rejects
-   * missing fields when EsignatureService is wired into DI.
-   */
   eSignaturePassword: z.string().min(1).max(256).optional(),
   eSignatureReason: z.string().trim().min(1).max(500).optional(),
 });
 export type PostSalesInvoice = z.infer<typeof PostSalesInvoiceSchema>;
+
+/**
+ * Body for `POST /finance/sales-invoices/:id/submit-for-posting`. Flips
+ * status DRAFT → AWAITING_APPROVAL and opens an `invoice` approval_request.
+ * The terminal approver supplies password + reason at
+ * `/approvals/:id/act`; the HMAC is computed there and the resulting hash
+ * is stamped onto `sales_invoices.signature_hash` by the finaliser.
+ */
+export const SubmitSalesInvoiceForPostingSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  notes: z.string().trim().max(2000).optional(),
+});
+export type SubmitSalesInvoiceForPosting = z.infer<
+  typeof SubmitSalesInvoiceForPostingSchema
+>;
 
 export const CancelSalesInvoiceSchema = z.object({
   expectedVersion: z.number().int().positive(),
@@ -355,7 +392,7 @@ export const PurchaseInvoiceSchema = z.object({
   orgId: uuid,
   invoiceNumber: z.string(),
   vendorInvoiceNo: z.string().nullable(),
-  status: InvoiceStatusSchema,
+  status: PurchaseInvoiceStatusSchema,
   matchStatus: PurchaseInvoiceMatchStatusSchema,
   matchNotes: z.string().nullable(),
   vendorId: uuid.nullable(),
@@ -469,7 +506,7 @@ export type CancelPurchaseInvoice = z.infer<
 >;
 
 export const PurchaseInvoiceListQuerySchema = PaginationQuerySchema.extend({
-  status: InvoiceStatusSchema.optional(),
+  status: PurchaseInvoiceStatusSchema.optional(),
   matchStatus: PurchaseInvoiceMatchStatusSchema.optional(),
   vendorId: uuid.optional(),
   purchaseOrderId: uuid.optional(),

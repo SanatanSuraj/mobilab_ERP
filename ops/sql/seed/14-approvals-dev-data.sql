@@ -27,12 +27,13 @@
 --     default (<20L)   : Finance
 --     >=20L            : Finance → Management
 --
---   quotation                       (automate.md Track 1 Phase 2)
+--   quotation                       (CRM/Finance approvals wiring)
 --     default (<20L)   : Sales Manager
 --     >=20L            : Sales Manager → Finance
---     The worker handler `quotation-approval-requested.ts` resolves this
---     chain on every quotation.submitted_for_approval outbox delivery —
---     if the seed hasn't run the handler logs + returns gracefully.
+--     QuotationsService.transitionStatus() opens an approval_request
+--     synchronously when a quotation moves into AWAITING_APPROVAL —
+--     `ApprovalsService.act()` calls back into the quotation finaliser
+--     once the chain reaches APPROVED or REJECTED. No worker handler.
 
 DO $$
 DECLARE
@@ -97,15 +98,20 @@ BEGIN
      '[{"stepNumber":1,"roleId":"QC_INSPECTOR","requiresESignature":true}]'::jsonb),
 
     -- ── invoice ───────────────────────────────────────────────────────────
+    -- Invoice POST is a §9.5-critical action — the previously hand-rolled
+    -- e-sig check on POST /finance/sales-invoices/:id/post moved to the
+    -- terminal step of the approval chain. The terminal approver re-enters
+    -- their password, ApprovalsService.act() HMACs the hash, and the
+    -- invoice finaliser stamps it onto sales_invoices.signature_hash.
     ('00000000-0000-0000-0000-0000000ac501', v_org_id, 'invoice',
-     'Invoice Issue — standard (<20L)', 'Finance Manager sign-off.',
+     'Invoice Issue — standard (<20L)', 'Finance Manager sign-off (e-sig).',
      NULL, 2000000,
-     '[{"stepNumber":1,"roleId":"FINANCE","requiresESignature":false}]'::jsonb),
+     '[{"stepNumber":1,"roleId":"FINANCE","requiresESignature":true}]'::jsonb),
     ('00000000-0000-0000-0000-0000000ac502', v_org_id, 'invoice',
-     'Invoice Issue — senior tier (>=20L)', 'Adds Management.',
+     'Invoice Issue — senior tier (>=20L)', 'Adds Management with e-sig at the terminal step.',
      2000000, NULL,
      '[{"stepNumber":1,"roleId":"FINANCE","requiresESignature":false},
-       {"stepNumber":2,"roleId":"MANAGEMENT","requiresESignature":false}]'::jsonb),
+       {"stepNumber":2,"roleId":"MANAGEMENT","requiresESignature":true}]'::jsonb),
 
     -- ── quotation (automate.md Track 1) ───────────────────────────────────
     -- Mirrors the existing invoice chain shape but starts at Sales because

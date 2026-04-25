@@ -351,6 +351,16 @@ export const DealSchema = z.object({
   closedAt: z.string().nullable(),
   lostReason: z.string().nullable(),
   leadId: uuid.nullable(),
+  // Header-level discount approval state. `pendingDiscountPct` is the
+  // requested percentage carried until the approval lands; on APPROVE the
+  // finaliser copies it to `approvedDiscountPct`, on REJECT it is cleared.
+  // `discountRequestId` is the FK back into approval_requests so the UI can
+  // link straight to the live request without a second round-trip.
+  pendingDiscountPct: decimalStr.nullable(),
+  approvedDiscountPct: decimalStr.nullable(),
+  discountApprovedBy: uuid.nullable(),
+  discountApprovedAt: z.string().nullable(),
+  discountRequestId: uuid.nullable(),
   version: z.number().int().positive(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -393,6 +403,25 @@ export const TransitionDealStageSchema = z.object({
   lostReason: z.string().trim().max(500).optional(),
 });
 export type TransitionDealStage = z.infer<typeof TransitionDealStageSchema>;
+
+/**
+ * Submit a header-level discount on a deal for approval. ARCHITECTURE.md §3.3
+ * routes any deal_discount > 15% through the central approvals workflow
+ * (Sales Manager + Finance). The endpoint refuses ≤15% — those discounts
+ * just go through the regular deal PATCH flow.
+ *
+ * `pendingDiscountPct` is parked on the deal row until the approval lands;
+ * the finaliser copies it to `approvedDiscountPct` on APPROVE or clears it
+ * on REJECT.
+ */
+export const SubmitDealDiscountForApprovalSchema = z.object({
+  pendingDiscountPct: z.number().min(0).max(100),
+  expectedVersion: z.number().int().positive(),
+  notes: z.string().trim().max(2000).optional(),
+});
+export type SubmitDealDiscountForApproval = z.infer<
+  typeof SubmitDealDiscountForApprovalSchema
+>;
 
 // ─── Tickets ─────────────────────────────────────────────────────────────────
 
@@ -602,6 +631,13 @@ export type TransitionQuotationStatus = z.infer<
   typeof TransitionQuotationStatusSchema
 >;
 
+/**
+ * @deprecated Quotation approvals now flow through the central
+ *             approvals engine (entity_type='quotation'). The frontend
+ *             should call POST /approvals/:id/act once the quotation
+ *             is in AWAITING_APPROVAL — this schema is kept solely so
+ *             existing FE imports don't fail to compile.
+ */
 export const ApproveQuotationSchema = z.object({
   expectedVersion: z.number().int().positive(),
 });

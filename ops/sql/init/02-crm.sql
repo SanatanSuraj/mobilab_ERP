@@ -158,6 +158,19 @@ CREATE TABLE IF NOT EXISTS deals (
   closed_at       timestamptz,
   lost_reason     text,
   lead_id         uuid REFERENCES leads(id) ON DELETE SET NULL,
+  -- Header-level discount approval state. Discounts proposed via
+  -- POST /crm/deals/:id/submit-discount-for-approval flow through the
+  -- central approvals engine (entity_type='deal_discount'); the finaliser
+  -- copies pending → approved on APPROVE or clears on REJECT.
+  -- discount_request_id is the FK back into approval_requests; added in a
+  -- second pass (below) once approvals tables exist in the bootstrap order.
+  pending_discount_pct  numeric(5, 2)
+                          CHECK (pending_discount_pct IS NULL OR pending_discount_pct BETWEEN 0 AND 100),
+  approved_discount_pct numeric(5, 2)
+                          CHECK (approved_discount_pct IS NULL OR approved_discount_pct BETWEEN 0 AND 100),
+  discount_approved_by  uuid REFERENCES users(id) ON DELETE SET NULL,
+  discount_approved_at  timestamptz,
+  discount_request_id   uuid,
   -- Optimistic concurrency: bumped by trigger on every UPDATE.
   version         integer NOT NULL DEFAULT 1,
   created_at      timestamptz NOT NULL DEFAULT now(),
@@ -170,6 +183,9 @@ CREATE INDEX IF NOT EXISTS deals_assigned_idx ON deals (org_id, assigned_to) WHE
 CREATE INDEX IF NOT EXISTS deals_account_idx ON deals (org_id, account_id);
 CREATE UNIQUE INDEX IF NOT EXISTS deals_number_org_unique
   ON deals (org_id, deal_number);
+CREATE INDEX IF NOT EXISTS deals_discount_request_idx
+  ON deals (discount_request_id)
+  WHERE discount_request_id IS NOT NULL;
 
 -- Deferred FK: leads.converted_to_deal_id → deals.id.
 ALTER TABLE leads

@@ -358,6 +358,47 @@ export const salesInvoicesRepo = {
     );
   },
 
+  async markAwaitingApproval(
+    client: PoolClient,
+    id: string,
+    expectedVersion: number,
+  ): Promise<SalesInvoice | "version_conflict" | "not_draft" | null> {
+    const cur = await salesInvoicesRepo.getById(client, id);
+    if (!cur) return null;
+    if (cur.status !== "DRAFT") return "not_draft";
+    if (cur.version !== expectedVersion) return "version_conflict";
+    const { rows } = await client.query<InvoiceRow>(
+      `UPDATE sales_invoices
+          SET status     = 'AWAITING_APPROVAL',
+              version    = version + 1,
+              updated_at = now()
+        WHERE id = $1 AND version = $2 AND status = 'DRAFT' AND deleted_at IS NULL
+        RETURNING ${SELECT_COLS}`,
+      [id, expectedVersion],
+    );
+    if (!rows[0]) return "version_conflict";
+    return rowToInvoice(rows[0]);
+  },
+
+  async revertToDraft(
+    client: PoolClient,
+    id: string,
+  ): Promise<SalesInvoice | null> {
+    // Reject path on the approvals chain. Bump version so any FE that
+    // cached the AWAITING_APPROVAL snapshot fails its OCC on the next
+    // edit. status filter guards against double-fire from a retry.
+    const { rows } = await client.query<InvoiceRow>(
+      `UPDATE sales_invoices
+          SET status     = 'DRAFT',
+              version    = version + 1,
+              updated_at = now()
+        WHERE id = $1 AND status = 'AWAITING_APPROVAL' AND deleted_at IS NULL
+        RETURNING ${SELECT_COLS}`,
+      [id],
+    );
+    return rows[0] ? rowToInvoice(rows[0]) : null;
+  },
+
   async markPosted(
     client: PoolClient,
     id: string,
@@ -369,16 +410,20 @@ export const salesInvoicesRepo = {
     // the signature_hash binds to the exact postedAt value (Phase 4 §9.5).
     // If the DB used now() while the service hashed against
     // new Date().toISOString(), an auditor recomputing the HMAC would
-    // never reproduce the stored hex. Callers that don't need e-sig
-    // (backward-compat legacy pool-only construction) still supply an
-    // actedAt from the service layer — never null.
+    // never reproduce the stored hex. Callers in the approvals path pass
+    // ctx.actedAt — the same string the HMAC was bound to.
+    //
+    // Source-state filter accepts both DRAFT (legacy direct-post path,
+    // pre-approvals) and AWAITING_APPROVAL (approvals finaliser path).
     const { rows } = await client.query<InvoiceRow>(
       `UPDATE sales_invoices
           SET status = 'POSTED',
               posted_at = $2::timestamptz,
               posted_by = $3,
               signature_hash = $4
-        WHERE id = $1 AND status = 'DRAFT' AND deleted_at IS NULL
+        WHERE id = $1
+          AND status IN ('DRAFT', 'AWAITING_APPROVAL')
+          AND deleted_at IS NULL
         RETURNING ${SELECT_COLS}`,
       [id, postedAt, postedBy, signatureHash],
     );

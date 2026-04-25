@@ -82,6 +82,7 @@ function formatDate(iso: string | null | undefined): string {
 
 const STATUS_TONE: Record<InvoiceStatus, string> = {
   DRAFT: "bg-amber-50 text-amber-700 border-amber-200",
+  AWAITING_APPROVAL: "bg-purple-50 text-purple-700 border-purple-200",
   POSTED: "bg-blue-50 text-blue-700 border-blue-200",
   CANCELLED: "bg-gray-50 text-gray-600 border-gray-200",
 };

@@ -16,7 +16,11 @@ initTracing({ serviceName: "worker" });
 
 import http from "node:http";
 import pg from "pg";
-import { createLogger, registry } from "@instigenie/observability";
+import {
+  createLogger,
+  dlqWritesTotal,
+  registry,
+} from "@instigenie/observability";
 import { installNumericTypeParser } from "@instigenie/db";
 import {
   QueueNames,
@@ -215,8 +219,19 @@ async function main(): Promise<void> {
           attempts: attemptsMade,
           lastError: err.message,
         });
+        // Bump the DLQ counter BEFORE the structured log line so a scrape
+        // racing against the log shipper still sees the metric. The
+        // alertmanager rule paired with this metric (see
+        // packages/observability/src/metrics.ts:dlqWritesTotal) is the
+        // primary signal — log.error is the secondary one for humans.
+        dlqWritesTotal.inc({
+          queue: QueueNames.pdfRender,
+          reason: "attempts_exhausted",
+        });
         log.error(
           {
+            event: "dlq.write",
+            queue: QueueNames.pdfRender,
             docType: job.data.docType,
             docId: job.data.docId,
             orgId: job.data.orgId,
@@ -227,9 +242,16 @@ async function main(): Promise<void> {
         );
       } catch (dlqErr) {
         // If we can't even write the DLQ row we've no safety net left.
-        // Log loudly — Gate 13 alerts on worker-error.
+        // Bump the metric with reason=dlq_write_failed so the alert still
+        // fires even when Postgres is the broken dependency.
+        dlqWritesTotal.inc({
+          queue: QueueNames.pdfRender,
+          reason: "dlq_write_failed",
+        });
         log.error(
           {
+            event: "dlq.write_failed",
+            queue: QueueNames.pdfRender,
             err: dlqErr,
             originalErr: err,
             jobData: job.data,
@@ -243,13 +265,37 @@ async function main(): Promise<void> {
   for (const w of workers) {
     if (w.name === QueueNames.pdfRender) continue; // custom DLQ hook above
     w.on("failed", (job, err) => {
+      const attemptsMade = job?.attemptsMade ?? 0;
+      const maxAttempts = job?.opts?.attempts ?? 1;
+      const exhausted = !!job && attemptsMade >= maxAttempts;
+      // For queues without a dedicated DLQ table (outbox-dispatch,
+      // email, audit-hashchain), terminal failure means the job is gone
+      // for good unless we surface it. Bump the DLQ counter so
+      // Alertmanager pages on-call — log.error alone is too easy to miss
+      // in a noisy stream.
+      if (exhausted) {
+        dlqWritesTotal.inc({
+          queue: w.name,
+          reason: "attempts_exhausted_no_dlq_table",
+        });
+      }
       log.error(
-        { queue: w.name, jobId: job?.id, err },
-        "job failed"
+        {
+          event: exhausted ? "dlq.write" : "job.failed",
+          queue: w.name,
+          jobId: job?.id,
+          attempts: attemptsMade,
+          maxAttempts,
+          terminal: exhausted,
+          err,
+        },
+        exhausted
+          ? `${w.name}: attempts exhausted (no DLQ table — alert via metric)`
+          : "job failed",
       );
     });
     w.on("error", (err) => {
-      log.error({ queue: w.name, err }, "worker error");
+      log.error({ event: "worker.error", queue: w.name, err }, "worker error");
     });
   }
   pdfRenderWorker.on("error", (err) => {

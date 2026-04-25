@@ -11,7 +11,7 @@ import type { PoolClient } from "pg";
 import type {
   CreatePurchaseInvoice,
   CreatePurchaseInvoiceLine,
-  InvoiceStatus,
+  PurchaseInvoiceStatus,
   PurchaseInvoice,
   PurchaseInvoiceLine,
   PurchaseInvoiceMatchStatus,
@@ -27,7 +27,7 @@ interface InvoiceRow {
   org_id: string;
   invoice_number: string;
   vendor_invoice_no: string | null;
-  status: InvoiceStatus;
+  status: PurchaseInvoiceStatus;
   match_status: PurchaseInvoiceMatchStatus;
   match_notes: string | null;
   vendor_id: string | null;
@@ -165,7 +165,7 @@ const LINE_COLS = `id, org_id, invoice_id, sequence_number,
 // ── Repo ─────────────────────────────────────────────────────────────────────
 
 export interface PurchaseInvoiceListFilters {
-  status?: InvoiceStatus;
+  status?: PurchaseInvoiceStatus;
   matchStatus?: PurchaseInvoiceMatchStatus;
   vendorId?: string;
   purchaseOrderId?: string;

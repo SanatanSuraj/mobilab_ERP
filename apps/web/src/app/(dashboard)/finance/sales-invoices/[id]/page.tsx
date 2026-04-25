@@ -58,8 +58,8 @@ import {
   useApiCreatePayment,
   useApiCustomerLedger,
   useApiDeleteSalesInvoiceLine,
-  useApiPostSalesInvoice,
   useApiSalesInvoice,
+  useApiSubmitSalesInvoiceForPosting,
 } from "@/hooks/useFinanceApi";
 import type { InvoiceStatus } from "@instigenie/contracts";
 import {
@@ -103,6 +103,7 @@ function formatDate(iso: string | null | undefined): string {
 
 const STATUS_TONE: Record<InvoiceStatus, string> = {
   DRAFT: "bg-amber-50 text-amber-700 border-amber-200",
+  AWAITING_APPROVAL: "bg-purple-50 text-purple-700 border-purple-200",
   POSTED: "bg-blue-50 text-blue-700 border-blue-200",
   CANCELLED: "bg-gray-50 text-gray-600 border-gray-200",
 };
@@ -122,7 +123,7 @@ export default function SalesInvoiceDetailPage() {
 
   const addLine = useApiAddSalesInvoiceLine(invoiceId);
   const deleteLine = useApiDeleteSalesInvoiceLine(invoiceId);
-  const postInvoice = useApiPostSalesInvoice(invoiceId);
+  const submitForPosting = useApiSubmitSalesInvoiceForPosting(invoiceId);
   const cancelInvoice = useApiCancelSalesInvoice(invoiceId);
   const createPayment = useApiCreatePayment();
 
@@ -248,13 +249,20 @@ export default function SalesInvoiceDetailPage() {
     }
   };
 
-  const handlePost = async (): Promise<void> => {
+  const handleSubmitForPosting = async (): Promise<void> => {
     try {
-      await postInvoice.mutateAsync({
+      await submitForPosting.mutateAsync({
         expectedVersion: invoice.version,
       });
+      // Nudge the user toward the approvals queue — that's where the
+      // terminal approver re-enters their password to seal the post.
+      router.push("/approvals");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "failed to post invoice");
+      alert(
+        err instanceof Error
+          ? err.message
+          : "failed to submit invoice for posting",
+      );
     }
   };
 
@@ -608,18 +616,18 @@ export default function SalesInvoiceDetailPage() {
         <div className="flex items-center gap-2">
           {isDraft && (
             <Button
-              onClick={handlePost}
-              disabled={postInvoice.isPending || lines.length === 0}
+              onClick={handleSubmitForPosting}
+              disabled={submitForPosting.isPending || lines.length === 0}
               size="sm"
             >
-              {postInvoice.isPending ? (
+              {submitForPosting.isPending ? (
                 <>
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" /> Posting…
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" /> Submitting…
                 </>
               ) : (
                 <>
                   <Send className="h-4 w-4 mr-1" />
-                  Post Invoice
+                  Submit for Posting
                 </>
               )}
             </Button>

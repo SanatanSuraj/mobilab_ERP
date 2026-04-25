@@ -30,7 +30,7 @@ import type {
   InvoiceStatus,
   CreateSalesInvoice,
   UpdateSalesInvoice,
-  PostSalesInvoice,
+  SubmitSalesInvoiceForPosting,
   CancelSalesInvoice,
   CreateSalesInvoiceLine,
   UpdateSalesInvoiceLine,
@@ -39,6 +39,7 @@ import type {
   PurchaseInvoiceWithLines,
   PurchaseInvoiceLine,
   PurchaseInvoiceMatchStatus,
+  PurchaseInvoiceStatus,
   CreatePurchaseInvoice,
   UpdatePurchaseInvoice,
   PostPurchaseInvoice,
@@ -152,14 +153,16 @@ export async function apiDeleteSalesInvoice(id: string): Promise<void> {
 }
 
 /**
- * Post (DRAFT → POSTED). Appends an INVOICE row to customer_ledger.
- * Requires ≥1 line and positive grandTotal.
+ * Submit for posting (DRAFT → AWAITING_APPROVAL). Opens an `invoice`
+ * approval_request; the actual ledger append happens when the chain's
+ * terminal approver acts at `/approvals/:id/act`. Requires ≥1 line and
+ * positive grandTotal.
  */
-export async function apiPostSalesInvoice(
+export async function apiSubmitSalesInvoiceForPosting(
   id: string,
-  body: PostSalesInvoice,
+  body: SubmitSalesInvoiceForPosting,
 ): Promise<SalesInvoiceWithLines> {
-  return tenantPost(`/finance/sales-invoices/${id}/post`, body);
+  return tenantPost(`/finance/sales-invoices/${id}/submit-for-posting`, body);
 }
 
 /**
@@ -214,7 +217,7 @@ export async function apiDeleteSalesInvoiceLine(
 // ─── Purchase Invoices (Vendor Bills) ────────────────────────────────────────
 
 export interface PurchaseInvoiceListQuery extends PaginationParams {
-  status?: InvoiceStatus;
+  status?: PurchaseInvoiceStatus;
   matchStatus?: PurchaseInvoiceMatchStatus;
   vendorId?: string;
   purchaseOrderId?: string;

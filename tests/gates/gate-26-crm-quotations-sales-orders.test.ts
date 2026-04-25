@@ -304,49 +304,11 @@ describe("gate-26: quotations + sales-orders service integration", () => {
     });
   });
 
-  // ─── QuotationsService.approve ──────────────────────────────────────────────
-
-  describe("QuotationsService.approve", () => {
-    it("stamps approvedBy/approvedAt and moves AWAITING_APPROVAL → APPROVED", async () => {
-      const q = await quotations.create(makeRequest(), {
-        company: "gate-26 approve-happy",
-        contactName: "T",
-        lineItems: [
-          {
-            productCode: "SKU-A",
-            productName: "Approve Widget",
-            quantity: 1,
-            unitPrice: "600000.00",
-            discountPct: "0",
-            taxPct: "0",
-          },
-        ],
-      });
-      expect(q.status).toBe("AWAITING_APPROVAL");
-
-      const approved = await quotations.approve(makeRequest(), q.id, {
-        expectedVersion: q.version,
-      });
-      expect(approved.status).toBe("APPROVED");
-      expect(approved.approvedBy).toBe(DEV_USER_ID);
-      expect(approved.approvedAt).not.toBeNull();
-      expect(approved.version).toBe(q.version + 1);
-    });
-
-    it("refuses to approve a DRAFT quotation", async () => {
-      const q = await quotations.create(makeRequest(), {
-        company: "gate-26 approve-wrong-status",
-        contactName: "T",
-        lineItems: [TRIVIAL_LINE],
-      });
-      expect(q.status).toBe("DRAFT");
-      await expect(
-        quotations.approve(makeRequest(), q.id, {
-          expectedVersion: q.version,
-        }),
-      ).rejects.toBeInstanceOf(StateTransitionError);
-    });
-  });
+  // QuotationsService.approve was removed when quotation approvals moved
+  // to the central approvals engine. AWAITING_APPROVAL → APPROVED is now
+  // driven by ApprovalsService.act() invoking the quotation finaliser
+  // (see quotations.service.ts:applyDecisionFromApprovals). The transition
+  // is covered by the approvals engine gates and the finaliser unit tests.
 
   // ─── QuotationsService.convertToSalesOrder ──────────────────────────────────
 

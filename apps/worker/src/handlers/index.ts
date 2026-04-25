@@ -37,7 +37,6 @@ import {
   draftSalesInvoice,
   releaseReservations,
 } from "./sales-order-dispatched.js";
-import { openTicket as openQuotationApprovalTicket } from "./quotation-approval-requested.js";
 import { observeSettlement } from "./payment-received.js";
 import { makeSendInvitationEmail } from "./user-invite-created.js";
 import { loadEnv } from "../env.js";
@@ -139,13 +138,6 @@ export const HANDLER_CATALOGUE: HandlerEntry[] = [
     handler: releaseReservations as unknown as HandlerEntry["handler"],
   },
 
-  // quotation.submitted_for_approval → approvals.openTicket
-  {
-    eventType: "quotation.submitted_for_approval",
-    handlerName: "approvals.openQuotationTicket",
-    handler: openQuotationApprovalTicket as unknown as HandlerEntry["handler"],
-  },
-
   // payment.received → finance.observeSettlement (read-only shell — see file
   // header; the real apply-to-ledger + maybe-settle logic can't land until
   // the schema gap in sales_invoices.status is closed in Track 2).
@@ -186,7 +178,6 @@ export type {
   // Track 1 Phase 1 payloads (automate.md)
   LeadConvertedPayload,
   DealStageChangedPayload,
-  QuotationApprovalRequestedPayload,
   SalesOrderConfirmedPayload,
   SalesOrderDispatchedPayload,
   PoIssuedPayload,

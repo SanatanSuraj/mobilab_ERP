@@ -31,7 +31,6 @@ import type pg from "pg";
 import type { FastifyRequest } from "fastify";
 import { Decimal } from "@instigenie/money";
 import type {
-  ApproveQuotation,
   ConvertQuotation,
   CreateQuotation,
   CreateQuotationLineItem,
@@ -59,6 +58,10 @@ import {
 } from "./quotations.repository.js";
 import { salesOrdersRepo } from "./sales-orders.repository.js";
 import { requireUser } from "../../context/request-context.js";
+import type {
+  ApprovalsService,
+  ApprovalFinaliserContext,
+} from "../approvals/approvals.service.js";
 
 type QuotationListQuery = z.infer<typeof QuotationListQuerySchema>;
 
@@ -137,8 +140,42 @@ function computeTotals(items: CreateQuotationLineItem[]): ComputedTotals {
   };
 }
 
+export interface QuotationsServiceDeps {
+  pool: pg.Pool;
+  /**
+   * Required to dispatch into `/approvals/*` when a quotation lands in
+   * AWAITING_APPROVAL (either via create() above the threshold or via
+   * an explicit transitionStatus). Optional in the deps shape so a
+   * bare-pool fallback compiles, but absent at runtime any over-threshold
+   * create + any AWAITING_APPROVAL transition fails closed rather than
+   * silently skipping the approval row.
+   */
+  approvals?: ApprovalsService;
+}
+
+function isQuotationsServiceDeps(
+  x: QuotationsServiceDeps | pg.Pool,
+): x is QuotationsServiceDeps {
+  return typeof x === "object" && x !== null && "pool" in x;
+}
+
 export class QuotationsService {
-  constructor(private readonly pool: pg.Pool) {}
+  private readonly pool: pg.Pool;
+  private readonly approvals: ApprovalsService | null;
+
+  // Two accepted shapes — pre-Phase-4 callers passed a bare pool, post-
+  // wiring callers pass a deps object so the approvals dispatcher can be
+  // injected. When approvals is missing at runtime, the AWAITING_APPROVAL
+  // path raises a clear error rather than silently skipping the request.
+  constructor(deps: QuotationsServiceDeps | pg.Pool) {
+    if (isQuotationsServiceDeps(deps)) {
+      this.pool = deps.pool;
+      this.approvals = deps.approvals ?? null;
+    } else {
+      this.pool = deps;
+      this.approvals = null;
+    }
+  }
 
   async list(
     req: FastifyRequest,
@@ -175,8 +212,14 @@ export class QuotationsService {
   ): Promise<Quotation> {
     const user = requireUser(req);
     const totals = computeTotals(input.lineItems);
+    if (totals.requiresApproval && !this.approvals) {
+      throw new ValidationError(
+        "approvals service is not wired — over-threshold quotations cannot be created",
+      );
+    }
+    const approvals = this.approvals;
     return withRequest(req, this.pool, async (client) => {
-      return quotationsRepo.create(client, user.orgId, {
+      const quotation = await quotationsRepo.create(client, user.orgId, {
         dealId: input.dealId ?? null,
         accountId: input.accountId ?? null,
         contactId: input.contactId ?? null,
@@ -191,6 +234,19 @@ export class QuotationsService {
         status: totals.requiresApproval ? "AWAITING_APPROVAL" : "DRAFT",
         lineItems: totals.lineItems,
       });
+      // Over-threshold create lands the quotation in AWAITING_APPROVAL —
+      // open the central approval_request in the same transaction so the
+      // row never sits in AWAITING_APPROVAL without a backing request.
+      if (totals.requiresApproval && approvals) {
+        await approvals.createRequestForEntity(client, user, {
+          entityType: "quotation",
+          entityId: quotation.id,
+          amount: quotation.grandTotal,
+          currency: "INR",
+          notes: input.notes,
+        });
+      }
+      return quotation;
     });
   }
 
@@ -253,6 +309,12 @@ export class QuotationsService {
     input: TransitionQuotationStatus,
   ): Promise<Quotation> {
     const user = requireUser(req);
+    if (input.status === "AWAITING_APPROVAL" && !this.approvals) {
+      throw new ValidationError(
+        "approvals service is not wired — submit-for-approval is unavailable",
+      );
+    }
+    const approvals = this.approvals;
     return withRequest(req, this.pool, async (client) => {
       const cur = await quotationsRepo.getById(client, id);
       if (!cur) throw new NotFoundError("quotation");
@@ -295,23 +357,17 @@ export class QuotationsService {
           idempotencyKey: `quotation.sent:${id}:v${result.version}`,
         });
       }
-      // Track 1 emit #4 (automate.md): transitioning INTO AWAITING_APPROVAL
-      // is the signal for the approvals module to open a ticket. Today the
-      // approvals flow is triggered manually via the UI; publishing the
-      // event unblocks the Phase 2 handler that opens tickets automatically.
-      if (input.status === "AWAITING_APPROVAL") {
-        await enqueueOutbox(client, {
-          aggregateType: "quotation",
-          aggregateId: id,
-          eventType: "quotation.submitted_for_approval",
-          payload: {
-            orgId: result.orgId,
-            quotationId: id,
-            quotationNumber: result.quotationNumber,
-            quotationVersion: result.version,
-            submittedBy: user.id,
-          },
-          idempotencyKey: `quotation.submitted_for_approval:${id}:v${result.version}`,
+      // Transitioning INTO AWAITING_APPROVAL is the entry point into the
+      // central approvals engine. Open the approval_request in the same
+      // transaction as the status flip so the row never sits in
+      // AWAITING_APPROVAL without a backing request — and a
+      // chain-resolution failure rolls the status back.
+      if (input.status === "AWAITING_APPROVAL" && approvals) {
+        await approvals.createRequestForEntity(client, user, {
+          entityType: "quotation",
+          entityId: id,
+          amount: result.grandTotal,
+          currency: "INR",
         });
       }
       return result;
@@ -319,35 +375,46 @@ export class QuotationsService {
   }
 
   /**
-   * Sales-manager approval. Enters APPROVED from AWAITING_APPROVAL, stamps
-   * approved_by/approved_at. Enforced separately from generic status
-   * transition because it carries an identity + requires a dedicated
-   * permission (`quotations:approve`).
+   * Finaliser invoked by `ApprovalsService.act()` when a `quotation`
+   * approval_request reaches APPROVED or REJECTED. Runs inside the
+   * caller's transaction. Mirrors the post-decision side effects of the
+   * legacy /approve gate (status flip, denormalised approved_by/_at on
+   * APPROVE, rejected_reason from comment on REJECT) without consulting
+   * the user's expectedVersion — the approvals layer is the source of
+   * truth for the action.
    */
-  async approve(
-    req: FastifyRequest,
-    id: string,
-    input: ApproveQuotation,
-  ): Promise<Quotation> {
-    const user = requireUser(req);
-    return withRequest(req, this.pool, async (client) => {
-      const cur = await quotationsRepo.getById(client, id);
-      if (!cur) throw new NotFoundError("quotation");
-      if (cur.status !== "AWAITING_APPROVAL") {
-        throw new StateTransitionError(
-          `can only approve a quotation in AWAITING_APPROVAL; it is ${cur.status}`,
-        );
-      }
-      const result = await quotationsRepo.approve(client, id, {
-        approverId: user.id,
-        expectedVersion: input.expectedVersion,
-      });
-      if (result === null) throw new NotFoundError("quotation");
-      if (result === "version_conflict") {
-        throw new ConflictError("quotation was modified by someone else");
-      }
-      return result;
-    });
+  async applyDecisionFromApprovals(
+    client: pg.PoolClient,
+    ctx: ApprovalFinaliserContext,
+  ): Promise<void> {
+    const { request, finalStatus, actor, comment } = ctx;
+    const cur = await quotationsRepo.getById(client, request.entityId);
+    if (!cur) {
+      throw new NotFoundError("quotation");
+    }
+    if (cur.status !== "AWAITING_APPROVAL") {
+      throw new StateTransitionError(
+        `cannot ${finalStatus.toLowerCase()} a quotation in status ${cur.status}; expected AWAITING_APPROVAL`,
+      );
+    }
+    if (finalStatus === "APPROVED") {
+      await client.query(
+        `UPDATE quotations
+            SET status      = 'APPROVED',
+                approved_by = $1,
+                approved_at = now()
+          WHERE id = $2 AND deleted_at IS NULL`,
+        [actor.id, cur.id],
+      );
+    } else {
+      await client.query(
+        `UPDATE quotations
+            SET status          = 'REJECTED',
+                rejected_reason = $1
+          WHERE id = $2 AND deleted_at IS NULL`,
+        [comment, cur.id],
+      );
+    }
   }
 
   /**

@@ -43,11 +43,11 @@ import {
   useApiPurchaseInvoices,
 } from "@/hooks/useFinanceApi";
 import {
-  INVOICE_STATUSES,
   PURCHASE_INVOICE_MATCH_STATUSES,
-  type InvoiceStatus,
+  PURCHASE_INVOICE_STATUSES,
   type PurchaseInvoice,
   type PurchaseInvoiceMatchStatus,
+  type PurchaseInvoiceStatus,
 } from "@instigenie/contracts";
 import {
   AlertCircle,
@@ -81,7 +81,7 @@ function formatDate(iso: string | null | undefined): string {
   });
 }
 
-const STATUS_TONE: Record<InvoiceStatus, string> = {
+const STATUS_TONE: Record<PurchaseInvoiceStatus, string> = {
   DRAFT: "bg-amber-50 text-amber-700 border-amber-200",
   POSTED: "bg-blue-50 text-blue-700 border-blue-200",
   CANCELLED: "bg-gray-50 text-gray-600 border-gray-200",
@@ -97,7 +97,7 @@ const MATCH_TONE: Record<PurchaseInvoiceMatchStatus, string> = {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function PurchaseInvoicesPage() {
-  const [status, setStatus] = useState<InvoiceStatus | "all">("all");
+  const [status, setStatus] = useState<PurchaseInvoiceStatus | "all">("all");
   const [matchStatus, setMatchStatus] = useState<
     PurchaseInvoiceMatchStatus | "all"
   >("all");
@@ -457,14 +457,14 @@ export default function PurchaseInvoicesPage() {
           <Label className="text-xs text-muted-foreground">Status</Label>
           <Select
             value={status}
-            onValueChange={(v) => setStatus(v as InvoiceStatus | "all")}
+            onValueChange={(v) => setStatus(v as PurchaseInvoiceStatus | "all")}
           >
             <SelectTrigger className="w-[160px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All</SelectItem>
-              {INVOICE_STATUSES.map((s) => (
+              {PURCHASE_INVOICE_STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
                   {s}
                 </SelectItem>

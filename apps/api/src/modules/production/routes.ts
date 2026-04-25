@@ -35,6 +35,7 @@ import {
   ProductFamilySchema,
   ProductListQuerySchema,
   ProductionReportsQuerySchema,
+  SubmitWorkOrderForApprovalSchema,
   UpdateBomLineSchema,
   UpdateBomVersionSchema,
   UpdateEcnSchema,
@@ -48,6 +49,7 @@ import type { RequireFeature } from "../quotas/guard.js";
 import type { ProductsService } from "./products.service.js";
 import type { BomsService } from "./boms.service.js";
 import type { WorkOrdersService } from "./work-orders.service.js";
+import type { WoApprovalsService } from "./wo-approvals.service.js";
 import type { DeviceInstancesService } from "./device-instances.service.js";
 import type { MrpService } from "./mrp.service.js";
 import type { ReportsService } from "./reports.service.js";
@@ -58,6 +60,13 @@ export interface RegisterProductionRoutesOptions {
   products: ProductsService;
   boms: BomsService;
   workOrders: WorkOrdersService;
+  /**
+   * Work-order approval submit. Optional in the deps shape so older test
+   * harnesses that don't construct it still compile; when absent, the
+   * /submit-for-approval route is not registered (a route that always
+   * returns 404 is friendlier than one that 500s on an undefined service).
+   */
+  woApprovals?: WoApprovalsService;
   deviceInstances: DeviceInstancesService;
   mrp: MrpService;
   reports: ReportsService;
@@ -369,6 +378,24 @@ export async function registerProductionRoutes(
       );
     }
   );
+
+  // Submit a PLANNED work order for approval. Opens an approval_request in
+  // the same transaction as a WO version-bump (OCC). The eventual decision
+  // arrives via /approvals/:id/act and is finalised by
+  // WoApprovalsService.applyDecisionFromApprovals (registered as the
+  // 'work_order' finaliser in apps/api/src/index.ts).
+  if (opts.woApprovals) {
+    const woApprovals = opts.woApprovals;
+    app.post(
+      "/production/work-orders/:id/submit-for-approval",
+      { preHandler: woUpdate },
+      async (req, reply) => {
+        const { id } = IdParamSchema.parse(req.params);
+        const body = SubmitWorkOrderForApprovalSchema.parse(req.body);
+        return reply.send(await woApprovals.submitForApproval(req, id, body));
+      },
+    );
+  }
 
   // ─── WIP Stage Templates ──────────────────────────────────────────────────
 

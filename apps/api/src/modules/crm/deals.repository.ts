@@ -36,6 +36,11 @@ interface DealRow {
   closed_at: Date | null;
   lost_reason: string | null;
   lead_id: string | null;
+  pending_discount_pct: string | null;
+  approved_discount_pct: string | null;
+  discount_approved_by: string | null;
+  discount_approved_at: Date | null;
+  discount_request_id: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -67,6 +72,13 @@ function rowToDeal(r: DealRow): Deal {
     closedAt: r.closed_at ? r.closed_at.toISOString() : null,
     lostReason: r.lost_reason,
     leadId: r.lead_id,
+    pendingDiscountPct: r.pending_discount_pct,
+    approvedDiscountPct: r.approved_discount_pct,
+    discountApprovedBy: r.discount_approved_by,
+    discountApprovedAt: r.discount_approved_at
+      ? r.discount_approved_at.toISOString()
+      : null,
+    discountRequestId: r.discount_request_id,
     version: r.version,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
@@ -77,7 +89,10 @@ function rowToDeal(r: DealRow): Deal {
 const SELECT_COLS = `id, org_id, deal_number, title, account_id, contact_id,
                      company, contact_name, stage, value, probability,
                      assigned_to, expected_close, closed_at, lost_reason,
-                     lead_id, version, created_at, updated_at, deleted_at`;
+                     lead_id, pending_discount_pct, approved_discount_pct,
+                     discount_approved_by, discount_approved_at,
+                     discount_request_id, version, created_at, updated_at,
+                     deleted_at`;
 
 export interface DealListFilters {
   stage?: DealStage;
@@ -290,6 +305,91 @@ export const dealsRepo = {
       [id]
     );
     return (rowCount ?? 0) > 0;
+  },
+
+  /**
+   * Park a pending discount + the FK to the live approval_request on the
+   * deal row. Called by DealApprovalsService inside the same transaction
+   * that creates the approval_request, so the row never sits with a stale
+   * `discount_request_id` pointing at nothing.
+   *
+   * Optimistic-locked on the caller-supplied expectedVersion so a stale UI
+   * submit fails with the same "version_conflict" sentinel as every other
+   * deal mutation.
+   */
+  async setPendingDiscount(
+    client: PoolClient,
+    id: string,
+    args: {
+      pendingDiscountPct: string;
+      discountRequestId: string;
+      expectedVersion: number;
+    },
+  ): Promise<Deal | "version_conflict" | null> {
+    const cur = await dealsRepo.getById(client, id);
+    if (!cur) return null;
+    if (cur.version !== args.expectedVersion) return "version_conflict";
+
+    const { rows } = await client.query<DealRow>(
+      `UPDATE deals
+          SET pending_discount_pct = $1,
+              discount_request_id  = $2
+        WHERE id = $3 AND version = $4 AND deleted_at IS NULL
+        RETURNING ${SELECT_COLS}`,
+      [
+        args.pendingDiscountPct,
+        args.discountRequestId,
+        id,
+        args.expectedVersion,
+      ],
+    );
+    if (!rows[0]) return "version_conflict";
+    return rowToDeal(rows[0]);
+  },
+
+  /**
+   * Apply the terminal decision on a deal-discount approval. APPROVE copies
+   * pending → approved + stamps approver + clears the request id; REJECT
+   * clears all pending state and the request id. The row's `version`
+   * trigger bumps in either case so subscribers see a fresh snapshot.
+   *
+   * Called by the deal-approvals finaliser inside the act() transaction —
+   * no expectedVersion gate because the approvals layer is the source of
+   * truth for the action.
+   */
+  async applyDiscountDecision(
+    client: PoolClient,
+    id: string,
+    args: {
+      finalStatus: "APPROVED" | "REJECTED";
+      approverId: string;
+    },
+  ): Promise<Deal | null> {
+    const cur = await dealsRepo.getById(client, id);
+    if (!cur) return null;
+    if (args.finalStatus === "APPROVED") {
+      const { rows } = await client.query<DealRow>(
+        `UPDATE deals
+            SET approved_discount_pct = pending_discount_pct,
+                pending_discount_pct  = NULL,
+                discount_approved_by  = $1,
+                discount_approved_at  = now(),
+                discount_request_id   = NULL
+          WHERE id = $2 AND deleted_at IS NULL
+          RETURNING ${SELECT_COLS}`,
+        [args.approverId, id],
+      );
+      return rows[0] ? rowToDeal(rows[0]) : null;
+    }
+    const { rows } = await client.query<DealRow>(
+      `UPDATE deals
+          SET pending_discount_pct = NULL,
+              discount_request_id  = NULL
+        WHERE id = $1 AND deleted_at IS NULL
+        RETURNING ${SELECT_COLS}`,
+      [id],
+    );
+    return rows[0] ? rowToDeal(rows[0]) : null;
   },
 };
 

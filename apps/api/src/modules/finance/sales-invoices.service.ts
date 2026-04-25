@@ -1,15 +1,16 @@
 /**
- * Sales invoices service. Orchestrates DRAFT → POSTED → CANCELLED lifecycle,
- * money computation, and customer_ledger append on post.
+ * Sales invoices service. Orchestrates DRAFT → AWAITING_APPROVAL → POSTED →
+ * CANCELLED lifecycle, money computation, and customer_ledger append on post.
  *
  * Lifecycle:
- *   DRAFT     ──post──▶ POSTED    (appends INVOICE row to customer_ledger)
- *   DRAFT     ──cancel──▶ CANCELLED
- *   POSTED    ──cancel──▶ CANCELLED  (appends reversing CREDIT to ledger)
+ *   DRAFT             ──submit-for-posting──▶ AWAITING_APPROVAL
+ *   AWAITING_APPROVAL ──finaliser APPROVE──▶  POSTED
+ *                     ──finaliser REJECT──▶   DRAFT     (re-edit + resubmit)
+ *   DRAFT|POSTED      ──cancel──▶            CANCELLED  (POSTED reverses AR)
  *
  * Invariants (service-enforced, not DB-enforced):
  *   - invoice header + lines are mutable only while status = DRAFT
- *   - POST requires ≥1 line with grandTotal > 0
+ *   - submit-for-posting requires ≥1 line with grandTotal > 0
  *   - customer_ledger is append-only — we NEVER UPDATE / DELETE a row
  *   - Totals recomputation is explicit and consistent: on every line mutation
  *     we recompute the header's subtotal / taxTotal / discountTotal /
@@ -26,6 +27,13 @@
  *   - All math via @instigenie/money (decimal.js). NEVER Number().
  *
  * Auto-numbering: SI-YYYY-NNNN via nextFinanceNumber(kind="SI").
+ *
+ * §9.5 — invoice issue is a critical action requiring e-signature. The
+ * password re-entry now happens at the approval chain's terminal step
+ * (`requiresESignature: true` on the seed chain), not here. The
+ * resulting HMAC arrives via the finaliser context and the finaliser
+ * stamps it onto `signature_hash` along with the same `actedAt` the
+ * hash was bound to.
  */
 
 import type pg from "pg";
@@ -35,7 +43,7 @@ import { z } from "zod";
 import {
   ConflictError,
   NotFoundError,
-  UnauthorizedError,
+  StateTransitionError,
   ValidationError,
 } from "@instigenie/errors";
 import {
@@ -43,11 +51,11 @@ import {
   type CancelSalesInvoice,
   type CreateSalesInvoice,
   type CreateSalesInvoiceLine,
-  type PostSalesInvoice,
   type SalesInvoice,
   type SalesInvoiceLine,
   type SalesInvoiceListQuerySchema,
   type SalesInvoiceWithLines,
+  type SubmitSalesInvoiceForPosting,
   type UpdateSalesInvoice,
   type UpdateSalesInvoiceLine,
 } from "@instigenie/contracts";
@@ -58,7 +66,10 @@ import { salesInvoicesRepo } from "./sales-invoices.repository.js";
 import { customerLedgerRepo } from "./customer-ledger.repository.js";
 import { nextFinanceNumber } from "./numbering.js";
 import { requireUser } from "../../context/request-context.js";
-import type { EsignatureService } from "../esignature/service.js";
+import type {
+  ApprovalsService,
+  ApprovalFinaliserContext,
+} from "../approvals/approvals.service.js";
 
 type SalesInvoiceListQuery = z.infer<typeof SalesInvoiceListQuerySchema>;
 
@@ -190,14 +201,13 @@ async function recomputeAndPersistHeaderTotals(
 export interface SalesInvoicesServiceDeps {
   pool: pg.Pool;
   /**
-   * Phase 4 §9.5 — re-entered password + HMAC-SHA256 hash for invoice
-   * POST. Optional so the pre-§4.2c bare-pool construction still
-   * compiles; when absent, post() degrades to the legacy (unsigned)
-   * path. When PRESENT, post() REQUIRES eSignaturePassword +
-   * eSignatureReason and rejects missing fields with ValidationError
-   * before touching the DB.
+   * Required to dispatch into `/approvals/*` on submit-for-posting.
+   * Optional in the deps shape so a bare-pool fallback still compiles,
+   * but absent at runtime any submit-for-posting call fails closed
+   * rather than silently flipping the row to AWAITING_APPROVAL without
+   * a backing approval_request.
    */
-  esignature?: EsignatureService;
+  approvals?: ApprovalsService;
 }
 
 function isSalesInvoicesServiceDeps(
@@ -208,17 +218,19 @@ function isSalesInvoicesServiceDeps(
 
 export class SalesInvoicesService {
   private readonly pool: pg.Pool;
-  private readonly esignature: EsignatureService | null;
+  private readonly approvals: ApprovalsService | null;
 
-  // Two accepted shapes so existing Phase 2 tests that pre-date §4.2c
-  // and construct `new SalesInvoicesService(pool)` still work.
+  // Two accepted shapes so existing Phase 2 tests that pre-date the
+  // approvals wiring and construct `new SalesInvoicesService(pool)` still
+  // work. When the bare-pool form is used, submit-for-posting fails
+  // closed.
   constructor(poolOrDeps: pg.Pool | SalesInvoicesServiceDeps) {
     if (isSalesInvoicesServiceDeps(poolOrDeps)) {
       this.pool = poolOrDeps.pool;
-      this.esignature = poolOrDeps.esignature ?? null;
+      this.approvals = poolOrDeps.approvals ?? null;
     } else {
       this.pool = poolOrDeps;
-      this.esignature = null;
+      this.approvals = null;
     }
   }
 
@@ -353,71 +365,35 @@ export class SalesInvoicesService {
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
   /**
-   * Post a DRAFT invoice. Validates preconditions, then transactionally:
-   *   1. (§9.5) Verify the re-entered password + HMAC a signature hash
-   *      if the service was wired with an EsignatureService. Fails
-   *      closed on missing fields, wrong password, or missing identity.
-   *   2. Recompute header totals (belt + braces in case lines are stale).
-   *   3. markPosted on the header (persists posted_at + signature_hash
-   *      atomically — the hash binds to the exact timestamptz stored).
-   *   4. Append an INVOICE row to customer_ledger (debit = grandTotal).
+   * Submit a DRAFT invoice for posting. Opens an `invoice` approval_request
+   * (chain band looked up by grandTotal) and flips status DRAFT →
+   * AWAITING_APPROVAL inside the same transaction. The terminal approver
+   * supplies password + reason at `/approvals/:id/act`; the resulting
+   * HMAC + actedAt arrive via the finaliser context and the finaliser
+   * (`applyDecisionFromApprovals`) stamps them onto the invoice row.
+   *
+   * Validation runs before the approval request is opened — an empty
+   * invoice or one with grandTotal ≤ 0 is rejected without leaving any
+   * approvals state behind.
    */
-  async post(
+  async submitForPosting(
     req: FastifyRequest,
     id: string,
-    input: PostSalesInvoice,
+    input: SubmitSalesInvoiceForPosting,
   ): Promise<SalesInvoiceWithLines> {
+    if (!this.approvals) {
+      throw new ValidationError(
+        "approvals service is not wired — submit-for-posting is unavailable",
+      );
+    }
+    const approvals = this.approvals;
     const user = requireUser(req);
-
-    // Phase 4 §9.5 — "Invoice issue" is a critical action and is
-    // UNCONDITIONALLY subject to password re-entry. Unlike stock.postEntry
-    // (which has non-critical txn types that legitimately bypass e-sig),
-    // every sales-invoice POST is §9.5-critical by definition.
-    //
-    // Rule layering (mirrors StockService.postEntry and §42.6
-    // ApprovalsService):
-    //   - deps MISSING (misconfigured server)  → ValidationError (fail closed)
-    //   - deps present + missing fields        → ValidationError
-    //   - deps present + missing identity      → UnauthorizedError
-    //
-    // All checks run BEFORE withRequest() opens a DB tx so a bad payload
-    // doesn't even reserve an advisory-lock slot.
-    if (!this.esignature) {
-      throw new ValidationError(
-        "invoice POST is a critical action and server is not configured for electronic signatures",
-      );
-    }
-    if (!input.eSignaturePassword) {
-      throw new ValidationError(
-        "eSignaturePassword is required to post an invoice",
-      );
-    }
-    if (!input.eSignatureReason) {
-      throw new ValidationError(
-        "eSignatureReason is required to post an invoice",
-      );
-    }
-    if (!user.identityId) {
-      // Pre-§4.2 tokens have no `idn` claim; vendor-admin sessions
-      // don't correspond to a tenant-user password row at all.
-      throw new UnauthorizedError(
-        "e-signature requires a tenant-user session",
-      );
-    }
-    // Capture narrowed locals so TypeScript keeps the non-null narrowing
-    // across the withRequest callback closure (the class-field narrowing
-    // would otherwise be widened back to `EsignatureService | null`).
-    const esig = this.esignature;
-    const userIdentityId = user.identityId;
-    const eSigPassword = input.eSignaturePassword;
-    const eSigReason = input.eSignatureReason;
-
     return withRequest(req, this.pool, async (client) => {
       const cur = await salesInvoicesRepo.getById(client, id);
       if (!cur) throw new NotFoundError("sales invoice");
       if (cur.status !== "DRAFT") {
         throw new ConflictError(
-          `cannot post invoice in status ${cur.status}; must be DRAFT`,
+          `cannot submit invoice for posting in status ${cur.status}; must be DRAFT`,
         );
       }
       if (cur.version !== input.expectedVersion) {
@@ -429,7 +405,8 @@ export class SalesInvoicesService {
         throw new ConflictError("cannot post an invoice with no lines");
       }
 
-      // Recompute totals to ensure header is consistent with lines.
+      // Recompute totals so the chain-band lookup uses an authoritative
+      // grandTotal even if a stale header total slipped through.
       const totals = await recomputeAndPersistHeaderTotals(client, id);
       if (m(totals.grandTotal).lte(ZERO)) {
         throw new ConflictError(
@@ -437,53 +414,120 @@ export class SalesInvoicesService {
         );
       }
 
-      // Authoritative actedAt: either caller-supplied (rare — only used
-      // by back-dated migrations) or server-generated. Either way we
-      // bind the HMAC to the SAME string that lands on posted_at so an
-      // auditor can recompute deterministically.
-      const postedAtIso = input.postedAt ?? new Date().toISOString();
-      const { hash: signatureHash } = await esig.verifyAndHash({
-        userIdentityId,
-        password: eSigPassword,
-        reason: eSigReason,
-        actedAt: postedAtIso,
+      // Open the approval_request first. createRequestForEntity throws on
+      // duplicate-pending or chain-not-found; both abort BEFORE the status
+      // flip so a failure leaves the row in DRAFT.
+      await approvals.createRequestForEntity(client, user, {
+        entityType: "invoice",
+        entityId: id,
+        amount: totals.grandTotal,
+        currency: cur.currency,
+        notes: input.notes,
       });
 
-      const posted = await salesInvoicesRepo.markPosted(
+      const flipped = await salesInvoicesRepo.markAwaitingApproval(
         client,
         id,
-        user.id,
-        postedAtIso,
-        signatureHash,
+        input.expectedVersion,
       );
-      if (!posted) {
-        // Race: status changed between getById and markPosted.
+      if (flipped === null) throw new NotFoundError("sales invoice");
+      if (flipped === "version_conflict") {
+        throw new ConflictError("sales invoice was modified by someone else");
+      }
+      if (flipped === "not_draft") {
         throw new ConflictError(
-          "sales invoice is no longer DRAFT and cannot be posted",
+          "sales invoice is no longer DRAFT and cannot be submitted",
         );
       }
 
-      // Append to customer_ledger if we have a customer. If the invoice has
-      // no customer_id, the ledger row is skipped (rare — only happens in
-      // ad-hoc draft templates with no customer bound).
-      if (posted.customerId) {
-        await customerLedgerRepo.append(client, user.orgId, user.id, {
-          customerId: posted.customerId,
-          entryDate: posted.invoiceDate,
-          entryType: "INVOICE",
-          debit: posted.grandTotal,
-          credit: "0",
-          currency: posted.currency,
-          referenceType: "SALES_INVOICE",
-          referenceId: posted.id,
-          referenceNumber: posted.invoiceNumber,
-          description: `Sales invoice ${posted.invoiceNumber}`,
-        });
-      }
-
       const refreshedLines = await salesInvoicesRepo.listLines(client, id);
-      return { ...posted, lines: refreshedLines };
+      return { ...flipped, lines: refreshedLines };
     });
+  }
+
+  /**
+   * Finaliser invoked by `ApprovalsService.act()` once an `invoice`
+   * approval_request reaches APPROVED or REJECTED. Runs inside the
+   * caller's transaction.
+   *
+   *   APPROVE  → recompute totals (defence in depth — lines may have
+   *              been edited via /lines while AWAITING_APPROVAL was
+   *              technically locked from header edits but lines are
+   *              not strictly frozen by the service today), markPosted
+   *              with ctx.actedAt + ctx.eSignatureHash, append the
+   *              INVOICE row to customer_ledger.
+   *
+   *   REJECT   → revertToDraft so the user can edit + resubmit.
+   *
+   * The HMAC arrived from approvals — we never recompute it here. We do
+   * stamp ctx.actedAt onto posted_at so an auditor reproducing the hash
+   * binds against the same timestamp the approvals layer used.
+   */
+  async applyDecisionFromApprovals(
+    client: PoolClient,
+    ctx: ApprovalFinaliserContext,
+  ): Promise<void> {
+    const { request, finalStatus, actor, actedAt, eSignatureHash } = ctx;
+    const cur = await salesInvoicesRepo.getById(client, request.entityId);
+    if (!cur) {
+      throw new NotFoundError("sales invoice");
+    }
+    if (cur.status !== "AWAITING_APPROVAL") {
+      throw new StateTransitionError(
+        `cannot ${finalStatus.toLowerCase()} an invoice in status ${cur.status}; expected AWAITING_APPROVAL`,
+      );
+    }
+
+    if (finalStatus === "REJECTED") {
+      const reverted = await salesInvoicesRepo.revertToDraft(
+        client,
+        request.entityId,
+      );
+      if (!reverted) {
+        throw new ConflictError(
+          "invoice is no longer AWAITING_APPROVAL and cannot be reverted",
+        );
+      }
+      return;
+    }
+
+    // APPROVED — recompute totals, stamp posted_at + signature_hash,
+    // append the AR ledger row. All in the same caller transaction.
+    const totals = await recomputeAndPersistHeaderTotals(
+      client,
+      request.entityId,
+    );
+    if (m(totals.grandTotal).lte(ZERO)) {
+      throw new ConflictError(
+        "cannot post an invoice with non-positive grandTotal",
+      );
+    }
+    const posted = await salesInvoicesRepo.markPosted(
+      client,
+      request.entityId,
+      actor.id,
+      actedAt,
+      eSignatureHash,
+    );
+    if (!posted) {
+      throw new ConflictError(
+        "invoice is no longer AWAITING_APPROVAL and cannot be posted",
+      );
+    }
+    if (posted.customerId) {
+      await customerLedgerRepo.append(client, actor.orgId, actor.id, {
+        customerId: posted.customerId,
+        entryDate: posted.invoiceDate,
+        entryType: "INVOICE",
+        debit: posted.grandTotal,
+        credit: "0",
+        currency: posted.currency,
+        referenceType: "SALES_INVOICE",
+        referenceId: posted.id,
+        referenceNumber: posted.invoiceNumber,
+        description: `Sales invoice ${posted.invoiceNumber}`,
+      });
+    }
   }
 
   /**
@@ -502,6 +546,15 @@ export class SalesInvoicesService {
       if (!cur) throw new NotFoundError("sales invoice");
       if (cur.status === "CANCELLED") {
         throw new ConflictError("sales invoice is already cancelled");
+      }
+      if (cur.status === "AWAITING_APPROVAL") {
+        // Cancelling while a request is pending would orphan the
+        // approval_request. Force the user through approvals.cancelRequest
+        // first; that revertToDraft path leaves the invoice editable +
+        // cancellable.
+        throw new ConflictError(
+          "cannot cancel an invoice that is awaiting approval — cancel the approval request first",
+        );
       }
       if (cur.version !== input.expectedVersion) {
         throw new ConflictError("sales invoice was modified by someone else");

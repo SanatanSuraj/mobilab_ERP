@@ -260,6 +260,11 @@ CREATE TABLE IF NOT EXISTS audit.log (
 );
 CREATE INDEX IF NOT EXISTS audit_log_org_table_idx ON audit.log (org_id, table_name);
 CREATE INDEX IF NOT EXISTS audit_log_changed_at_idx ON audit.log (changed_at);
+-- Admin audit-log dashboard pages by changed_at DESC under an RLS-enforced
+-- org_id filter; this composite index lets that query plan as an index scan
+-- instead of falling back to the broader table_name composite + sort.
+CREATE INDEX IF NOT EXISTS audit_log_org_changed_at_idx
+  ON audit.log (org_id, changed_at DESC);
 
 -- ── Plans catalog (GLOBAL — no RLS) ─────────────────────────────────────────
 -- The vendor's catalog of SaaS plans. Tenants subscribe to exactly one plan
@@ -423,3 +428,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS vendor_refresh_tokens_hash_unique
   ON vendor.refresh_tokens (token_hash);
 CREATE INDEX IF NOT EXISTS vendor_refresh_tokens_admin_idx
   ON vendor.refresh_tokens (vendor_admin_id);
+
+-- ── Schema migration ledger ────────────────────────────────────────────────
+-- Tracks every forward migration applied from ops/sql/migrations/. The TS
+-- runner (packages/db/src/migrate/) creates this table itself idempotently
+-- so it works on databases that never went through the docker-entrypoint
+-- bootstrap; the duplicate definition here keeps the docker-bootstrapped
+-- dev cluster aligned without a second round-trip.
+--
+-- Columns:
+--   version     filename stem, e.g. '0001_add_outbox_dlq'. Lex-ordered.
+--   name        human-readable label (the description portion of the file
+--               name, with underscores → spaces). Indexed only by version.
+--   checksum    sha256 of the file contents at apply time. The runner
+--               recomputes the checksum on every status / up call and fails
+--               LOUD if a previously-applied file has been edited — drift
+--               is treated as a bug, not a soft warning.
+--   applied_at  insertion timestamp; provides a "what changed when" log.
+--   applied_by  postgres role that ran the migration; helps trace which
+--               operator / CI job applied a given change.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version     text PRIMARY KEY,
+  name        text NOT NULL,
+  checksum    text NOT NULL,
+  applied_at  timestamptz NOT NULL DEFAULT now(),
+  applied_by  text NOT NULL DEFAULT current_user
+);
+
+COMMENT ON TABLE schema_migrations IS
+  'Forward migration ledger. One row per file in ops/sql/migrations/, inserted by packages/db/src/migrate. checksum = sha256 of file body — drift is a hard error.';

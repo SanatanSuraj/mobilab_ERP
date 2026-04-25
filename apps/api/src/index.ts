@@ -39,6 +39,7 @@ import {
   QuotaService,
 } from "@instigenie/quotas";
 import { loadEnv } from "./env.js";
+import { runBootstrapPolicy } from "./bootstrap-policy.js";
 import { registerProblemHandler } from "./errors/problem.js";
 import { TokenFactory } from "./modules/auth/tokens.js";
 import { AuthService } from "./modules/auth/service.js";
@@ -50,6 +51,7 @@ import { AccountsService } from "./modules/crm/accounts.service.js";
 import { ContactsService } from "./modules/crm/contacts.service.js";
 import { LeadsService } from "./modules/crm/leads.service.js";
 import { DealsService } from "./modules/crm/deals.service.js";
+import { DealApprovalsService } from "./modules/crm/deal-approvals.service.js";
 import { TicketsService } from "./modules/crm/tickets.service.js";
 import { QuotationsService } from "./modules/crm/quotations.service.js";
 import { SalesOrdersService } from "./modules/crm/sales-orders.service.js";
@@ -71,6 +73,7 @@ import { registerProcurementRoutes } from "./modules/procurement/routes.js";
 import { ProductsService } from "./modules/production/products.service.js";
 import { BomsService } from "./modules/production/boms.service.js";
 import { WorkOrdersService } from "./modules/production/work-orders.service.js";
+import { WoApprovalsService } from "./modules/production/wo-approvals.service.js";
 import { DeviceInstancesService } from "./modules/production/device-instances.service.js";
 import { MrpService } from "./modules/production/mrp.service.js";
 import { ReportsService } from "./modules/production/reports.service.js";
@@ -162,6 +165,15 @@ export async function buildApp(): Promise<BuiltApp> {
   const cache = new Cache({ url: env.cacheRedisUrl });
   await cache.connect();
 
+  // Verify the database is bootstrapped correctly BEFORE we wire any
+  // services. RLS not enabled on a tenant table would mean every
+  // subsequent query bypasses tenant isolation — refuse to start. Tests
+  // that drive `buildApp()` against a hand-rolled minimal schema can opt
+  // out via SKIP_BOOTSTRAP_POLICY=1.
+  if (process.env.SKIP_BOOTSTRAP_POLICY !== "1") {
+    await runBootstrapPolicy(pool, log);
+  }
+
   const tokens = new TokenFactory({
     secret: new TextEncoder().encode(env.jwtSecret),
     issuer: env.jwtIssuer,
@@ -207,12 +219,16 @@ export async function buildApp(): Promise<BuiltApp> {
   });
 
   // CRM services — each one is a thin orchestrator over a pg.Pool + withRequest.
+  // Quotations + deal-discount approvals share the central ApprovalsService.
+  // The services themselves are constructed below the approvalsService block
+  // so the dispatcher reference is available at construction. Forward
+  // declarations stay implicit — TypeScript's `const` in this scope captures
+  // them in the closure passed to registerCrmRoutes.
   const accountsService = new AccountsService(pool);
   const contactsService = new ContactsService(pool);
   const leadsService = new LeadsService(pool);
   const dealsService = new DealsService(pool);
   const ticketsService = new TicketsService(pool);
-  const quotationsService = new QuotationsService(pool);
   const salesOrdersService = new SalesOrdersService(pool);
   const crmReportsService = new CrmReportsService(pool);
 
@@ -268,16 +284,17 @@ export async function buildApp(): Promise<BuiltApp> {
   const qcReportsService = new QcReportsService(pool);
 
   // Finance services — Phase 2 §12.1 #7 / §13.6. Sales + purchase invoices
-  // with DRAFT → POSTED → CANCELLED lifecycle, append-only customer/vendor
-  // ledgers with computed running balance, and polymorphic payments that
-  // can settle N invoices atomically (with void reversal). CORE module —
-  // not feature-flagged. Phase 4 §4.2c injects EsignatureService into
-  // SalesInvoicesService so POST rejects missing password + HMAC-stamps
-  // signature_hash on the row.
-  const salesInvoicesService = new SalesInvoicesService({
-    pool,
-    esignature: esignatureService,
-  });
+  // with DRAFT → AWAITING_APPROVAL → POSTED → CANCELLED lifecycle,
+  // append-only customer/vendor ledgers with computed running balance, and
+  // polymorphic payments that can settle N invoices atomically (with void
+  // reversal). CORE module — not feature-flagged.
+  //
+  // SalesInvoicesService is constructed *below* approvalsService because
+  // submit-for-posting opens an `invoice` approval_request inside the same
+  // transaction. The HMAC e-signature is now captured at the chain's
+  // terminal step (per the seed in 14-approvals-dev-data.sql) — the
+  // signature_hash arrives via the finaliser context and is stamped onto
+  // the row by `applyDecisionFromApprovals`.
   const purchaseInvoicesService = new PurchaseInvoicesService(pool);
   const paymentsService = new PaymentsService(pool);
   const customerLedgerService = new CustomerLedgerService(pool);
@@ -312,6 +329,50 @@ export async function buildApp(): Promise<BuiltApp> {
   });
   approvalsService.registerFinaliser("purchase_order", (client, ctx) =>
     poApprovalsService.applyDecisionFromApprovals(client, ctx),
+  );
+
+  // Quotation + deal-discount approvals — same shape as PoApprovalsService.
+  // QuotationsService takes the deps form so transitionStatus() can dispatch
+  // into approvals; the finaliser wires the decision → quotation status flip.
+  const quotationsService = new QuotationsService({
+    pool,
+    approvals: approvalsService,
+  });
+  approvalsService.registerFinaliser("quotation", (client, ctx) =>
+    quotationsService.applyDecisionFromApprovals(client, ctx),
+  );
+
+  const dealApprovalsService = new DealApprovalsService({
+    pool,
+    approvals: approvalsService,
+  });
+  approvalsService.registerFinaliser("deal_discount", (client, ctx) =>
+    dealApprovalsService.applyDecisionFromApprovals(client, ctx),
+  );
+
+  // Sales invoice — same shape. submit-for-posting flips DRAFT →
+  // AWAITING_APPROVAL and opens the approval_request; the finaliser
+  // posts (APPROVED) or reverts (REJECTED) inside the act() transaction.
+  const salesInvoicesService = new SalesInvoicesService({
+    pool,
+    approvals: approvalsService,
+  });
+  approvalsService.registerFinaliser("invoice", (client, ctx) =>
+    salesInvoicesService.applyDecisionFromApprovals(client, ctx),
+  );
+
+  // Work-order approvals — chain seeded in 14-approvals-dev-data.sql with
+  // the standard 3-band shape (default <5L, 5L–20L, ≥20L). Finaliser:
+  // APPROVED flips PLANNED → MATERIAL_CHECK (release for production);
+  // REJECTED flips PLANNED → CANCELLED. Without this registration the
+  // chain would be inert — `approvalsService.act()` would still finalise
+  // the request but the WO header would never reflect the decision.
+  const woApprovalsService = new WoApprovalsService({
+    pool,
+    approvals: approvalsService,
+  });
+  approvalsService.registerFinaliser("work_order", (client, ctx) =>
+    woApprovalsService.applyDecisionFromApprovals(client, ctx),
   );
 
   // Sprint 3 — vendor-admin stack. Uses the BYPASSRLS `vendorPool`, shares
@@ -433,6 +494,7 @@ export async function buildApp(): Promise<BuiltApp> {
     contacts: contactsService,
     leads: leadsService,
     deals: dealsService,
+    dealApprovals: dealApprovalsService,
     tickets: ticketsService,
     quotations: quotationsService,
     salesOrders: salesOrdersService,
@@ -478,6 +540,7 @@ export async function buildApp(): Promise<BuiltApp> {
     products: productsService,
     boms: bomsService,
     workOrders: workOrdersService,
+    woApprovals: woApprovalsService,
     deviceInstances: deviceInstancesService,
     mrp: mrpService,
     reports: reportsService,

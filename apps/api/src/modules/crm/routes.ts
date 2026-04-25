@@ -21,7 +21,6 @@ import {
   AccountListQuerySchema,
   AddLeadActivitySchema,
   AddTicketCommentSchema,
-  ApproveQuotationSchema,
   BulkCreateLeadsSchema,
   ContactListQuerySchema,
   ConvertLeadSchema,
@@ -40,6 +39,7 @@ import {
   MarkLeadLostSchema,
   QuotationListQuerySchema,
   SalesOrderListQuerySchema,
+  SubmitDealDiscountForApprovalSchema,
   TicketListQuerySchema,
   TransitionDealStageSchema,
   TransitionQuotationStatusSchema,
@@ -60,6 +60,7 @@ import type { AccountsService } from "./accounts.service.js";
 import type { ContactsService } from "./contacts.service.js";
 import type { LeadsService } from "./leads.service.js";
 import type { DealsService } from "./deals.service.js";
+import type { DealApprovalsService } from "./deal-approvals.service.js";
 import type { TicketsService } from "./tickets.service.js";
 import type { QuotationsService } from "./quotations.service.js";
 import type { SalesOrdersService } from "./sales-orders.service.js";
@@ -70,6 +71,7 @@ export interface RegisterCrmRoutesOptions {
   contacts: ContactsService;
   leads: LeadsService;
   deals: DealsService;
+  dealApprovals: DealApprovalsService;
   tickets: TicketsService;
   quotations: QuotationsService;
   salesOrders: SalesOrdersService;
@@ -390,6 +392,21 @@ export async function registerCrmRoutes(
     }
   );
 
+  // Header-level discount > 15% routes through the central approvals
+  // engine. The decision arrives via POST /approvals/:id/act, which the
+  // dispatcher routes back to DealApprovalsService.applyDecisionFromApprovals
+  // (registered in the bootstrap) — no separate decide endpoint here.
+  app.post(
+    "/crm/deals/:id/submit-discount-for-approval",
+    { preHandler: [authGuard, requireCrmModule, requirePermission("deals:update")] },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = SubmitDealDiscountForApprovalSchema.parse(req.body);
+      const result = await opts.dealApprovals.submitForApproval(req, id, body);
+      return reply.send(result);
+    }
+  );
+
   // ─── Tickets ──────────────────────────────────────────────────────────────
 
   app.get(
@@ -540,17 +557,6 @@ export async function registerCrmRoutes(
       const { id } = IdParamSchema.parse(req.params);
       const body = TransitionQuotationStatusSchema.parse(req.body);
       const result = await opts.quotations.transitionStatus(req, id, body);
-      return reply.send(result);
-    }
-  );
-
-  app.post(
-    "/crm/quotations/:id/approve",
-    { preHandler: [authGuard, requireCrmModule, requirePermission("quotations:approve")] },
-    async (req, reply) => {
-      const { id } = IdParamSchema.parse(req.params);
-      const body = ApproveQuotationSchema.parse(req.body);
-      const result = await opts.quotations.approve(req, id, body);
       return reply.send(result);
     }
   );

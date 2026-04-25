@@ -440,29 +440,6 @@ export const quotationsRepo = {
     return rowToQuotation(rows[0], lineItems);
   },
 
-  async approve(
-    client: PoolClient,
-    id: string,
-    args: { approverId: string; expectedVersion: number },
-  ): Promise<Quotation | "version_conflict" | null> {
-    const cur = await quotationsRepo.getById(client, id);
-    if (!cur) return null;
-    if (cur.version !== args.expectedVersion) return "version_conflict";
-
-    const { rows } = await client.query<QuotationRow>(
-      `UPDATE quotations
-          SET status = 'APPROVED',
-              approved_by = $1,
-              approved_at = now()
-        WHERE id = $2 AND version = $3 AND deleted_at IS NULL
-        RETURNING ${SELECT_COLS}`,
-      [args.approverId, id, args.expectedVersion],
-    );
-    if (!rows[0]) return "version_conflict";
-    const lineItems = await fetchLineItems(client, id);
-    return rowToQuotation(rows[0], lineItems);
-  },
-
   /**
    * Flip to CONVERTED and stamp the resulting sales-order id. Called by the
    * quotations service inside the same tx that creates the SO.

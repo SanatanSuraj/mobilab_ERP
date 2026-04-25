@@ -251,14 +251,6 @@ export interface DealStageChangedPayload {
   actorId?: string | null;
 }
 
-export interface QuotationApprovalRequestedPayload {
-  orgId: string;
-  quotationId: string;
-  quotationNumber: string;
-  quotationVersion: number;
-  submittedBy?: string | null;
-}
-
 export interface SalesOrderConfirmedPayload {
   orgId: string;
   salesOrderId: string;

@@ -334,20 +334,24 @@ export const portalRepo = {
   },
 
   // Invoices ──
+  //
+  // SECURITY: portal users MUST only ever see POSTED invoices. DRAFT and
+  // AWAITING_APPROVAL are internal states (the customer hasn't been billed
+  // yet); CANCELLED is a record we never want to expose. The hard
+  // `status = 'POSTED'` predicate below is the application-layer fence —
+  // RLS already restricts to the right org + customer, but it does NOT
+  // gate by status, so this filter is the only thing standing between a
+  // mis-routed query parameter and an information leak.
+  //
+  // We deliberately ignore any caller-supplied status filter on the
+  // portal path: even though the schema accepts it for UI parity with
+  // the internal list, the repo overrides to POSTED unconditionally.
   async listInvoices(
     client: PoolClient,
-    filter: { status?: InvoiceStatus },
+    _filter: { status?: InvoiceStatus },
     plan: PaginationPlan,
   ): Promise<{ data: PortalInvoiceSummary[]; total: number }> {
-    const where: string[] = ["deleted_at IS NULL"];
-    const params: unknown[] = [];
-    let i = 1;
-    if (filter.status) {
-      where.push(`status = $${i}`);
-      params.push(filter.status);
-      i++;
-    }
-    const whereSql = `WHERE ${where.join(" AND ")}`;
+    const whereSql = `WHERE deleted_at IS NULL AND status = 'POSTED'`;
     const countSql = `SELECT count(*)::bigint AS total FROM sales_invoices ${whereSql}`;
     const listSql = `
       SELECT ${INVOICE_HEADER_COLS}
@@ -357,8 +361,8 @@ export const portalRepo = {
        LIMIT ${plan.limit} OFFSET ${plan.offset}
     `;
     const [countRes, listRes] = await Promise.all([
-      client.query<{ total: string }>(countSql, params),
-      client.query<SalesInvoiceHeaderRow>(listSql, params),
+      client.query<{ total: string }>(countSql),
+      client.query<SalesInvoiceHeaderRow>(listSql),
     ]);
     return {
       data: listRes.rows.map(rowToInvoiceSummary),
@@ -370,9 +374,11 @@ export const portalRepo = {
     client: PoolClient,
     id: string,
   ): Promise<PortalInvoiceSummary | null> {
+    // Same fence as listInvoices — a direct GET /portal/invoices/:id with
+    // a known DRAFT id must 404, not return the row.
     const { rows } = await client.query<SalesInvoiceHeaderRow>(
       `SELECT ${INVOICE_HEADER_COLS} FROM sales_invoices
-        WHERE id = $1 AND deleted_at IS NULL`,
+        WHERE id = $1 AND deleted_at IS NULL AND status = 'POSTED'`,
       [id],
     );
     return rows[0] ? rowToInvoiceSummary(rows[0]) : null;
