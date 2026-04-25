@@ -21,7 +21,7 @@
  *     browser without hunting in the mailbox table.
  */
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Copy, Mail } from "lucide-react";
 
@@ -43,7 +43,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { apiInviteUser } from "@/lib/api/admin-users";
+import { useApiInviteUser } from "@/hooks/useAdminUsersApi";
 import { ApiProblem } from "@/lib/api/tenant-fetch";
 import { ROLES, type Role } from "@instigenie/contracts";
 import type { InvitationSummary } from "@instigenie/contracts";
@@ -94,7 +94,8 @@ export function InviteUserDialog({
   const [roleId, setRoleId] = useState<Role | "">("");
   const [expiresInHours, setExpiresInHours] = useState<number>(72);
   const [error, setError] = useState<string>("");
-  const [isPending, startTransition] = useTransition();
+  const inviteMutation = useApiInviteUser();
+  const isPending = inviteMutation.isPending;
 
   // Close helper: resets + notifies parent. Called from both the Cancel button
   // and the dialog backdrop so re-opening never shows stale state. Handled
@@ -124,9 +125,8 @@ export function InviteUserDialog({
       ...(name.trim() ? { name: name.trim() } : {}),
       expiresInHours,
     };
-    startTransition(async () => {
-      try {
-        const res = await apiInviteUser(body);
+    inviteMutation.mutate(body, {
+      onSuccess: async (res) => {
         onInvited?.(res.invitation);
         if (res.devAcceptUrl) {
           // Best-effort clipboard write. In insecure contexts (http without
@@ -146,13 +146,14 @@ export function InviteUserDialog({
           toast.success(`Invite sent to ${res.invitation.email}.`);
         }
         closeAndReset();
-      } catch (err) {
+      },
+      onError: (err) => {
         if (err instanceof ApiProblem) {
           setError(err.problem.detail ?? err.problem.title);
         } else {
           setError("Could not reach the API. Is it running on :4000?");
         }
-      }
+      },
     });
   }
 

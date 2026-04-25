@@ -1,25 +1,63 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { PageHeader } from "@/components/shared/page-header";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+/**
+ * Admin → Users & Roles.
+ *
+ * Backend reality (apps/api/src/modules/admin-users/routes.ts):
+ *   - POST /admin/users/invite                       — create + queue email
+ *   - GET  /admin/users/invitations                  — list (status filter)
+ *   - POST /admin/users/invitations/:id/revoke       — revoke open invite
+ *
+ * There is intentionally NO `GET /admin/users` endpoint, so the "Members"
+ * view here is derived from invitations whose status is ACCEPTED — the
+ * only signal the API exposes about staff membership. The bootstrap admin
+ * and any seeded user that didn't go through the invitation flow will
+ * NOT appear in this list; that is called out in a banner.
+ *
+ * Data model used here:
+ *   - useApiInvitations({ status: "ACCEPTED" })  → Members tab
+ *   - useApiInvitations()                         → open pipeline
+ *                                                   (PENDING + EXPIRED + REVOKED)
+ *   - useApiRevokeInvitation()                    → revoke action
+ *
+ * No MOCK data. No fake "edit role" flow — there is no API for it.
+ */
+
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useAuthStore, UserRole, MOCK_USERS_BY_ROLE } from "@/store/auth.store";
-import { Shield, UserPlus, Edit2, Lock, Loader2, MailX, Clock } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useAuthStore, type UserRole } from "@/store/auth.store";
+import {
+  Shield,
+  UserPlus,
+  Lock,
+  Loader2,
+  MailX,
+  Clock,
+  Info,
+  RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { InviteUserDialog } from "@/components/admin-users/InviteUserDialog";
 import {
-  apiListInvitations,
-  apiRevokeInvitation,
-} from "@/lib/api/admin-users";
+  useApiInvitations,
+  useApiRevokeInvitation,
+} from "@/hooks/useAdminUsersApi";
 import { ApiProblem } from "@/lib/api/tenant-fetch";
 import type { InvitationSummary } from "@instigenie/contracts";
 
@@ -45,38 +83,14 @@ const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
   SALES_MANAGER: "All CRM data across reps, pipeline reports, reassignment",
   FINANCE: "PO approval, invoices, ledger, GST, Tally export",
   PRODUCTION: "WIP stage advancement, component assignment, stage notes",
-  PRODUCTION_MANAGER: "All production + manual WO creation, scheduling, capacity",
+  PRODUCTION_MANAGER:
+    "All production + manual WO creation, scheduling, capacity",
   RD: "BOM creation/editing (DRAFT), ECN initiation",
   QC_INSPECTOR: "Inspection queue, defect logging, certificate issuance",
   QC_MANAGER: "All QC + template management, quarantine, amendment",
   STORES: "Inward entry, cycle count, stock adjustment, transfers",
   CUSTOMER: "Own orders, invoices, QC certs, support tickets (portal only)",
 };
-
-type MockUser = {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  department: string;
-  status: "ACTIVE" | "INACTIVE";
-  lastLogin: string;
-};
-
-const MOCK_USERS: MockUser[] = [
-  { id: "u1", name: "Chetan (HOD)", email: "chetan@instigenie.in", role: "PRODUCTION_MANAGER", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u2", name: "Shubham", email: "shubham@instigenie.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u3", name: "Sanju", email: "sanju@instigenie.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-17" },
-  { id: "u4", name: "Jatin", email: "jatin@instigenie.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u5", name: "Rishabh", email: "rishabh@instigenie.in", role: "PRODUCTION", department: "Manufacturing", status: "ACTIVE", lastLogin: "2026-04-16" },
-  { id: "u6", name: "Binsu", email: "binsu@instigenie.in", role: "QC_INSPECTOR", department: "Quality", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u7", name: "Saurabh", email: "saurabh@instigenie.in", role: "STORES", department: "Warehouse", status: "ACTIVE", lastLogin: "2026-04-15" },
-  { id: "u8", name: "Minakshi", email: "minakshi@instigenie.in", role: "STORES", department: "Warehouse", status: "ACTIVE", lastLogin: "2026-04-14" },
-  { id: "u9", name: "Priya Sharma", email: "priya@instigenie.in", role: "SALES_REP", department: "Sales", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u10", name: "Anita Das", email: "anita@instigenie.in", role: "FINANCE", department: "Finance", status: "ACTIVE", lastLogin: "2026-04-18" },
-  { id: "u11", name: "QC Manager", email: "qcmgr@instigenie.in", role: "QC_MANAGER", department: "Quality", status: "ACTIVE", lastLogin: "2026-04-17" },
-  { id: "u12", name: "Management User", email: "mgmt@instigenie.in", role: "MANAGEMENT", department: "Management", status: "ACTIVE", lastLogin: "2026-04-18" },
-];
 
 const ROLE_COLORS: Partial<Record<UserRole, string>> = {
   SUPER_ADMIN: "bg-red-50 text-red-700 border-red-200",
@@ -93,125 +107,29 @@ const ROLE_COLORS: Partial<Record<UserRole, string>> = {
   CUSTOMER: "bg-gray-50 text-gray-600 border-gray-200",
 };
 
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiProblem) {
+    return err.problem.detail ?? err.problem.title;
+  }
+  return fallback;
+}
+
 export default function UsersRolesPage() {
   const { role: currentRole } = useAuthStore();
-  const [users, setUsers] = useState<MockUser[]>(MOCK_USERS);
-  const [editUser, setEditUser] = useState<MockUser | null>(null);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [newRole, setNewRole] = useState<UserRole | "">("");
   const [activeTab, setActiveTab] = useState<"users" | "roles">("users");
-
-  // Invite flow state — real API (/admin/users/*).
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [invitations, setInvitations] = useState<InvitationSummary[]>([]);
-  // Start in loading=true so the card shows a spinner on first paint until
-  // the mount effect resolves — flipping to true *inside* the effect would
-  // trip React 19's set-state-in-effect rule.
-  const [invitationsLoading, setInvitationsLoading] = useState(true);
-  const [invitationsError, setInvitationsError] = useState<string | null>(null);
-  const [revokingId, setRevokingId] = useState<string | null>(null);
 
-  // Manual refresh — wired to the "Refresh" button on the invitations card.
-  // Safe to call setState synchronously here because a click is a user event,
-  // not an effect, so React 19's set-state-in-effect rule doesn't apply.
-  const refreshInvitations = useCallback(async () => {
-    setInvitationsLoading(true);
-    setInvitationsError(null);
-    try {
-      // No status filter → API returns PENDING + EXPIRED + REVOKED (anything
-      // that isn't ACCEPTED). The admin cares about all open threads.
-      const res = await apiListInvitations({ limit: 100 });
-      setInvitations(res.items);
-    } catch (err) {
-      if (err instanceof ApiProblem) {
-        setInvitationsError(err.problem.detail ?? err.problem.title);
-      } else {
-        setInvitationsError("Couldn't load invitations. Is the API running?");
-      }
-    } finally {
-      setInvitationsLoading(false);
-    }
-  }, []);
+  // Permission gate — both queries are gated on enabled so role-switch in
+  // dev doesn't fire 403s. Queries auto-refetch when `enabled` flips.
+  const isAdmin = currentRole === "SUPER_ADMIN";
 
-  // Only SUPER_ADMIN renders below, but we still gate on the permission
-  // before making the API call — prevents a flood of 403s on role-switch
-  // in dev. The early-return below handles the UI path. We launch a floating
-  // promise (no setState synchronously) so the React 19 effect rule passes.
-  useEffect(() => {
-    if (currentRole !== "SUPER_ADMIN") return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await apiListInvitations({ limit: 100 });
-        if (cancelled) return;
-        setInvitations(res.items);
-        setInvitationsError(null);
-      } catch (err) {
-        if (cancelled) return;
-        if (err instanceof ApiProblem) {
-          setInvitationsError(err.problem.detail ?? err.problem.title);
-        } else {
-          setInvitationsError("Couldn't load invitations. Is the API running?");
-        }
-      } finally {
-        if (!cancelled) setInvitationsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentRole]);
+  const membersQuery = useApiInvitations(
+    isAdmin ? { status: "ACCEPTED", limit: 200 } : { status: "ACCEPTED" },
+  );
+  const pipelineQuery = useApiInvitations(isAdmin ? { limit: 200 } : {});
+  const revokeMutation = useApiRevokeInvitation();
 
-  function handleInvited(invitation: InvitationSummary) {
-    // Optimistic prepend — backend RLS guarantees we'll see this row on
-    // the next refresh anyway, but showing it immediately feels snappier.
-    setInvitations((prev) => [
-      invitation,
-      ...prev.filter((i) => i.id !== invitation.id),
-    ]);
-  }
-
-  async function handleRevoke(invitation: InvitationSummary) {
-    if (revokingId) return;
-    setRevokingId(invitation.id);
-    try {
-      const updated = await apiRevokeInvitation(invitation.id);
-      setInvitations((prev) =>
-        prev.map((i) => (i.id === updated.id ? updated : i)),
-      );
-      toast.success(`Revoked invite to ${invitation.email}.`);
-    } catch (err) {
-      const msg =
-        err instanceof ApiProblem
-          ? (err.problem.detail ?? err.problem.title)
-          : "Could not revoke invite.";
-      toast.error(msg);
-    } finally {
-      setRevokingId(null);
-    }
-  }
-
-  const roleCount = Object.entries(
-    users.reduce((acc, u) => ({ ...acc, [u.role]: (acc[u.role] ?? 0) + 1 }), {} as Record<string, number>)
-  ).sort((a, b) => b[1] - a[1]);
-
-  function handleEditRole(user: MockUser) {
-    setEditUser(user);
-    setNewRole(user.role);
-    setEditDialogOpen(true);
-  }
-
-  function handleSaveRole() {
-    if (!editUser || !newRole) return;
-    setUsers((prev) =>
-      prev.map((u) => (u.id === editUser.id ? { ...u, role: newRole as UserRole } : u))
-    );
-    toast.success(`Role updated: ${editUser.name} → ${ROLE_LABELS[newRole as UserRole]}`);
-    setEditDialogOpen(false);
-    setEditUser(null);
-  }
-
-  if (currentRole !== "SUPER_ADMIN") {
+  if (!isAdmin) {
     return (
       <div className="p-6 max-w-[900px] mx-auto">
         <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -220,76 +138,55 @@ export default function UsersRolesPage() {
           </div>
           <h2 className="text-xl font-semibold">Access Restricted</h2>
           <p className="text-sm text-muted-foreground text-center max-w-sm">
-            User & Role management is restricted to Super Admin only. Your current role is{" "}
-            <span className="font-medium">{currentRole ? ROLE_LABELS[currentRole] : "Unknown"}</span>.
+            User &amp; Role management is restricted to Super Admin only. Your
+            current role is{" "}
+            <span className="font-medium">
+              {currentRole ? ROLE_LABELS[currentRole] : "Unknown"}
+            </span>
+            .
           </p>
-          <p className="text-xs text-muted-foreground">Use the role switcher in the sidebar to switch to Super Admin.</p>
+          <p className="text-xs text-muted-foreground">
+            Use the role switcher in the sidebar to switch to Super Admin.
+          </p>
         </div>
       </div>
     );
   }
 
+  const members = membersQuery.data?.items ?? [];
+  const pipeline = pipelineQuery.data?.items ?? [];
+
+  // Role-usage tally for the Role Definitions tab — derived from accepted
+  // invitations only; bootstrap admin / seeded users won't be reflected.
+  const roleCount = Object.entries(
+    members.reduce(
+      (acc, m) => ({ ...acc, [m.roleId]: (acc[m.roleId] ?? 0) + 1 }),
+      {} as Record<string, number>,
+    ),
+  ).sort((a, b) => b[1] - a[1]);
+
+  function handleRevoke(invitation: InvitationSummary) {
+    if (revokeMutation.isPending) return;
+    revokeMutation.mutate(invitation.id, {
+      onSuccess: () => {
+        toast.success(`Revoked invite to ${invitation.email}.`);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Could not revoke invite."));
+      },
+    });
+  }
+
   return (
     <div className="p-6 max-w-[1200px] mx-auto space-y-6">
-      {/* Edit Role Dialog */}
-      <Dialog open={editDialogOpen} onOpenChange={(open) => { if (!open) setEditDialogOpen(false); }}>
-        <DialogContent className="sm:max-w-[440px]">
-          <DialogHeader>
-            <DialogTitle>Edit User Role</DialogTitle>
-          </DialogHeader>
-          {editUser && (
-            <div className="space-y-4 py-2">
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-sm font-semibold text-primary">
-                  {editUser.name.slice(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <p className="text-sm font-medium">{editUser.name}</p>
-                  <p className="text-xs text-muted-foreground">{editUser.email}</p>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>New Role</Label>
-                <Select
-                  value={newRole}
-                  onValueChange={(v) => setNewRole((v ?? "") as UserRole)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(ROLE_LABELS) as UserRole[]).map((r) => (
-                      <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {newRole && (
-                <p className="text-xs text-muted-foreground bg-blue-50 border border-blue-100 rounded-md px-3 py-2">
-                  {ROLE_DESCRIPTIONS[newRole as UserRole]}
-                </p>
-              )}
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveRole} disabled={!newRole}>Save Role</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Invite flow dialog — real API (/admin/users/invite) */}
-      <InviteUserDialog
-        open={inviteOpen}
-        onOpenChange={setInviteOpen}
-        onInvited={handleInvited}
-      />
+      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} />
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Users & Roles</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Users &amp; Roles</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage system users and their access permissions. All permissions enforced at API layer.
+            Manage system users and their access permissions. All permissions
+            enforced at API layer.
           </p>
         </div>
         <Button onClick={() => setInviteOpen(true)}>
@@ -298,7 +195,16 @@ export default function UsersRolesPage() {
         </Button>
       </div>
 
-      {/* Tab Toggle */}
+      <p className="text-xs text-muted-foreground bg-blue-50 border border-blue-100 rounded-md px-3 py-2 flex items-start gap-2">
+        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <span>
+          The Members list is derived from accepted invitations. Bootstrap
+          admin or seeded users that did not join via an invitation link will
+          not appear here. To extend this view, add a{" "}
+          <code className="mx-0.5">GET /admin/users</code> route on the API.
+        </span>
+      </p>
+
       <div className="flex gap-2 border-b pb-0">
         {(["users", "roles"] as const).map((tab) => (
           <button
@@ -317,125 +223,131 @@ export default function UsersRolesPage() {
 
       {activeTab === "users" && (
         <div className="space-y-4">
-          {/* Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Card className="p-4">
-              <p className="text-xs text-muted-foreground">Total Users</p>
-              <p className="text-2xl font-bold mt-1">{users.length}</p>
+              <p className="text-xs text-muted-foreground">Members (joined)</p>
+              <p className="text-2xl font-bold mt-1">
+                {membersQuery.isPending ? "—" : members.length}
+              </p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs text-muted-foreground">Active</p>
-              <p className="text-2xl font-bold mt-1 text-green-600">{users.filter((u) => u.status === "ACTIVE").length}</p>
+              <p className="text-xs text-muted-foreground">Pending Invites</p>
+              <p className="text-2xl font-bold mt-1 text-blue-600">
+                {pipelineQuery.isPending
+                  ? "—"
+                  : pipeline.filter((i) => i.status === "PENDING").length}
+              </p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs text-muted-foreground">Production Team</p>
-              <p className="text-2xl font-bold mt-1">{users.filter((u) => u.role === "PRODUCTION" || u.role === "PRODUCTION_MANAGER").length}</p>
+              <p className="text-xs text-muted-foreground">Expired</p>
+              <p className="text-2xl font-bold mt-1 text-amber-600">
+                {pipelineQuery.isPending
+                  ? "—"
+                  : pipeline.filter((i) => i.status === "EXPIRED").length}
+              </p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-muted-foreground">Roles in Use</p>
-              <p className="text-2xl font-bold mt-1">{new Set(users.map((u) => u.role)).size}</p>
+              <p className="text-2xl font-bold mt-1">
+                {membersQuery.isPending
+                  ? "—"
+                  : new Set(members.map((m) => m.roleId)).size}
+              </p>
             </Card>
           </div>
 
-          {/* Users Table */}
-          <div className="rounded-lg border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead>User</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Department</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Login</TableHead>
-                  <TableHead className="w-16"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map((user) => (
-                  <TableRow key={user.id} className="hover:bg-muted/30">
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
-                          {user.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <span className="text-sm font-medium">{user.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
-                    <TableCell>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ROLE_COLORS[user.role] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
-                        {ROLE_LABELS[user.role]}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{user.department}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={user.status} />
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{user.lastLogin}</TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0"
-                        onClick={() => handleEditRole(user)}
-                      >
-                        <Edit2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <MembersCard
+            invitations={members}
+            loading={membersQuery.isPending}
+            fetching={membersQuery.isFetching}
+            error={
+              membersQuery.error
+                ? errorMessage(
+                    membersQuery.error,
+                    "Couldn't load members. Is the API running?",
+                  )
+                : null
+            }
+            onRefresh={() => void membersQuery.refetch()}
+          />
 
-          {/* Pending Invitations — real API (/admin/users/invitations) */}
-          <InvitationsCard
-            invitations={invitations}
-            loading={invitationsLoading}
-            error={invitationsError}
-            revokingId={revokingId}
+          <PipelineCard
+            invitations={pipeline}
+            loading={pipelineQuery.isPending}
+            fetching={pipelineQuery.isFetching}
+            error={
+              pipelineQuery.error
+                ? errorMessage(
+                    pipelineQuery.error,
+                    "Couldn't load invitations. Is the API running?",
+                  )
+                : null
+            }
+            revokingId={
+              revokeMutation.isPending
+                ? (revokeMutation.variables ?? null)
+                : null
+            }
             onRevoke={handleRevoke}
-            onRefresh={refreshInvitations}
+            onRefresh={() => void pipelineQuery.refetch()}
           />
         </div>
       )}
 
       {activeTab === "roles" && (
         <div className="space-y-4">
-          {/* Role usage summary */}
           <div className="flex flex-wrap gap-2 mb-2">
+            {roleCount.length === 0 && !membersQuery.isPending && (
+              <p className="text-xs text-muted-foreground">
+                No member-role data yet — invite a user to populate this view.
+              </p>
+            )}
             {roleCount.map(([role, count]) => (
-              <span key={role} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${ROLE_COLORS[role as UserRole] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
+              <span
+                key={role}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+                  ROLE_COLORS[role as UserRole] ??
+                  "bg-gray-50 text-gray-600 border-gray-200"
+                }`}
+              >
                 {ROLE_LABELS[role as UserRole]}
-                <Badge variant="secondary" className="h-4 text-[10px] px-1">{count}</Badge>
+                <Badge variant="secondary" className="h-4 text-[10px] px-1">
+                  {count}
+                </Badge>
               </span>
             ))}
           </div>
 
-          {/* Role definitions */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => (
-              <Card key={role} className="overflow-hidden">
-                <CardHeader className="pb-2 pt-4 px-4">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-semibold">{ROLE_LABELS[role]}</CardTitle>
-                    <div className="flex items-center gap-1.5">
-                      <Shield className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">
-                        {users.filter((u) => u.role === role).length} user{users.filter((u) => u.role === role).length !== 1 ? "s" : ""}
-                      </span>
+            {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => {
+              const usage = members.filter((m) => m.roleId === role).length;
+              return (
+                <Card key={role} className="overflow-hidden">
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-semibold">
+                        {ROLE_LABELS[role]}
+                      </CardTitle>
+                      <div className="flex items-center gap-1.5">
+                        <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">
+                          {usage} user{usage !== 1 ? "s" : ""}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="px-4 pb-4">
-                  <p className="text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[role]}</p>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <p className="text-xs text-muted-foreground">
+                      {ROLE_DESCRIPTIONS[role]}
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
           <p className="text-xs text-muted-foreground bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
-            ⚠ All permissions are enforced at the API middleware layer — not just the UI. Frontend role restrictions are a UX feature only.
+            All permissions are enforced at the API middleware layer — not just
+            the UI. Frontend role restrictions are a UX feature only.
           </p>
         </div>
       )}
@@ -443,68 +355,177 @@ export default function UsersRolesPage() {
   );
 }
 
-// ─── Invitations sub-card ────────────────────────────────────────────────────
-//
-// Kept in this file rather than its own component because it's only ever
-// rendered here and it shares the page's ROLE_LABELS / ROLE_COLORS lookup
-// tables. If a second page ever needs to list invitations, promote to
-// components/admin-users/.
+// ─── Members card ─────────────────────────────────────────────────────────
 
-interface InvitationsCardProps {
+interface MembersCardProps {
   invitations: InvitationSummary[];
   loading: boolean;
+  fetching: boolean;
   error: string | null;
-  revokingId: string | null;
-  onRevoke: (invitation: InvitationSummary) => void | Promise<void>;
-  onRefresh: () => void | Promise<void>;
+  onRefresh: () => void;
 }
 
-function InvitationsCard({
+function MembersCard({
   invitations,
   loading,
+  fetching,
   error,
-  revokingId,
-  onRevoke,
   onRefresh,
-}: InvitationsCardProps) {
-  const pending = invitations.filter((i) => i.status === "PENDING");
-  const other = invitations.filter((i) => i.status !== "PENDING");
-
+}: MembersCardProps) {
   return (
-    <div className="rounded-lg border bg-card">
+    <div className="rounded-lg border bg-card overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div>
-          <h3 className="text-sm font-semibold">Invitations</h3>
+          <h3 className="text-sm font-semibold">Members</h3>
           <p className="text-xs text-muted-foreground">
-            {pending.length} pending · {other.length} closed
+            {invitations.length} accepted invitation
+            {invitations.length === 1 ? "" : "s"}
           </p>
         </div>
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => void onRefresh()}
-          disabled={loading}
+          onClick={onRefresh}
+          disabled={fetching}
         >
-          {loading ? (
+          {fetching ? (
             <>
               <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
               Loading
             </>
           ) : (
-            "Refresh"
+            <>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+              Refresh
+            </>
           )}
         </Button>
       </div>
       {error ? (
         <p className="px-4 py-6 text-sm text-destructive">{error}</p>
-      ) : loading && invitations.length === 0 ? (
+      ) : loading ? (
+        <p className="px-4 py-8 text-sm text-muted-foreground flex items-center gap-2 justify-center">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading members…
+        </p>
+      ) : invitations.length === 0 ? (
+        <p className="px-4 py-8 text-sm text-muted-foreground text-center">
+          No members yet. Invitations show up here once accepted.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/30 hover:bg-muted/30">
+              <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Joined</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {invitations.map((m) => {
+              const roleLabel =
+                ROLE_LABELS[m.roleId as UserRole] ?? m.roleId;
+              return (
+                <TableRow key={m.id} className="hover:bg-muted/20">
+                  <TableCell>
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+                        {m.email.slice(0, 2).toUpperCase()}
+                      </div>
+                      <span className="text-sm font-medium break-all">
+                        {m.email}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
+                        ROLE_COLORS[m.roleId as UserRole] ??
+                        "bg-gray-50 text-gray-600 border-gray-200"
+                      }`}
+                    >
+                      {roleLabel}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {m.acceptedAt
+                      ? new Date(m.acceptedAt).toLocaleString()
+                      : "—"}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
+// ─── Pipeline card (PENDING + EXPIRED + REVOKED) ─────────────────────────
+
+interface PipelineCardProps {
+  invitations: InvitationSummary[];
+  loading: boolean;
+  fetching: boolean;
+  error: string | null;
+  revokingId: string | null;
+  onRevoke: (invitation: InvitationSummary) => void;
+  onRefresh: () => void;
+}
+
+function PipelineCard({
+  invitations,
+  loading,
+  fetching,
+  error,
+  revokingId,
+  onRevoke,
+  onRefresh,
+}: PipelineCardProps) {
+  const pending = invitations.filter((i) => i.status === "PENDING");
+  const closed = invitations.filter((i) => i.status !== "PENDING");
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b">
+        <div>
+          <h3 className="text-sm font-semibold">Invitations</h3>
+          <p className="text-xs text-muted-foreground">
+            {pending.length} pending · {closed.length} closed
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onRefresh}
+          disabled={fetching}
+        >
+          {fetching ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Loading
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+              Refresh
+            </>
+          )}
+        </Button>
+      </div>
+      {error ? (
+        <p className="px-4 py-6 text-sm text-destructive">{error}</p>
+      ) : loading ? (
         <p className="px-4 py-8 text-sm text-muted-foreground flex items-center gap-2 justify-center">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading invitations…
         </p>
       ) : invitations.length === 0 ? (
         <p className="px-4 py-8 text-sm text-muted-foreground text-center">
-          No invitations yet. Use <span className="font-medium">Invite User</span> above to send the first one.
+          No invitations yet. Use{" "}
+          <span className="font-medium">Invite User</span> above to send the
+          first one.
         </p>
       ) : (
         <Table>
@@ -519,13 +540,21 @@ function InvitationsCard({
           </TableHeader>
           <TableBody>
             {invitations.map((invite) => {
-              const roleLabel = ROLE_LABELS[invite.roleId as UserRole] ?? invite.roleId;
+              const roleLabel =
+                ROLE_LABELS[invite.roleId as UserRole] ?? invite.roleId;
               const isRevoking = revokingId === invite.id;
               return (
                 <TableRow key={invite.id} className="hover:bg-muted/20">
-                  <TableCell className="text-sm font-medium break-all">{invite.email}</TableCell>
+                  <TableCell className="text-sm font-medium break-all">
+                    {invite.email}
+                  </TableCell>
                   <TableCell>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ROLE_COLORS[invite.roleId as UserRole] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
+                        ROLE_COLORS[invite.roleId as UserRole] ??
+                        "bg-gray-50 text-gray-600 border-gray-200"
+                      }`}
+                    >
                       {roleLabel}
                     </span>
                   </TableCell>
@@ -544,7 +573,7 @@ function InvitationsCard({
                         variant="ghost"
                         size="sm"
                         disabled={isRevoking}
-                        onClick={() => void onRevoke(invite)}
+                        onClick={() => onRevoke(invite)}
                         className="h-7 text-xs"
                       >
                         {isRevoking ? (
@@ -556,7 +585,9 @@ function InvitationsCard({
                         )}
                       </Button>
                     ) : (
-                      <span className="text-[11px] text-muted-foreground pr-2">—</span>
+                      <span className="text-[11px] text-muted-foreground pr-2">
+                        —
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -569,9 +600,11 @@ function InvitationsCard({
   );
 }
 
-function InvitationStatusChip({ status }: { status: InvitationSummary["status"] }) {
-  // Small inline chip so the table row stays compact. Colours mirror the
-  // role chips so the whole page has a coherent palette.
+function InvitationStatusChip({
+  status,
+}: {
+  status: InvitationSummary["status"];
+}) {
   const classes: Record<InvitationSummary["status"], string> = {
     PENDING: "bg-blue-50 text-blue-700 border-blue-200",
     EXPIRED: "bg-gray-50 text-gray-600 border-gray-200",
