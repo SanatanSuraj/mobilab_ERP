@@ -133,6 +133,7 @@ export const PERMISSIONS = [
   "purchase_orders:create",
   "purchase_orders:read",
   "purchase_orders:update",
+  "purchase_orders:approve",
   "purchase_orders:approve_finance",
 
   // purchase_invoices
@@ -210,6 +211,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "ncr:read",
     "inventory:read",
     "purchase_orders:read",
+    "purchase_orders:approve",
     "purchase_invoices:read",
     "sales_invoices:read",
     "payments:read",
@@ -309,6 +311,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "sales_orders:read",
     "sales_orders:approve_finance",
     "purchase_orders:read",
+    "purchase_orders:approve",
     "purchase_orders:approve_finance",
     "purchase_invoices:create",
     "purchase_invoices:read",

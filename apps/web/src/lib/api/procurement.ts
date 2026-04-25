@@ -46,6 +46,10 @@ import type {
   CreatePoLine,
   UpdatePoLine,
   PoStatus,
+  // PO approvals
+  ApprovePurchaseOrder,
+  RejectPurchaseOrder,
+  PoApprovalHistory,
   // GRNs
   Grn,
   GrnLine,
@@ -57,6 +61,7 @@ import type {
   PostGrn,
   GrnStatus,
   // Reports
+  ProcurementOverview,
   ProcurementReports,
 } from "@instigenie/contracts";
 
@@ -217,6 +222,11 @@ export interface PurchaseOrderListQuery extends PaginationParams {
   from?: string;
   /** Inclusive. ISO-8601 date (YYYY-MM-DD). */
   to?: string;
+  /**
+   * Inclusive lower bound on grand_total. Drives the finance-approvals
+   * filtered view (high-value POs only).
+   */
+  minTotal?: string;
   search?: string;
 }
 
@@ -292,6 +302,35 @@ export async function apiDeletePoLine(
   lineId: string
 ): Promise<void> {
   return tenantDelete(`/procurement/purchase-orders/${id}/lines/${lineId}`);
+}
+
+// ─── PO Approvals ───────────────────────────────────────────────────────────
+//
+// All three endpoints reuse the PO `version` for optimistic concurrency.
+// Server transitions { DRAFT, PENDING_APPROVAL } → APPROVED | REJECTED;
+// any other source state surfaces as a 409 `invalid_state_transition`.
+
+/** Approve a PO. Stamps approved_by/approved_at on the header. */
+export async function apiApprovePurchaseOrder(
+  id: string,
+  body: ApprovePurchaseOrder
+): Promise<PurchaseOrder> {
+  return tenantPost(`/procurement/purchase-orders/${id}/approve`, body);
+}
+
+/** Reject a PO. Remarks are required (server validates). */
+export async function apiRejectPurchaseOrder(
+  id: string,
+  body: RejectPurchaseOrder
+): Promise<PurchaseOrder> {
+  return tenantPost(`/procurement/purchase-orders/${id}/reject`, body);
+}
+
+/** Full append-only audit history for a PO (approve + reject actions). */
+export async function apiGetPoApprovalHistory(
+  id: string
+): Promise<PoApprovalHistory> {
+  return tenantGet(`/procurement/purchase-orders/${id}/approval-history`);
 }
 
 // ─── GRNs ───────────────────────────────────────────────────────────────────
@@ -409,4 +448,10 @@ export async function apiGetProcurementReports(
   q: ProcurementReportsQuery = {}
 ): Promise<ProcurementReports> {
   return tenantGet(`/procurement/reports${qs(q)}`);
+}
+
+// ─── Procurement overview (live counts for dashboard cards) ───────────────────
+
+export async function apiGetProcurementOverview(): Promise<ProcurementOverview> {
+  return tenantGet(`/procurement/overview`);
 }

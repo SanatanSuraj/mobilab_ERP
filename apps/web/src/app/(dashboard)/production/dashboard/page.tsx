@@ -1,97 +1,148 @@
 "use client";
 
-// TODO(phase-5): Instigenie Mobicase dashboard has no backend route yet. It
-// aggregates mobi WOs + OEE + scrap + device IDs. Expected:
-//   GET /mfg/overview - counts + OEE avg + scrap total in one call
-// Mock imports left in place until the mobicase slice ships in
-// apps/api/src/modules/mfg.
+/**
+ * Manufacturing dashboard — backed by real APIs.
+ *
+ *   GET /production/overview     → { totalWorkOrders, activeWip, completedToday,
+ *                                    oee, scrapRate, machineUtilization,
+ *                                    notImplemented[] }
+ *   GET /production/work-orders  → enriched WO list (header + product + stages)
+ *
+ * `oee`, `scrapRate`, and `machineUtilization` come back null because the
+ * source tables (oee_records, scrap_entries, machine_utilization) don't
+ * exist yet. Those sections render <AwaitingBackend/> instead of a fake
+ * number — per project policy we never invent data.
+ *
+ * No `@/data/*` imports — every datum on this page is server-derived.
+ */
 
 import { useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { ProductBadge } from "@/components/shared/product-badge";
+import { AwaitingBackend } from "@/components/shared/awaiting-backend";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  getActiveWOs,
-  getOnHoldWOs,
-  getWOProgress,
-  getOEEAvg,
-  getTotalScrapValue,
-  formatCurrency,
-  formatDate,
-  mobiWorkOrders,
-  oeeRecords,
-  scrapEntries,
-  mobiDeviceIDs,
-  isFinishedDevice,
-  isFinishedDeviceCode,
-  isModule,
-  isModuleCode,
-} from "@/data/instigenie-mock";
+  useApiProductionOverview,
+  useApiWorkOrders,
+} from "@/hooks/useProductionApi";
+import type { WoStatus, WorkOrderListItem } from "@instigenie/contracts";
 import {
   AlertCircle,
   Activity,
-  Package,
-  TrendingDown,
   BarChart3,
   ClipboardList,
+  Package,
+  TrendingDown,
 } from "lucide-react";
 
-export default function MfgDashboardPage() {
-  const activeWOs = useMemo(() => getActiveWOs(), []);
-  const onHoldWOs = useMemo(() => getOnHoldWOs(), []);
-  const oeeAvg = useMemo(() => getOEEAvg(), []);
-  const totalScrapValue = useMemo(() => getTotalScrapValue(), []);
+const ACTIVE_WO_STATUSES: ReadonlySet<WoStatus> = new Set([
+  "MATERIAL_CHECK",
+  "IN_PROGRESS",
+  "QC_HOLD",
+  "REWORK",
+]);
 
-  // Units in production today, split by kind (Device=MCC only, Module=MBA/MBM/MBC/CFG)
-  const { devicesInProduction, modulesInProduction } = useMemo(() => {
-    let devices = 0;
-    let modules = 0;
-    for (const d of mobiDeviceIDs) {
-      if (d.status !== "IN_PRODUCTION") continue;
-      if (isFinishedDevice(d)) devices++;
-      else if (isModule(d)) modules++;
-    }
-    return { devicesInProduction: devices, modulesInProduction: modules };
-  }, []);
+const STATUS_TONE: Record<WoStatus, string> = {
+  PLANNED: "bg-gray-50 text-gray-700 border-gray-200",
+  MATERIAL_CHECK: "bg-amber-50 text-amber-700 border-amber-200",
+  IN_PROGRESS: "bg-blue-50 text-blue-700 border-blue-200",
+  QC_HOLD: "bg-purple-50 text-purple-700 border-purple-200",
+  REWORK: "bg-orange-50 text-orange-700 border-orange-200",
+  COMPLETED: "bg-green-50 text-green-700 border-green-200",
+  CANCELLED: "bg-red-50 text-red-700 border-red-200",
+};
 
-  // Last 4 OEE records for trend table
-  const recentOEE = useMemo(
-    () =>
-      [...oeeRecords]
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 4),
-    []
+const PRIORITY_TONE: Record<string, string> = {
+  CRITICAL: "bg-red-50 text-red-700 border-red-200",
+  HIGH: "bg-orange-50 text-orange-700 border-orange-200",
+  NORMAL: "bg-gray-50 text-gray-700 border-gray-200",
+  LOW: "bg-slate-50 text-slate-600 border-slate-200",
+};
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function daysFromNow(targetDate: string | null): number | null {
+  if (!targetDate) return null;
+  const t = new Date(targetDate);
+  if (Number.isNaN(t.getTime())) return null;
+  const now = new Date();
+  return Math.ceil((t.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+export default function ProductionDashboardPage() {
+  const router = useRouter();
+
+  const overviewQuery = useApiProductionOverview();
+  const woQuery = useApiWorkOrders({ limit: 100 });
+
+  const overview = overviewQuery.data;
+  const workOrders: WorkOrderListItem[] = woQuery.data?.data ?? [];
+
+  const activeWOs = useMemo(
+    () => workOrders.filter((wo) => ACTIVE_WO_STATUSES.has(wo.status)),
+    [workOrders]
   );
 
-  // Pre-compute completed Device (MCC) vs Module (MBA/MBM/MBC/CFG) counts per WO
-  // so the Active WO table can show "Devices" and "Modules" columns without per-row filters.
-  const completedUnitsByWO = useMemo(() => {
-    const map = new Map<string, { devices: number; modules: number }>();
-    for (const d of mobiDeviceIDs) {
-      if (
-        d.status === "FINAL_QC_PASS" ||
-        d.status === "RELEASED" ||
-        d.status === "DISPATCHED"
-      ) {
-        const prev = map.get(d.workOrderId) ?? { devices: 0, modules: 0 };
-        if (isFinishedDevice(d)) prev.devices++;
-        else if (isModule(d)) prev.modules++;
-        map.set(d.workOrderId, prev);
-      }
-    }
-    return map;
-  }, []);
+  const onHoldWOs = useMemo(
+    () => workOrders.filter((wo) => wo.status === "QC_HOLD"),
+    [workOrders]
+  );
+
+  // ─── Loading ────────────────────────────────────────────────────────────
+  if (overviewQuery.isLoading || woQuery.isLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <Skeleton className="h-8 w-72" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  // ─── Error ──────────────────────────────────────────────────────────────
+  if (overviewQuery.isError || woQuery.isError) {
+    const err = overviewQuery.error ?? woQuery.error;
+    return (
+      <div className="p-6 max-w-[1400px] mx-auto">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">
+              Failed to load manufacturing dashboard
+            </p>
+            <p className="text-red-700 mt-1">
+              {err instanceof Error ? err.message : "Unknown error"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 p-6">
       <PageHeader
-        title="Manufacturing Dashboard — Instigenie"
-        description="Mobicase Diagnostic Suite | ISO 13485 | Guwahati Plant"
+        title="Manufacturing Dashboard"
+        description="Live counts from the work-orders pipeline."
       />
 
-      {/* On-Hold Alert Banners */}
+      {/* QC-Hold Banners */}
       {onHoldWOs.map((wo) => (
         <div
           key={wo.id}
@@ -99,14 +150,11 @@ export default function MfgDashboardPage() {
         >
           <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
           <div>
-            <span className="font-semibold">ON HOLD — </span>
-            <span className="font-mono text-amber-800">{wo.woNumber}</span>
-            {wo.onHoldReason && (
-              <span className="ml-1 text-amber-800">
-                {" "}
-                &mdash; {wo.onHoldReason}
-              </span>
-            )}
+            <span className="font-semibold">QC HOLD — </span>
+            <span className="font-mono text-amber-800">{wo.pid}</span>
+            <span className="ml-2 text-amber-800">
+              {wo.productCode} · {wo.productName}
+            </span>
           </div>
         </div>
       ))}
@@ -114,36 +162,40 @@ export default function MfgDashboardPage() {
       {/* KPI Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
-          title="Active Work Orders"
-          value={String(activeWOs.length)}
+          title="Total Work Orders"
+          value={String(overview?.totalWorkOrders ?? 0)}
           icon={ClipboardList}
           iconColor="text-blue-600"
-          change={`${onHoldWOs.length} on hold`}
+          change={`${overview?.activeWip ?? 0} active`}
+          trend="neutral"
+        />
+        <KPICard
+          title="Active WIP"
+          value={String(overview?.activeWip ?? 0)}
+          icon={Package}
+          iconColor="text-indigo-600"
+          change={`${onHoldWOs.length} on QC hold`}
           trend={onHoldWOs.length > 0 ? "down" : "neutral"}
         />
         <KPICard
-          title="Units in Production"
-          value={String(devicesInProduction + modulesInProduction)}
-          icon={Package}
-          iconColor="text-indigo-600"
-          change={`${devicesInProduction} Device · ${modulesInProduction} Module`}
+          title="Completed Today"
+          value={String(overview?.completedToday ?? 0)}
+          icon={Activity}
+          iconColor="text-green-600"
+          change="from work_orders"
           trend="neutral"
         />
         <KPICard
           title="OEE (Avg)"
-          value={`${oeeAvg}%`}
+          value={overview?.oee == null ? "—" : `${overview.oee}%`}
           icon={BarChart3}
-          iconColor={oeeAvg >= 75 ? "text-green-600" : "text-red-600"}
-          change={oeeAvg >= 75 ? "Target met (≥75%)" : "Below target (<75%)"}
-          trend={oeeAvg >= 75 ? "up" : "down"}
-        />
-        <KPICard
-          title="Total Scrap Value"
-          value={formatCurrency(totalScrapValue)}
-          icon={TrendingDown}
-          iconColor="text-red-600"
-          change="All recorded scrap entries"
-          trend="down"
+          iconColor="text-muted-foreground"
+          change={
+            overview?.notImplemented.includes("oee")
+              ? "Not implemented — needs oee_records"
+              : "Target ≥ 75%"
+          }
+          trend="neutral"
         />
       </div>
 
@@ -164,41 +216,23 @@ export default function MfgDashboardPage() {
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                         WO #
                       </th>
-                      <th
-                        className="text-left px-4 py-3 font-medium text-muted-foreground"
-                        title="Finished device — MCC (Mobicase)"
-                      >
-                        Device
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                        Product
                       </th>
-                      <th
-                        className="text-left px-4 py-3 font-medium text-muted-foreground"
-                        title="Sub-assembly modules — MBA, MBM, MBC, CFG"
-                      >
-                        Module
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                        Family
                       </th>
                       <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                        Planned
-                      </th>
-                      <th
-                        className="text-right px-4 py-3 font-medium text-muted-foreground"
-                        title="Finished devices (MCC) completed on this WO"
-                      >
-                        Devices ✓
-                      </th>
-                      <th
-                        className="text-right px-4 py-3 font-medium text-muted-foreground"
-                        title="Sub-assembly modules (MBA/MBM/MBC/CFG) completed on this WO"
-                      >
-                        Modules ✓
+                        Qty
                       </th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                         Status
                       </th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                        Lines
+                        Priority
                       </th>
-                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                        Progress
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                        Target
                       </th>
                       <th className="text-right px-4 py-3 font-medium text-muted-foreground">
                         Days Remaining
@@ -207,116 +241,66 @@ export default function MfgDashboardPage() {
                   </thead>
                   <tbody className="divide-y">
                     {activeWOs.map((wo) => {
-                      const progress = getWOProgress(wo);
-                      const today = new Date("2026-04-17");
-                      const end = new Date(wo.targetEndDate);
-                      const daysRemaining = Math.ceil(
-                        (end.getTime() - today.getTime()) /
-                          (1000 * 60 * 60 * 24)
-                      );
-
-                      // Use pre-computed map — O(1) lookup instead of O(n) filter
-                      const completed = completedUnitsByWO.get(wo.id) ?? { devices: 0, modules: 0 };
-
-                      const isOverdue = daysRemaining < 0;
-                      const isOnHold = wo.status === "ON_HOLD";
-
+                      const dr = daysFromNow(wo.targetDate);
+                      const isOverdue = dr !== null && dr < 0;
                       return (
                         <tr
                           key={wo.id}
-                          className={`hover:bg-muted/30 transition-colors ${
-                            isOnHold ? "bg-amber-50/40" : ""
+                          className={`hover:bg-muted/30 transition-colors cursor-pointer ${
+                            wo.status === "QC_HOLD" ? "bg-amber-50/40" : ""
                           } ${isOverdue ? "bg-red-50/40" : ""}`}
+                          onClick={() =>
+                            router.push(`/production/work-orders/${wo.id}`)
+                          }
                         >
                           <td className="px-4 py-3 font-mono text-xs font-bold text-blue-700">
-                            {wo.woNumber}
+                            {wo.pid}
                           </td>
                           <td className="px-4 py-3">
-                            {(() => {
-                              const deviceCodes = wo.productCodes.filter(isFinishedDeviceCode);
-                              if (deviceCodes.length === 0)
-                                return <span className="text-muted-foreground text-xs">—</span>;
-                              return (
-                                <div className="flex gap-1 flex-wrap">
-                                  {deviceCodes.map((pc) => (
-                                    <ProductBadge key={pc} productCode={pc} />
-                                  ))}
-                                </div>
-                              );
-                            })()}
+                            <div className="font-medium">{wo.productName}</div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              {wo.productCode}
+                            </div>
                           </td>
-                          <td className="px-4 py-3">
-                            {(() => {
-                              const moduleCodes = wo.productCodes
-                                .filter(isModuleCode)
-                                .slice()
-                                .sort((a, b) => a.localeCompare(b));
-                              if (moduleCodes.length === 0)
-                                return <span className="text-muted-foreground text-xs">—</span>;
-                              return (
-                                <div className="flex gap-1 flex-wrap">
-                                  {moduleCodes.map((pc) => (
-                                    <ProductBadge key={pc} productCode={pc} />
-                                  ))}
-                                </div>
-                              );
-                            })()}
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {wo.productFamily}
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-sm">
-                            {wo.batchQty}
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono text-sm text-indigo-700">
-                            {completed.devices}
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono text-sm text-slate-700">
-                            {completed.modules}
+                            {wo.quantity}
                           </td>
                           <td className="px-4 py-3">
-                            <StatusBadge status={wo.status} />
+                            <Badge
+                              variant="outline"
+                              className={`text-xs whitespace-nowrap ${STATUS_TONE[wo.status]}`}
+                            >
+                              {wo.status.replace(/_/g, " ")}
+                            </Badge>
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1">
-                              {wo.lineAssignments.map((la) => (
-                                <StatusBadge key={la.line} status={la.line} />
-                              ))}
-                              {wo.lineAssignments.length === 0 && (
-                                <span className="text-xs text-muted-foreground">
-                                  —
-                                </span>
-                              )}
-                            </div>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${PRIORITY_TONE[wo.priority] ?? ""}`}
+                            >
+                              {wo.priority}
+                            </Badge>
                           </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex flex-col items-end gap-1">
-                              <span className="text-sm font-semibold">
-                                {progress}%
-                              </span>
-                              <div className="w-24 h-1.5 rounded-full bg-muted overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all ${
-                                    progress >= 80
-                                      ? "bg-green-500"
-                                      : progress >= 40
-                                      ? "bg-amber-500"
-                                      : "bg-red-500"
-                                  }`}
-                                  style={{ width: `${progress}%` }}
-                                />
-                              </div>
-                            </div>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {formatDate(wo.targetDate)}
                           </td>
                           <td
                             className={`px-4 py-3 text-right text-sm font-medium ${
                               isOverdue
                                 ? "text-red-700"
-                                : daysRemaining <= 5
+                                : dr !== null && dr <= 5
                                 ? "text-amber-700"
                                 : "text-muted-foreground"
                             }`}
                           >
-                            {isOverdue
-                              ? `${Math.abs(daysRemaining)}d overdue`
-                              : `${daysRemaining}d`}
+                            {dr === null
+                              ? "—"
+                              : isOverdue
+                              ? `${Math.abs(dr)}d overdue`
+                              : `${dr}d`}
                           </td>
                         </tr>
                       );
@@ -329,170 +313,41 @@ export default function MfgDashboardPage() {
         </Card>
       </div>
 
-      {/* Two-column: OEE Trend + Scrap This Month */}
+      {/* Two-column: OEE Trend + Scrap (both awaiting backend) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* OEE Trend */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">OEE Trend</h2>
             <Activity className="h-4 w-4 text-muted-foreground" />
           </div>
-          <Card>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 border-b">
-                    <tr>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                        Date
-                      </th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                        Line
-                      </th>
-                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                        Avail%
-                      </th>
-                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                        Perf%
-                      </th>
-                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                        Qual%
-                      </th>
-                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                        OEE%
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {recentOEE.map((rec) => {
-                      const isLow = rec.oee < 75;
-                      return (
-                        <tr
-                          key={rec.id}
-                          className={`hover:bg-muted/30 transition-colors ${
-                            isLow ? "bg-red-50/60" : ""
-                          }`}
-                        >
-                          <td className="px-4 py-3 text-xs text-muted-foreground">
-                            {formatDate(rec.date)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={rec.line} />
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono text-xs">
-                            {rec.availability}%
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono text-xs">
-                            {rec.performance}%
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono text-xs">
-                            {rec.quality}%
-                          </td>
-                          <td
-                            className={`px-4 py-3 text-right font-mono text-xs font-bold ${
-                              isLow ? "text-red-700" : "text-green-700"
-                            }`}
-                          >
-                            {rec.oee}%
-                            {isLow && (
-                              <span className="ml-1 text-red-500">▼</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+          <AwaitingBackend
+            endpoint="GET /production/oee"
+            note="OEE records (availability × performance × quality, per machine + day) need an oee_records table. Once it lands, /production/overview will return a non-null oee value and this section will render the trend table."
+          />
         </div>
 
-        {/* Scrap This Month */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">Scrap This Month</h2>
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </div>
-          <Card>
-            <CardContent className="p-0">
-              {scrapEntries.length === 0 ? (
-                <div className="py-12 text-center text-muted-foreground text-sm">
-                  No scrap entries
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50 border-b">
-                      <tr>
-                        <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                          Unit ID
-                        </th>
-                        <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                          Root Cause
-                        </th>
-                        <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                          Value (₹)
-                        </th>
-                        <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                          CAPA
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {scrapEntries.map((s) => (
-                        <tr
-                          key={s.id}
-                          className="hover:bg-muted/30 transition-colors"
-                        >
-                          <td className="px-4 py-3">
-                            <div className="font-mono text-xs font-medium text-red-700">
-                              {s.deviceId ?? "—"}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {s.scrapNumber}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={s.rootCause} />
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono text-sm font-semibold text-red-700">
-                            {formatCurrency(s.scrapValueINR)}
-                          </td>
-                          <td className="px-4 py-3">
-                            {s.linkedCAPANumber ? (
-                              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                                {s.linkedCAPANumber}
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-500 border border-gray-200">
-                                None
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-muted/30 border-t">
-                      <tr>
-                        <td
-                          className="px-4 py-2 text-xs font-semibold text-muted-foreground"
-                          colSpan={2}
-                        >
-                          Total
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-sm font-bold text-red-700">
-                          {formatCurrency(totalScrapValue)}
-                        </td>
-                        <td />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <AwaitingBackend
+            endpoint="GET /production/scrap"
+            note="Scrap entries (per-unit write-offs with root cause + value) need a scrap_entries table. /production/overview will populate scrapRate once that ships."
+          />
         </div>
+      </div>
+
+      {/* Machine utilization — third stub block */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">Machine Utilization</h2>
+          <BarChart3 className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <AwaitingBackend
+          endpoint="GET /production/machine-utilization"
+          note="Machine-utilization rollups need a machine_utilization table (or a downtime/uptime ledger). /production/overview will fill machineUtilization once the backing data lands."
+        />
       </div>
     </div>
   );

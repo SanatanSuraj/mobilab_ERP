@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatDate } from "@/data/mock";
+import { formatCurrency, formatDate } from "@/lib/format";
 import {
   useApiApproveQuotation,
   useApiConvertQuotation,

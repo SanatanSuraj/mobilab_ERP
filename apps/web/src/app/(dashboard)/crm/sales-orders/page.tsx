@@ -6,7 +6,7 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { KPICard } from "@/components/shared/kpi-card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatCurrency, formatDate } from "@/data/mock";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { useApiSalesOrders } from "@/hooks/useCrmApi";
 import type { SalesOrder } from "@instigenie/contracts";
 import {

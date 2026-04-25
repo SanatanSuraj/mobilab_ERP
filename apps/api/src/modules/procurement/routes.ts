@@ -16,6 +16,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  ApprovePurchaseOrderSchema,
   CreateGrnLineSchema,
   CreateGrnSchema,
   CreateIndentLineSchema,
@@ -28,6 +29,7 @@ import {
   PostGrnSchema,
   ProcurementReportsQuerySchema,
   PurchaseOrderListQuerySchema,
+  RejectPurchaseOrderSchema,
   UpdateGrnLineSchema,
   UpdateGrnSchema,
   UpdateIndentLineSchema,
@@ -43,6 +45,7 @@ import type { RequireFeature } from "../quotas/guard.js";
 import type { VendorsService } from "./vendors.service.js";
 import type { IndentsService } from "./indents.service.js";
 import type { PurchaseOrdersService } from "./purchase-orders.service.js";
+import type { PoApprovalsService } from "./po-approvals.service.js";
 import type { GrnsService } from "./grns.service.js";
 import type { ProcurementReportsService } from "./reports.service.js";
 
@@ -50,6 +53,7 @@ export interface RegisterProcurementRoutesOptions {
   vendors: VendorsService;
   indents: IndentsService;
   purchaseOrders: PurchaseOrdersService;
+  poApprovals: PoApprovalsService;
   grns: GrnsService;
   reports: ProcurementReportsService;
   guardInternal: AuthGuardOptions;
@@ -72,6 +76,7 @@ export async function registerProcurementRoutes(
   const read = [authGuard, requireModule, requirePermission("purchase_orders:read")];
   const write = [authGuard, requireModule, requirePermission("purchase_orders:update")];
   const create = [authGuard, requireModule, requirePermission("purchase_orders:create")];
+  const approve = [authGuard, requireModule, requirePermission("purchase_orders:approve")];
   const receive = [authGuard, requireModule, requirePermission("inventory:receive")];
 
   // ─── Vendors ──────────────────────────────────────────────────────────────
@@ -303,6 +308,41 @@ export async function registerProcurementRoutes(
     }
   );
 
+  // ─── PO Approvals ─────────────────────────────────────────────────────────
+  // Append-only approve / reject + audit-history surface. Reuses the
+  // PO `version` for optimistic concurrency. Allowed transitions:
+  //   { DRAFT, PENDING_APPROVAL } → APPROVED | REJECTED
+  // Any other source state → 409 invalid_state_transition.
+
+  app.post(
+    "/procurement/purchase-orders/:id/approve",
+    { preHandler: approve },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = ApprovePurchaseOrderSchema.parse(req.body);
+      return reply.send(await opts.poApprovals.approve(req, id, body));
+    }
+  );
+
+  app.post(
+    "/procurement/purchase-orders/:id/reject",
+    { preHandler: approve },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      const body = RejectPurchaseOrderSchema.parse(req.body);
+      return reply.send(await opts.poApprovals.reject(req, id, body));
+    }
+  );
+
+  app.get(
+    "/procurement/purchase-orders/:id/approval-history",
+    { preHandler: read },
+    async (req, reply) => {
+      const { id } = IdParamSchema.parse(req.params);
+      return reply.send(await opts.poApprovals.getApprovalHistory(req, id));
+    }
+  );
+
   // ─── GRNs ─────────────────────────────────────────────────────────────────
 
   app.get("/procurement/grns", { preHandler: read }, async (req, reply) => {
@@ -408,6 +448,19 @@ export async function registerProcurementRoutes(
     async (req, reply) => {
       const query = ProcurementReportsQuerySchema.parse(req.query);
       return reply.send(await opts.reports.summary(req, query));
+    }
+  );
+
+  // ─── Procurement overview ─────────────────────────────────────────────────
+  // Live counts for the procurement dashboard cards (totalPOs, pendingPOs,
+  // totalGRNs, pendingIndents). Lightweight aggregate; spend / throughput
+  // remains in /procurement/reports.
+
+  app.get(
+    "/procurement/overview",
+    { preHandler: read },
+    async (req, reply) => {
+      return reply.send(await opts.reports.overview(req));
     }
   );
 }

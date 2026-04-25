@@ -55,6 +55,7 @@ import type {
   AssemblyLine,
   // MRP / reports / ECN
   MrpRow,
+  ProductionOverview,
   ProductionReports,
   EngineeringChangeNotice,
   EcnStatus,
@@ -355,6 +356,18 @@ export async function apiGetDeviceInstance(
   id: string
 ): Promise<DeviceInstance> {
   return tenantGet(`/production/device-instances/${id}`);
+}
+
+// ─── Overview ────────────────────────────────────────────────────────────────
+
+/**
+ * Manufacturing-dashboard KPI payload. Counts come from `work_orders` in a
+ * single round-trip. OEE / scrapRate / machineUtilization arrive as `null`
+ * with field names listed in `notImplemented[]` until their backing tables
+ * (oee_records, scrap_entries, machine_utilization) ship.
+ */
+export async function apiGetProductionOverview(): Promise<ProductionOverview> {
+  return tenantGet(`/production/overview`);
 }
 
 // ─── MRP ─────────────────────────────────────────────────────────────────────

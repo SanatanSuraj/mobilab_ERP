@@ -69,6 +69,7 @@ export const PO_STATUSES = [
   "DRAFT",
   "PENDING_APPROVAL",
   "APPROVED",
+  "REJECTED",
   "SENT",
   "PARTIALLY_RECEIVED",
   "RECEIVED",
@@ -76,6 +77,10 @@ export const PO_STATUSES = [
 ] as const;
 export const PoStatusSchema = z.enum(PO_STATUSES);
 export type PoStatus = z.infer<typeof PoStatusSchema>;
+
+export const PO_APPROVAL_ACTIONS = ["APPROVE", "REJECT"] as const;
+export const PoApprovalActionSchema = z.enum(PO_APPROVAL_ACTIONS);
+export type PoApprovalAction = z.infer<typeof PoApprovalActionSchema>;
 
 export const GRN_STATUSES = ["DRAFT", "POSTED"] as const;
 export const GrnStatusSchema = z.enum(GRN_STATUSES);
@@ -389,8 +394,50 @@ export const PurchaseOrderListQuerySchema = PaginationQuerySchema.extend({
   deliveryWarehouseId: uuid.optional(),
   from: z.string().date().optional(),
   to: z.string().date().optional(),
+  /** Inclusive lower bound on grand_total — drives the finance-approvals view. */
+  minTotal: decimalStr.optional(),
   search: z.string().trim().min(1).max(200).optional(),
 });
+
+// ─── PO Approvals ───────────────────────────────────────────────────────────
+//
+// Append-only audit of approve/reject actions against a PO. The PO header
+// also carries `approved_by` / `approved_at` (denormalised on APPROVE) so
+// list views don't have to join — this table preserves the full who/when/
+// why trail and the prior/new status pair for compliance.
+
+export const ApprovePurchaseOrderSchema = z.object({
+  /** Optimistic-concurrency token; mirrors the rest of the PO surface. */
+  expectedVersion: z.number().int().positive(),
+  remarks: z.string().trim().max(2000).optional(),
+});
+export type ApprovePurchaseOrder = z.infer<typeof ApprovePurchaseOrderSchema>;
+
+export const RejectPurchaseOrderSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  /** Required for REJECT — auditors expect a reason. */
+  remarks: z.string().trim().min(1).max(2000),
+});
+export type RejectPurchaseOrder = z.infer<typeof RejectPurchaseOrderSchema>;
+
+export const PoApprovalSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  poId: uuid,
+  action: PoApprovalActionSchema,
+  userId: uuid.nullable(),
+  priorStatus: PoStatusSchema,
+  newStatus: PoStatusSchema,
+  remarks: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type PoApproval = z.infer<typeof PoApprovalSchema>;
+
+export const PoApprovalHistorySchema = z.object({
+  poId: uuid,
+  data: z.array(PoApprovalSchema),
+});
+export type PoApprovalHistory = z.infer<typeof PoApprovalHistorySchema>;
 
 // ─── GRNs ────────────────────────────────────────────────────────────────────
 
@@ -558,3 +605,18 @@ export const ProcurementReportsSchema = z.object({
   ),
 });
 export type ProcurementReports = z.infer<typeof ProcurementReportsSchema>;
+
+// ─── Procurement overview (dashboard top-of-funnel counts) ────────────────────
+
+/**
+ * Lightweight aggregate that backs /procurement/dashboard. Distinct from
+ * `ProcurementReports`: no date window, no vendor breakdown, just the
+ * four counts the cards show. Spend stays in the reports endpoint.
+ */
+export const ProcurementOverviewSchema = z.object({
+  totalPOs: z.number().int().nonnegative(),
+  pendingPOs: z.number().int().nonnegative(),
+  totalGRNs: z.number().int().nonnegative(),
+  pendingIndents: z.number().int().nonnegative(),
+});
+export type ProcurementOverview = z.infer<typeof ProcurementOverviewSchema>;

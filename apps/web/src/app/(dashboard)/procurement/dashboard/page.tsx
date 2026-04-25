@@ -1,84 +1,34 @@
 "use client";
 
-// TODO(phase-5): Procurement dashboard aggregates across indents / POs /
-// inward / QC — the backend exposes useApiIndents / useApiPurchaseOrders /
-// useApiGrns but there is no dedicated overview route. Expected:
-//   GET /procurement/overview - counts + SLA breach totals in one call
-// Or rewrite client-side over useApiIndents + useApiPurchaseOrders +
-// useApiGrns. Mock imports left in place until one of the above lands.
+/**
+ * Procurement dashboard.
+ *
+ * Cards reflect the live aggregate from `/procurement/overview`:
+ *   - Total POs       all purchase orders (excluding soft-deleted)
+ *   - Pending POs     status = PENDING_APPROVAL — awaiting approver action
+ *   - Total GRNs      all goods receipts on file
+ *   - Pending indents SUBMITTED + APPROVED but not yet CONVERTED to a PO
+ *
+ * No mock data. The page falls back to skeletons while the query loads
+ * and an explicit error banner if the request fails.
+ */
 
-import { useMemo } from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { KPICard } from "@/components/shared/kpi-card";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useApiProcurementOverview } from "@/hooks/useProcurementApi";
 import {
-  vendors,
-  purchaseOrders,
-  indents,
-  inwardEntries,
-  qcInspections,
-  formatCurrency,
-  formatDate,
-  getRatingColor,
-  getRatingLabel,
-} from "@/data/procurement-mock";
-import {
-  ClipboardList,
-  Clock,
-  FlaskConical,
-  AlertTriangle,
+  AlertCircle,
   ArrowRight,
+  ClipboardCheck,
+  ClipboardList,
+  PackageCheck,
+  ShoppingCart,
 } from "lucide-react";
 
-const TODAY = new Date("2026-04-17");
-
 export default function ProcurementDashboardPage() {
-  const openIndents = useMemo(
-    () => indents.filter((i) => ["DRAFT", "SUBMITTED", "APPROVED"].includes(i.status)).length,
-    []
-  );
-
-  const pendingApprovals = useMemo(
-    () => purchaseOrders.filter((po) => ["PENDING_FINANCE", "PENDING_MGMT"].includes(po.status)).length,
-    []
-  );
-
-  const inQC = useMemo(
-    () => inwardEntries.filter((ie) => ie.status === "QC_IN_PROGRESS").length,
-    []
-  );
-
-  const overduePOs = useMemo(
-    () =>
-      purchaseOrders.filter((po) => {
-        const deliveryDate = new Date(po.requiredDeliveryDate);
-        return deliveryDate < TODAY && ["APPROVED", "PO_SENT"].includes(po.status);
-      }).length,
-    []
-  );
-
-  const recentPOs = useMemo(() => [...purchaseOrders].slice(-5).reverse(), []);
-
-  // Lifecycle stage counts
-  const lifecycle = useMemo(() => {
-    const indent = indents.filter((i) => ["DRAFT", "SUBMITTED"].includes(i.status)).length;
-    const approved = indents.filter((i) => i.status === "APPROVED").length;
-    const poCreated = purchaseOrders.filter((po) => po.status === "DRAFT").length;
-    const financeApproval = purchaseOrders.filter((po) => po.status === "PENDING_FINANCE").length;
-    const mgmtApproval = purchaseOrders.filter((po) => po.status === "PENDING_MGMT").length;
-    const poSent = purchaseOrders.filter((po) => po.status === "PO_SENT").length;
-    const inward = inwardEntries.filter((ie) => ie.status === "RECEIVED").length;
-    const qcInProgress = inwardEntries.filter((ie) => ie.status === "QC_IN_PROGRESS").length;
-    const qcDone = inwardEntries.filter((ie) => ie.status === "QC_DONE").length;
-    const grn = inwardEntries.filter((ie) => ie.status === "GRN_CREATED").length;
-    const stockUpdated = grn; // same as GRN for demo
-    const invoice = purchaseOrders.filter((po) => po.status === "FULFILLED").length;
-    return { indent, approved, poCreated, financeApproval, mgmtApproval, poSent, inward, qcInProgress, qcDone, grn, stockUpdated, invoice };
-  }, []);
+  const overviewQuery = useApiProcurementOverview();
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
@@ -87,164 +37,133 @@ export default function ProcurementDashboardPage() {
         description="End-to-end purchase lifecycle management"
       />
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KPICard
-          title="Open Indents"
-          value={String(openIndents)}
-          icon={ClipboardList}
-          iconColor="text-blue-600"
-          change="DRAFT / SUBMITTED / APPROVED"
-          trend="neutral"
-        />
-        <KPICard
-          title="Pending Approvals"
-          value={String(pendingApprovals)}
-          icon={Clock}
-          iconColor="text-amber-600"
-          change="Finance + Management"
-          trend="neutral"
-        />
-        <KPICard
-          title="In QC"
-          value={String(inQC)}
-          icon={FlaskConical}
-          iconColor="text-purple-600"
-          change="Inward entries in QC"
-          trend="neutral"
-        />
-        <KPICard
-          title="Overdue POs"
-          value={String(overduePOs)}
-          icon={AlertTriangle}
-          iconColor="text-red-600"
-          change="Delivery date passed"
-          trend={overduePOs > 0 ? "down" : "neutral"}
-        />
-      </div>
-
-      {/* Two-column grid */}
-      <div className="grid grid-cols-3 gap-6">
-        {/* Left: Recent POs */}
-        <Card className="col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Recent Purchase Orders</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead>PO Number</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead className="text-right">Value</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Required By</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentPOs.map((po) => {
-                  const isOverdue =
-                    new Date(po.requiredDeliveryDate) < TODAY &&
-                    ["APPROVED", "PO_SENT"].includes(po.status);
-                  return (
-                    <TableRow key={po.id}>
-                      <TableCell className="font-mono text-xs text-blue-700">
-                        {po.poNumber}
-                      </TableCell>
-                      <TableCell className="font-medium text-sm">{po.vendorName}</TableCell>
-                      <TableCell className="text-right text-sm font-medium">
-                        {formatCurrency(po.totalValue)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={po.status} />
-                      </TableCell>
-                      <TableCell
-                        className={`text-sm ${isOverdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}
-                      >
-                        {isOverdue && (
-                          <span className="mr-1 text-red-500">⚠</span>
-                        )}
-                        {formatDate(po.requiredDeliveryDate)}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        {/* Right: Vendor Performance */}
-        <Card className="col-span-1">
-          <CardHeader>
-            <CardTitle className="text-base">Vendor Performance</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {vendors.map((vendor) => (
-              <div key={vendor.id} className="space-y-1.5 pb-3 border-b last:border-b-0 last:pb-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium truncate">{vendor.tradeName}</span>
-                  <StatusBadge status={vendor.status} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Progress
-                    value={vendor.ratingScore}
-                    className="h-1.5 flex-1"
-                  />
-                  <span className={`text-xs font-bold w-8 text-right ${getRatingColor(vendor.ratingScore)}`}>
-                    {vendor.ratingScore}
-                  </span>
-                </div>
-                <p className={`text-xs ${getRatingColor(vendor.ratingScore)}`}>
-                  {getRatingLabel(vendor.ratingScore)}
-                </p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Procurement Lifecycle Flow */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Procurement Lifecycle</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-1 overflow-x-auto pb-2 flex-wrap">
-            {[
-              { label: "Indent", count: lifecycle.indent, color: "bg-blue-100 text-blue-700" },
-              { label: "Approved", count: lifecycle.approved, color: "bg-green-100 text-green-700" },
-              { label: "PO Created", count: lifecycle.poCreated, color: "bg-gray-100 text-gray-600" },
-              { label: "Finance Approval", count: lifecycle.financeApproval, color: "bg-amber-100 text-amber-700" },
-              { label: "Mgmt Approval", count: lifecycle.mgmtApproval, color: "bg-orange-100 text-orange-700" },
-              { label: "PO Sent", count: lifecycle.poSent, color: "bg-indigo-100 text-indigo-700" },
-              { label: "Inward", count: lifecycle.inward, color: "bg-cyan-100 text-cyan-700" },
-              { label: "QC", count: lifecycle.qcInProgress, color: "bg-purple-100 text-purple-700" },
-              { label: "QC Done", count: lifecycle.qcDone, color: "bg-teal-100 text-teal-700" },
-              { label: "GRN", count: lifecycle.grn, color: "bg-lime-100 text-lime-700" },
-              { label: "Stock Updated", count: lifecycle.stockUpdated, color: "bg-emerald-100 text-emerald-700" },
-              { label: "Invoice", count: lifecycle.invoice, color: "bg-green-100 text-green-700" },
-            ].map((stage, idx, arr) => (
-              <div key={stage.label} className="flex items-center gap-1">
-                <div className="flex flex-col items-center gap-1">
-                  <span className={`text-xs font-medium px-2 py-1 rounded-md whitespace-nowrap ${stage.color}`}>
-                    {stage.label}
-                  </span>
-                  <Badge
-                    variant="outline"
-                    className={`text-xs h-5 min-w-[1.5rem] justify-center ${stage.color} border-current`}
-                  >
-                    {stage.count}
-                  </Badge>
-                </div>
-                {idx < arr.length - 1 && (
-                  <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-[-14px]" />
-                )}
-              </div>
-            ))}
+      {overviewQuery.isLoading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+      ) : overviewQuery.isError ? (
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">
+              Failed to load procurement overview
+            </p>
+            <p className="text-red-700 mt-1">
+              {overviewQuery.error instanceof Error
+                ? overviewQuery.error.message
+                : "Unknown error"}
+            </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <KPICard
+            title="Total POs"
+            value={(overviewQuery.data?.totalPOs ?? 0).toLocaleString()}
+            icon={ShoppingCart}
+            iconColor="text-blue-600"
+          />
+          <KPICard
+            title="Pending POs"
+            value={(overviewQuery.data?.pendingPOs ?? 0).toLocaleString()}
+            icon={ClipboardCheck}
+            iconColor={
+              (overviewQuery.data?.pendingPOs ?? 0) > 0
+                ? "text-amber-600"
+                : "text-gray-500"
+            }
+            change={
+              (overviewQuery.data?.pendingPOs ?? 0) > 0
+                ? "Awaiting approval"
+                : "All approved"
+            }
+            trend={
+              (overviewQuery.data?.pendingPOs ?? 0) > 0 ? "up" : "neutral"
+            }
+          />
+          <KPICard
+            title="Total GRNs"
+            value={(overviewQuery.data?.totalGRNs ?? 0).toLocaleString()}
+            icon={PackageCheck}
+            iconColor="text-emerald-600"
+          />
+          <KPICard
+            title="Pending indents"
+            value={(overviewQuery.data?.pendingIndents ?? 0).toLocaleString()}
+            icon={ClipboardList}
+            iconColor={
+              (overviewQuery.data?.pendingIndents ?? 0) > 0
+                ? "text-amber-600"
+                : "text-gray-500"
+            }
+            change={
+              (overviewQuery.data?.pendingIndents ?? 0) > 0
+                ? "Not yet on a PO"
+                : "All converted"
+            }
+            trend={
+              (overviewQuery.data?.pendingIndents ?? 0) > 0 ? "up" : "neutral"
+            }
+          />
+        </div>
+      )}
+
+      {/* Quick links into the underlying lists. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {QUICK_LINKS.map((link) => (
+          <Link
+            key={link.href}
+            href={link.href}
+            className="group rounded-lg border bg-card hover:bg-muted/50 transition-colors p-4 flex items-start justify-between gap-3"
+          >
+            <div className="space-y-0.5 min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                {link.title}
+              </p>
+              <p className="text-xs text-muted-foreground line-clamp-2">
+                {link.description}
+              </p>
+            </div>
+            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0 mt-0.5" />
+          </Link>
+        ))}
+      </div>
+
+      <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+        Looking for spend, on-time delivery, or vendor breakdowns?{" "}
+        <Link
+          href="/procurement/reports"
+          className="text-primary underline underline-offset-2 hover:text-primary/80"
+        >
+          Open the reports view
+        </Link>
+        .
+      </div>
     </div>
   );
 }
+
+const QUICK_LINKS = [
+  {
+    title: "Indents",
+    href: "/procurement/indents",
+    description: "Material requirement requests from production / stores.",
+  },
+  {
+    title: "Purchase Orders",
+    href: "/procurement/purchase-orders",
+    description: "Vendor commitments, approvals, and dispatch tracking.",
+  },
+  {
+    title: "Inward & Gate Entry",
+    href: "/procurement/inward",
+    description: "Goods received notes and gate-pass capture.",
+  },
+  {
+    title: "Approvals",
+    href: "/approvals",
+    description: "Cross-module pending approvals across all entities.",
+  },
+] as const;

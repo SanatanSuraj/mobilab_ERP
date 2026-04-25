@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { KPICard } from "@/components/shared/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatCurrency, formatDate } from "@/data/mock";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { useApiQuotations } from "@/hooks/useCrmApi";
 import type { Quotation } from "@instigenie/contracts";
 import { FileText, Clock, Send, CheckCircle, AlertCircle } from "lucide-react";

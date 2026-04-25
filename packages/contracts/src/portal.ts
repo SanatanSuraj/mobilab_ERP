@@ -69,6 +69,28 @@ export type PortalInvoiceListQuery = z.infer<
   typeof PortalInvoiceListQuerySchema
 >;
 
+/**
+ * Customer-facing invoice projection. Mirrors apps/api PortalInvoiceSummary —
+ * the curated subset of SalesInvoice safe to expose on the portal (no
+ * internal `notes`, `cancelledBy`, `signatureHash`, …).
+ */
+export const PortalInvoiceSummarySchema = z.object({
+  id: z.string().uuid(),
+  invoiceNumber: z.string(),
+  status: InvoiceStatusSchema,
+  invoiceDate: z.string(),
+  dueDate: z.string().nullable(),
+  currency: z.string(),
+  subtotal: z.string(),
+  taxTotal: z.string(),
+  discountTotal: z.string(),
+  grandTotal: z.string(),
+  amountPaid: z.string(),
+  postedAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type PortalInvoiceSummary = z.infer<typeof PortalInvoiceSummarySchema>;
+
 // ─── Tickets (read + write) ─────────────────────────────────────────────────
 
 export const PortalTicketListQuerySchema = PaginationQuerySchema.extend({

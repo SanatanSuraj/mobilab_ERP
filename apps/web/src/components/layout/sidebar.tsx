@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
+  ClipboardCheck,
   FlaskConical,
   Users,
   ShoppingCart,
@@ -36,6 +37,13 @@ type NavSection = {
 };
 
 const navSections: NavSection[] = [
+  {
+    section: "Workflow",
+    icon: ClipboardCheck,
+    items: [
+      { label: "Approvals", href: "/approvals" },
+    ],
+  },
   {
     section: "Lead to Cash",
     icon: Users,
@@ -176,11 +184,10 @@ const navSections: NavSection[] = [
         ],
       },
       {
-        label: "Device & Module IDs",
-        href: "/production/device-ids",
+        label: "Reports & Compliance",
+        href: "/production/bmr",
         roles: ["SUPER_ADMIN", "MANAGEMENT", "PRODUCTION_MANAGER", "QC_MANAGER", "RD"],
         children: [
-          { label: "Device & Module IDs", href: "/production/device-ids" },
           { label: "BMR", href: "/production/bmr" },
           { label: "Scrap & CAPA", href: "/production/scrap" },
           { label: "OEE & COPQ", href: "/production/oee" },
@@ -215,6 +222,7 @@ const navSections: NavSection[] = [
       { label: "Products", href: "/admin/products" },
       { label: "Warehouses", href: "/inventory/warehouses" },
       { label: "Users & Roles", href: "/admin/users" },
+      { label: "Notification Templates", href: "/admin/notification-templates" },
     ],
   },
 ];

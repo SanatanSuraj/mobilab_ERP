@@ -52,6 +52,7 @@ import type { DeviceInstancesService } from "./device-instances.service.js";
 import type { MrpService } from "./mrp.service.js";
 import type { ReportsService } from "./reports.service.js";
 import type { EcnsService } from "./ecns.service.js";
+import type { ProductionOverviewService } from "./overview.service.js";
 
 export interface RegisterProductionRoutesOptions {
   products: ProductsService;
@@ -61,6 +62,7 @@ export interface RegisterProductionRoutesOptions {
   mrp: MrpService;
   reports: ReportsService;
   ecns: EcnsService;
+  overview: ProductionOverviewService;
   guardInternal: AuthGuardOptions;
   requireFeature: RequireFeature;
 }
@@ -404,6 +406,20 @@ export async function registerProductionRoutes(
     async (req, reply) => {
       const { id } = IdParamSchema.parse(req.params);
       return reply.send(await opts.deviceInstances.getById(req, id));
+    }
+  );
+
+  // ─── Overview ─────────────────────────────────────────────────────────────
+  // Manufacturing-dashboard KPI payload. Single round-trip aggregate over
+  // work_orders. OEE / scrap / machine_utilization land as null until their
+  // backing tables are introduced (notImplemented[] surfaces the gap).
+  // Reuses work_orders:read.
+
+  app.get(
+    "/production/overview",
+    { preHandler: woRead },
+    async (req, reply) => {
+      return reply.send(await opts.overview.get(req));
     }
   );
 

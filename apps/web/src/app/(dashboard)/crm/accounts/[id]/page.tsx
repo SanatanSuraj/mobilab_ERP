@@ -22,10 +22,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  formatCurrency,
+  formatDate,
   getHealthScoreColor,
   getHealthScoreLabel,
-} from "@/data/crm-mock";
-import { formatCurrency, formatDate } from "@/data/mock";
+} from "@/lib/format";
 import {
   useApiAccount,
   useApiContacts,

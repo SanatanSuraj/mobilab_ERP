@@ -12,6 +12,7 @@
 import type pg from "pg";
 import type { FastifyRequest } from "fastify";
 import type {
+  ProcurementOverview,
   ProcurementReports,
   ProcurementReportsQuery,
 } from "@instigenie/contracts";
@@ -55,8 +56,55 @@ function defaultRange(): { from: string; to: string } {
   return { from: fromDate.toISOString().slice(0, 10), to };
 }
 
+interface OverviewRow {
+  total_pos: string;
+  pending_pos: string;
+  total_grns: string;
+  pending_indents: string;
+}
+
 export class ProcurementReportsService {
   constructor(private readonly pool: pg.Pool) {}
+
+  /**
+   * Top-of-funnel counts for the procurement dashboard. No date window —
+   * these are the live "what's open right now?" numbers, complementary
+   * to `summary()` which is a date-windowed throughput report.
+   *
+   *   - totalPOs       all POs (excluding soft-deleted)
+   *   - pendingPOs     PENDING_APPROVAL (waiting on approver)
+   *   - totalGRNs      all GRNs (excluding soft-deleted)
+   *   - pendingIndents SUBMITTED + APPROVED but not yet CONVERTED
+   */
+  async overview(req: FastifyRequest): Promise<ProcurementOverview> {
+    return withRequest(req, this.pool, async (client) => {
+      const sql = `
+        SELECT
+          (SELECT COUNT(*)::bigint
+             FROM purchase_orders
+            WHERE deleted_at IS NULL)                           AS total_pos,
+          (SELECT COUNT(*)::bigint
+             FROM purchase_orders
+            WHERE deleted_at IS NULL
+              AND status = 'PENDING_APPROVAL')                  AS pending_pos,
+          (SELECT COUNT(*)::bigint
+             FROM grns
+            WHERE deleted_at IS NULL)                           AS total_grns,
+          (SELECT COUNT(*)::bigint
+             FROM indents
+            WHERE deleted_at IS NULL
+              AND status IN ('SUBMITTED', 'APPROVED'))          AS pending_indents
+      `;
+      const res = await client.query<OverviewRow>(sql);
+      const row = res.rows[0]!;
+      return {
+        totalPOs: Number(row.total_pos),
+        pendingPOs: Number(row.pending_pos),
+        totalGRNs: Number(row.total_grns),
+        pendingIndents: Number(row.pending_indents),
+      };
+    });
+  }
 
   async summary(
     req: FastifyRequest,

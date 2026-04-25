@@ -104,6 +104,8 @@ export interface PoListFilters {
   deliveryWarehouseId?: string;
   from?: string;
   to?: string;
+  /** Inclusive lower bound on grand_total — drives finance-approvals filter. */
+  minTotal?: string;
   search?: string;
 }
 
@@ -225,6 +227,11 @@ export const purchaseOrdersRepo = {
     if (filters.to) {
       where.push(`order_date <= $${i}::date`);
       params.push(filters.to);
+      i++;
+    }
+    if (filters.minTotal) {
+      where.push(`grand_total >= $${i}::numeric(18,2)`);
+      params.push(filters.minTotal);
       i++;
     }
     if (filters.search) {

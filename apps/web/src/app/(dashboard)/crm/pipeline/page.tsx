@@ -29,7 +29,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useApiDeals, useApiMoveDealStage } from "@/hooks/useCrmApi";
-import { formatCurrency, formatDate } from "@/data/mock";
+import { formatCurrency, formatDate } from "@/lib/format";
 import type { Deal, DealStage } from "@instigenie/contracts";
 import {
   AlertCircle,

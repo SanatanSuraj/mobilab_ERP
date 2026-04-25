@@ -47,6 +47,7 @@ import {
   apiGetEcn,
   apiGetMrp,
   apiGetProduct,
+  apiGetProductionOverview,
   apiGetProductionReports,
   apiGetWipBoard,
   apiGetWorkOrder,
@@ -87,6 +88,7 @@ import type {
   MrpRow,
   Product,
   ProductFamily,
+  ProductionOverview,
   ProductionReports,
   UpdateBomLine,
   UpdateBomVersion,
@@ -134,6 +136,9 @@ export const productionApiKeys = {
   },
   mrp: {
     all: ["prod-api", "mrp"] as const,
+  },
+  overview: {
+    all: ["prod-api", "overview"] as const,
   },
   reports: {
     all: ["prod-api", "reports"] as const,
@@ -489,7 +494,20 @@ export function useApiWipStageTemplates(productFamily?: ProductFamily) {
 // Re-export WipStage type consumers might need alongside the hooks.
 export type { WipStage };
 
-// ─── MRP / reports / ECN ───────────────────────────────────────────────────
+// ─── Overview / MRP / reports / ECN ────────────────────────────────────────
+
+/**
+ * Manufacturing dashboard one-shot KPI roll-up. Numbers come from `work_orders`
+ * counts; `oee` / `scrapRate` / `machineUtilization` are nullable until their
+ * source tables ship — `notImplemented[]` lists the fields that are stubs.
+ */
+export function useApiProductionOverview() {
+  return useQuery<ProductionOverview, Error>({
+    queryKey: productionApiKeys.overview.all,
+    queryFn: () => apiGetProductionOverview(),
+    staleTime: 30_000,
+  });
+}
 
 /** Component-level shortage rollup across every active WO. */
 export function useApiMrp() {

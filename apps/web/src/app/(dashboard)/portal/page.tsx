@@ -1,101 +1,137 @@
 "use client";
 
+/**
+ * Customer portal — landing page. Reads /portal/me to show the
+ * logged-in customer's name and three live counts (open orders,
+ * unpaid invoices, open tickets). The shortcut tiles route to the
+ * read-only and read+write surfaces under /portal/*.
+ */
+
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
-import { ShoppingCart, FileText, Ticket, Clock } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useApiPortalSummary } from "@/hooks/usePortalApi";
+import {
+  AlertCircle,
+  ArrowRight,
+  FileText,
+  ShoppingCart,
+  Ticket,
+} from "lucide-react";
 
-const portalLinks = [
+interface PortalLink {
+  title: string;
+  description: string;
+  href: string;
+  icon: typeof ShoppingCart;
+  iconColor: string;
+  countKey: "openOrders" | "unpaidInvoices" | "openTickets";
+  countLabel: string;
+}
+
+const portalLinks: PortalLink[] = [
   {
-    title: "Orders History",
-    description: "View your past and current orders",
+    title: "Order History",
+    description: "Past and current orders",
     href: "/portal/orders",
     icon: ShoppingCart,
     iconColor: "text-blue-600 bg-blue-50",
+    countKey: "openOrders",
+    countLabel: "open",
   },
   {
     title: "Invoices",
-    description: "View and download your invoices",
-    href: "/portal/orders",
+    description: "Posted invoices and payment status",
+    href: "/portal/invoices",
     icon: FileText,
-    iconColor: "text-green-600 bg-green-50",
+    iconColor: "text-emerald-600 bg-emerald-50",
+    countKey: "unpaidInvoices",
+    countLabel: "unpaid",
   },
   {
     title: "Support Tickets",
-    description: "Track your support requests",
+    description: "Open new tickets and track requests",
     href: "/portal/tickets",
     icon: Ticket,
     iconColor: "text-purple-600 bg-purple-50",
+    countKey: "openTickets",
+    countLabel: "open",
   },
 ];
 
-const recentActivity = [
-  { text: "Order ORD-2026-002 delivered successfully", time: "2 days ago", icon: ShoppingCart },
-  { text: "Invoice INV-2026-001 payment confirmed", time: "1 week ago", icon: FileText },
-  { text: "Ticket TK-2026-005 resolved - Firmware update", time: "1 week ago", icon: Ticket },
-  { text: "Order ORD-2026-003 confirmed", time: "2 weeks ago", icon: ShoppingCart },
-];
-
 export default function PortalPage() {
+  const summaryQuery = useApiPortalSummary();
+
   return (
-    <div className="space-y-8">
-      {/* Header */}
+    <div className="space-y-6 max-w-5xl mx-auto p-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Customer Portal</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Welcome, Dr. Rakesh Gupta
-        </p>
+        {summaryQuery.isLoading ? (
+          <Skeleton className="h-4 w-48 mt-2" />
+        ) : summaryQuery.isError ? (
+          <p className="text-sm text-red-700 mt-1">
+            Couldn&apos;t load portal session.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground mt-1">
+            Welcome, {summaryQuery.data?.customer.name ?? "Customer"}.
+          </p>
+        )}
       </div>
 
-      {/* Quick Links */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {portalLinks.map((link) => (
-          <Link key={link.title} href={link.href}>
-            <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-              <CardContent className="p-5">
-                <div className="flex items-start gap-4">
-                  <div className={`p-2.5 rounded-lg ${link.iconColor}`}>
-                    <link.icon className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{link.title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {link.description}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
-
-      {/* Recent Activity */}
-      <Card>
-        <CardContent className="p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Recent Activity</h2>
+      {summaryQuery.isError ? (
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-red-900">Failed to load summary</p>
+            <p className="text-red-700 mt-1">
+              {summaryQuery.error instanceof Error
+                ? summaryQuery.error.message
+                : "Unknown error"}
+            </p>
           </div>
-          <div className="space-y-3">
-            {recentActivity.map((item, idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
-              >
-                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                  <item.icon className="h-3.5 w-3.5 text-muted-foreground" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm">{item.text}</p>
-                </div>
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                  {item.time}
-                </span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {portalLinks.map((link) => {
+            const count = summaryQuery.data?.counts[link.countKey];
+            return (
+              <Link key={link.title} href={link.href}>
+                <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
+                  <CardContent className="p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div
+                        className={`p-2.5 rounded-lg ${link.iconColor}`}
+                      >
+                        <link.icon className="h-5 w-5" />
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="mt-4 space-y-0.5">
+                      <p className="text-sm font-medium">{link.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {link.description}
+                      </p>
+                    </div>
+                    <div className="mt-3 text-xs text-muted-foreground">
+                      {summaryQuery.isLoading ? (
+                        <Skeleton className="h-4 w-20" />
+                      ) : (
+                        <>
+                          <span className="font-semibold text-foreground">
+                            {(count ?? 0).toLocaleString()}
+                          </span>{" "}
+                          {link.countLabel}
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

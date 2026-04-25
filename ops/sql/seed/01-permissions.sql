@@ -116,6 +116,7 @@ INSERT INTO permissions (id, resource, action, description) VALUES
   ('purchase_orders:create',            'purchase_orders', 'create',            NULL),
   ('purchase_orders:read',              'purchase_orders', 'read',              NULL),
   ('purchase_orders:update',            'purchase_orders', 'update',            NULL),
+  ('purchase_orders:approve',           'purchase_orders', 'approve',           'Approve or reject purchase orders'),
   ('purchase_orders:approve_finance',   'purchase_orders', 'approve_finance',   NULL),
 
   -- purchase_invoices

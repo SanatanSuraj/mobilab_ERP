@@ -32,6 +32,7 @@
 import type { PoolClient } from "pg";
 import type {
   InvoiceStatus,
+  PortalInvoiceSummary,
   SalesOrder,
   SalesOrderStatus,
   Ticket,
@@ -39,6 +40,8 @@ import type {
   TicketStatus,
 } from "@instigenie/contracts";
 import type { PaginationPlan } from "../shared/pagination.js";
+
+export type { PortalInvoiceSummary };
 
 // ─── Pivot ──────────────────────────────────────────────────────────────────
 
@@ -168,22 +171,6 @@ const INVOICE_HEADER_COLS = `id, org_id, invoice_number, status, customer_id,
  * inadvertently surface finance-internal fields (posted_by, cancelled_by,
  * etc.) if the schema ever grows.
  */
-export interface PortalInvoiceSummary {
-  id: string;
-  invoiceNumber: string;
-  status: InvoiceStatus;
-  invoiceDate: string;
-  dueDate: string | null;
-  currency: string;
-  subtotal: string;
-  taxTotal: string;
-  discountTotal: string;
-  grandTotal: string;
-  amountPaid: string;
-  postedAt: string | null;
-  createdAt: string;
-}
-
 function rowToInvoiceSummary(r: SalesInvoiceHeaderRow): PortalInvoiceSummary {
   return {
     id: r.id,

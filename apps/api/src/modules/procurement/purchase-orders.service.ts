@@ -56,6 +56,7 @@ export class PurchaseOrdersService {
           deliveryWarehouseId: query.deliveryWarehouseId,
           from: query.from,
           to: query.to,
+          minTotal: query.minTotal,
           search: query.search,
         },
         plan

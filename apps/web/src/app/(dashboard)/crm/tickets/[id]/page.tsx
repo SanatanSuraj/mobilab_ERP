@@ -30,7 +30,7 @@ import {
   useApiTransitionTicketStatus,
   useApiUpdateTicket,
 } from "@/hooks/useCrmApi";
-import { formatDate } from "@/data/mock";
+import { formatDate } from "@/lib/format";
 import type {
   TicketCategory,
   TicketPriority,

@@ -84,6 +84,7 @@ const PO_STATUS_TONE: Record<PoStatus, string> = {
   DRAFT: "bg-gray-50 text-gray-700 border-gray-200",
   PENDING_APPROVAL: "bg-amber-50 text-amber-700 border-amber-200",
   APPROVED: "bg-blue-50 text-blue-700 border-blue-200",
+  REJECTED: "bg-rose-50 text-rose-700 border-rose-200",
   SENT: "bg-indigo-50 text-indigo-700 border-indigo-200",
   PARTIALLY_RECEIVED: "bg-purple-50 text-purple-700 border-purple-200",
   RECEIVED: "bg-green-50 text-green-700 border-green-200",

@@ -33,7 +33,7 @@ import {
   useApiTransitionDealStage,
   useApiUpdateDeal,
 } from "@/hooks/useCrmApi";
-import { formatCurrency, formatDate } from "@/data/mock";
+import { formatCurrency, formatDate } from "@/lib/format";
 import type { DealStage, Quotation, UpdateDeal } from "@instigenie/contracts";
 import { NewQuotationDialog } from "@/components/crm/quotations/NewQuotationDialog";
 import {

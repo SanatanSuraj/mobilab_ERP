@@ -384,6 +384,30 @@ export const MrpRowSchema = z.object({
 });
 export type MrpRow = z.infer<typeof MrpRowSchema>;
 
+// ─── Production overview (manufacturing dashboard) ──────────────────────────
+//
+// One-shot KPI payload for /production/overview. Backed by counts over the
+// `work_orders` table. OEE / scrap / machine-utilization fields are returned
+// as `null` because the backing tables (oee_records, scrap_entries,
+// machine_utilization) do not exist yet — `notImplemented[]` lists the
+// fields that are not yet wired so the UI can show a proper "needs backend"
+// hint instead of a fake zero.
+
+export const ProductionOverviewSchema = z.object({
+  totalWorkOrders: z.number().int().nonnegative(),
+  activeWip: z.number().int().nonnegative(),
+  completedToday: z.number().int().nonnegative(),
+  /** OEE % across machines today. Null until oee_records exists. */
+  oee: z.number().nullable(),
+  /** Scrap % of completed units today. Null until scrap_entries exists. */
+  scrapRate: z.number().nullable(),
+  /** Avg machine utilization %. Null until machine_utilization exists. */
+  machineUtilization: z.number().nullable(),
+  /** Names of fields that are not yet wired to a real source. */
+  notImplemented: z.array(z.string()),
+});
+export type ProductionOverview = z.infer<typeof ProductionOverviewSchema>;
+
 // ─── Production reports ──────────────────────────────────────────────────────
 
 export const ProductionReportsQuerySchema = z.object({

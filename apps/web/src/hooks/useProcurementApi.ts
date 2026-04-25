@@ -31,6 +31,7 @@ import {
   apiAddGrnLine,
   apiAddIndentLine,
   apiAddPoLine,
+  apiApprovePurchaseOrder,
   apiCreateGrn,
   apiCreateIndent,
   apiCreatePurchaseOrder,
@@ -44,6 +45,8 @@ import {
   apiDeleteVendor,
   apiGetGrn,
   apiGetIndent,
+  apiGetPoApprovalHistory,
+  apiGetProcurementOverview,
   apiGetProcurementReports,
   apiGetPurchaseOrder,
   apiGetVendor,
@@ -55,6 +58,7 @@ import {
   apiListPurchaseOrders,
   apiListVendors,
   apiPostGrn,
+  apiRejectPurchaseOrder,
   apiUpdateGrn,
   apiUpdateGrnLine,
   apiUpdateIndent,
@@ -70,6 +74,7 @@ import {
 } from "@/lib/api/procurement";
 
 import type {
+  ApprovePurchaseOrder,
   CreateGrn,
   CreateGrnLine,
   CreateIndent,
@@ -83,11 +88,14 @@ import type {
   Indent,
   IndentLine,
   IndentWithLines,
+  PoApprovalHistory,
   PoLine,
   PostGrn,
+  ProcurementOverview,
   ProcurementReports,
   PurchaseOrder,
   PurchaseOrderWithLines,
+  RejectPurchaseOrder,
   UpdateGrn,
   UpdateGrnLine,
   UpdateIndent,
@@ -126,6 +134,8 @@ export const procurementApiKeys = {
       ["proc-api", "purchase-orders", "detail", id] as const,
     lines: (id: string) =>
       ["proc-api", "purchase-orders", "lines", id] as const,
+    approvalHistory: (id: string) =>
+      ["proc-api", "purchase-orders", "approval-history", id] as const,
   },
   grns: {
     all: ["proc-api", "grns"] as const,
@@ -137,6 +147,7 @@ export const procurementApiKeys = {
     all: ["proc-api", "reports"] as const,
     summary: (q: ProcurementReportsQuery) =>
       ["proc-api", "reports", "summary", q] as const,
+    overview: ["proc-api", "reports", "overview"] as const,
   },
 };
 
@@ -458,6 +469,67 @@ export function useApiDeletePoLine(poId: string) {
   });
 }
 
+// ─── PO Approvals ───────────────────────────────────────────────────────────
+//
+// Approve / reject mutations bump the PO version + status, so they
+// invalidate detail, list, and the audit-history sub-key. The history
+// query itself is short-staleTime because it appends on every action.
+
+/**
+ * Append-only audit trail. Refetches whenever an approve/reject lands
+ * because both mutations invalidate this key.
+ */
+export function useApiApprovalHistory(id: string | undefined) {
+  return useQuery({
+    queryKey: id
+      ? procurementApiKeys.purchaseOrders.approvalHistory(id)
+      : ["proc-api", "purchase-orders", "approval-history", "__none__"],
+    queryFn: () => apiGetPoApprovalHistory(id!),
+    enabled: Boolean(id),
+    staleTime: 15_000,
+  });
+}
+
+export function useApiApprovePurchaseOrder(poId: string) {
+  const qc = useQueryClient();
+  return useMutation<PurchaseOrder, Error, ApprovePurchaseOrder>({
+    mutationFn: (body) => apiApprovePurchaseOrder(poId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: procurementApiKeys.purchaseOrders.detail(poId),
+      });
+      qc.invalidateQueries({
+        queryKey: procurementApiKeys.purchaseOrders.approvalHistory(poId),
+      });
+      qc.invalidateQueries({
+        queryKey: procurementApiKeys.purchaseOrders.all,
+      });
+    },
+  });
+}
+
+export function useApiRejectPurchaseOrder(poId: string) {
+  const qc = useQueryClient();
+  return useMutation<PurchaseOrder, Error, RejectPurchaseOrder>({
+    mutationFn: (body) => apiRejectPurchaseOrder(poId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: procurementApiKeys.purchaseOrders.detail(poId),
+      });
+      qc.invalidateQueries({
+        queryKey: procurementApiKeys.purchaseOrders.approvalHistory(poId),
+      });
+      qc.invalidateQueries({
+        queryKey: procurementApiKeys.purchaseOrders.all,
+      });
+    },
+  });
+}
+
+// Re-export for downstream type usage. PoApprovalHistory is the response
+// shape returned by useApiApprovalHistory.
+export type { PoApprovalHistory };
+
 // ─── GRNs: reads ────────────────────────────────────────────────────────────
 
 export function useApiGrns(query: GrnListQuery = {}) {
@@ -615,6 +687,20 @@ export function useApiProcurementReports(q: ProcurementReportsQuery = {}) {
     queryKey: procurementApiKeys.reports.summary(q),
     queryFn: () => apiGetProcurementReports(q),
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/**
+ * Live counts for the procurement dashboard (totalPOs, pendingPOs, totalGRNs,
+ * pendingIndents). Cheaper than `useApiProcurementReports` — no date window,
+ * no vendor join.
+ */
+export function useApiProcurementOverview() {
+  return useQuery<ProcurementOverview, Error>({
+    queryKey: procurementApiKeys.reports.overview,
+    queryFn: () => apiGetProcurementOverview(),
+    staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
 }

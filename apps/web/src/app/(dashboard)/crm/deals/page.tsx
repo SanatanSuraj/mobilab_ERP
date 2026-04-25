@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { KPICard } from "@/components/shared/kpi-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
-import { formatCurrency, formatDate } from "@/data/mock";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { useApiDeals } from "@/hooks/useCrmApi";
 import type { Deal } from "@instigenie/contracts";
 import { Briefcase, DollarSign, TrendingUp, Target, AlertCircle } from "lucide-react";

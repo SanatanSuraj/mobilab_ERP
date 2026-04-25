@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Customer portal — order history. Lists sales orders scoped to the
- * portal user's account_id (server-enforced via the customer hook +
- * RLS). No customer-side filter is exposed beyond status.
+ * Customer portal — invoice history. Uses the curated
+ * PortalInvoiceSummary projection (no internal notes / signatureHash /
+ * cancelledBy fields). Server-enforced scoping via account_id; only
+ * the status filter is exposed on the client.
  */
 
 import Link from "next/link";
@@ -21,11 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useApiPortalOrders } from "@/hooks/usePortalApi";
+import { useApiPortalInvoices } from "@/hooks/usePortalApi";
 import {
-  SALES_ORDER_STATUSES,
-  type SalesOrder,
-  type SalesOrderStatus,
+  INVOICE_STATUSES,
+  type InvoiceStatus,
+  type PortalInvoiceSummary,
 } from "@instigenie/contracts";
 import { AlertCircle, ArrowLeft } from "lucide-react";
 
@@ -46,18 +47,21 @@ function formatDate(iso: string | null): string {
   });
 }
 
-const STATUS_TONE: Record<SalesOrderStatus, string> = {
+const STATUS_TONE: Record<InvoiceStatus, string> = {
   DRAFT: "bg-gray-50 text-gray-700 border-gray-200",
-  CONFIRMED: "bg-blue-50 text-blue-700 border-blue-200",
-  PROCESSING: "bg-amber-50 text-amber-700 border-amber-200",
-  DISPATCHED: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  IN_TRANSIT: "bg-purple-50 text-purple-700 border-purple-200",
-  DELIVERED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  POSTED: "bg-emerald-50 text-emerald-700 border-emerald-200",
   CANCELLED: "bg-red-50 text-red-700 border-red-200",
 };
 
-export default function PortalOrdersPage() {
-  const [status, setStatus] = useState<SalesOrderStatus | "all">("all");
+function balanceDue(inv: PortalInvoiceSummary): string {
+  const total = Number(inv.grandTotal);
+  const paid = Number(inv.amountPaid);
+  if (!Number.isFinite(total) || !Number.isFinite(paid)) return inv.grandTotal;
+  return (total - paid).toFixed(2);
+}
+
+export default function PortalInvoicesPage() {
+  const [status, setStatus] = useState<InvoiceStatus | "all">("all");
 
   const query = useMemo(
     () => ({
@@ -69,60 +73,81 @@ export default function PortalOrdersPage() {
     [status],
   );
 
-  const ordersQuery = useApiPortalOrders(query);
+  const invoicesQuery = useApiPortalInvoices(query);
 
-  const columns: Column<SalesOrder>[] = [
+  const columns: Column<PortalInvoiceSummary>[] = [
     {
-      key: "orderNumber",
-      header: "Order",
-      render: (o) => (
-        <span className="font-mono text-sm font-medium">{o.orderNumber}</span>
+      key: "invoiceNumber",
+      header: "Invoice",
+      render: (i) => (
+        <Link
+          href={`/portal/invoices/${i.id}`}
+          className="font-mono text-sm font-medium text-primary hover:underline"
+        >
+          {i.invoiceNumber}
+        </Link>
       ),
     },
     {
-      key: "createdAt",
-      header: "Placed",
-      render: (o) => (
+      key: "invoiceDate",
+      header: "Date",
+      render: (i) => (
         <span className="text-sm text-muted-foreground">
-          {formatDate(o.createdAt)}
+          {formatDate(i.invoiceDate)}
         </span>
       ),
     },
     {
-      key: "expectedDelivery",
-      header: "Expected",
-      render: (o) => (
+      key: "dueDate",
+      header: "Due",
+      render: (i) => (
         <span className="text-sm text-muted-foreground">
-          {formatDate(o.expectedDelivery)}
-        </span>
-      ),
-    },
-    {
-      key: "lines",
-      header: "Items",
-      render: (o) => (
-        <span className="text-sm">
-          {o.lineItems.length}{" "}
-          <span className="text-muted-foreground">item{o.lineItems.length === 1 ? "" : "s"}</span>
+          {formatDate(i.dueDate)}
         </span>
       ),
     },
     {
       key: "grandTotal",
       header: "Total",
-      render: (o) => (
-        <span className="font-mono text-sm">{formatINR(o.grandTotal)}</span>
+      render: (i) => (
+        <span className="font-mono text-sm">{formatINR(i.grandTotal)}</span>
       ),
+    },
+    {
+      key: "amountPaid",
+      header: "Paid",
+      render: (i) => (
+        <span className="font-mono text-sm text-muted-foreground">
+          {formatINR(i.amountPaid)}
+        </span>
+      ),
+    },
+    {
+      key: "balance",
+      header: "Balance",
+      render: (i) => {
+        const due = balanceDue(i);
+        const isPaid = Number(due) <= 0;
+        return (
+          <span
+            className={`font-mono text-sm ${
+              isPaid ? "text-emerald-700" : "text-foreground"
+            }`}
+          >
+            {formatINR(due)}
+          </span>
+        );
+      },
     },
     {
       key: "status",
       header: "Status",
-      render: (o) => (
+      render: (i) => (
         <Badge
           variant="outline"
-          className={`text-xs whitespace-nowrap ${STATUS_TONE[o.status]}`}
+          className={`text-xs whitespace-nowrap ${STATUS_TONE[i.status]}`}
         >
-          {o.status.replace(/_/g, " ")}
+          {i.status}
         </Badge>
       ),
     },
@@ -139,8 +164,8 @@ export default function PortalOrdersPage() {
       </Link>
 
       <PageHeader
-        title="Order History"
-        description="View your past and current orders"
+        title="Invoices"
+        description="Posted invoices and payment status"
       />
 
       <div className="flex flex-wrap gap-3 items-end">
@@ -149,7 +174,7 @@ export default function PortalOrdersPage() {
           <Select
             value={status}
             onValueChange={(v) =>
-              setStatus(!v ? "all" : (v as SalesOrderStatus | "all"))
+              setStatus(!v ? "all" : (v as InvoiceStatus | "all"))
             }
           >
             <SelectTrigger className="w-[200px]">
@@ -157,9 +182,9 @@ export default function PortalOrdersPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
-              {SALES_ORDER_STATUSES.map((s) => (
+              {INVOICE_STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s.replace(/_/g, " ")}
+                  {s}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -167,35 +192,35 @@ export default function PortalOrdersPage() {
         </div>
       </div>
 
-      {ordersQuery.isLoading ? (
+      {invoicesQuery.isLoading ? (
         <div className="space-y-2">
           {[1, 2, 3, 4].map((i) => (
             <Skeleton key={i} className="h-10 w-full" />
           ))}
         </div>
-      ) : ordersQuery.isError ? (
+      ) : invoicesQuery.isError ? (
         <div className="rounded-md border border-red-200 bg-red-50 p-4 flex items-start gap-3">
           <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
           <div className="text-sm">
-            <p className="font-medium text-red-900">Failed to load orders</p>
+            <p className="font-medium text-red-900">Failed to load invoices</p>
             <p className="text-red-700 mt-1">
-              {ordersQuery.error instanceof Error
-                ? ordersQuery.error.message
+              {invoicesQuery.error instanceof Error
+                ? invoicesQuery.error.message
                 : "Unknown error"}
             </p>
           </div>
         </div>
       ) : (
         <>
-          <DataTable<SalesOrder>
-            data={ordersQuery.data?.data ?? []}
+          <DataTable<PortalInvoiceSummary>
+            data={invoicesQuery.data?.data ?? []}
             columns={columns}
             pageSize={25}
           />
           <p className="text-xs text-muted-foreground">
-            Showing {(ordersQuery.data?.data.length ?? 0).toLocaleString()} of{" "}
-            {(ordersQuery.data?.total ?? 0).toLocaleString()} order
-            {ordersQuery.data?.total === 1 ? "" : "s"}.
+            Showing {(invoicesQuery.data?.data.length ?? 0).toLocaleString()} of{" "}
+            {(invoicesQuery.data?.total ?? 0).toLocaleString()} invoice
+            {invoicesQuery.data?.total === 1 ? "" : "s"}.
           </p>
         </>
       )}

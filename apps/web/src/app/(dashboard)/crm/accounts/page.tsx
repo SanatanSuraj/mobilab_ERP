@@ -6,8 +6,11 @@ import { DataTable, Column } from "@/components/shared/data-table";
 import { KPICard } from "@/components/shared/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getHealthScoreColor, getHealthScoreLabel } from "@/data/crm-mock";
-import { formatCurrency } from "@/data/mock";
+import {
+  formatCurrency,
+  getHealthScoreColor,
+  getHealthScoreLabel,
+} from "@/lib/format";
 import { useApiAccounts } from "@/hooks/useCrmApi";
 import type { Account } from "@instigenie/contracts";
 import { Building2, Star, DollarSign, Activity, AlertCircle } from "lucide-react";

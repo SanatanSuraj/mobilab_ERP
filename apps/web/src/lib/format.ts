@@ -114,3 +114,16 @@ export function currentMonthPrefix(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
+
+export function getHealthScoreColor(score: number): string {
+  if (score >= 80) return "text-green-600 bg-green-50 border-green-200";
+  if (score >= 60) return "text-amber-600 bg-amber-50 border-amber-200";
+  return "text-red-600 bg-red-50 border-red-200";
+}
+
+export function getHealthScoreLabel(score: number): string {
+  if (score >= 80) return "Excellent";
+  if (score >= 60) return "Good";
+  if (score >= 40) return "Needs Attention";
+  return "At Risk";
+}

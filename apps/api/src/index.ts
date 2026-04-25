@@ -64,6 +64,7 @@ import { registerInventoryRoutes } from "./modules/inventory/routes.js";
 import { VendorsService } from "./modules/procurement/vendors.service.js";
 import { IndentsService } from "./modules/procurement/indents.service.js";
 import { PurchaseOrdersService } from "./modules/procurement/purchase-orders.service.js";
+import { PoApprovalsService } from "./modules/procurement/po-approvals.service.js";
 import { GrnsService } from "./modules/procurement/grns.service.js";
 import { ProcurementReportsService } from "./modules/procurement/reports.service.js";
 import { registerProcurementRoutes } from "./modules/procurement/routes.js";
@@ -74,6 +75,7 @@ import { DeviceInstancesService } from "./modules/production/device-instances.se
 import { MrpService } from "./modules/production/mrp.service.js";
 import { ReportsService } from "./modules/production/reports.service.js";
 import { EcnsService } from "./modules/production/ecns.service.js";
+import { ProductionOverviewService } from "./modules/production/overview.service.js";
 import { registerProductionRoutes } from "./modules/production/routes.js";
 import { InspectionTemplatesService } from "./modules/qc/templates.service.js";
 import { QcInspectionsService } from "./modules/qc/inspections.service.js";
@@ -237,6 +239,7 @@ export async function buildApp(): Promise<BuiltApp> {
   const vendorsService = new VendorsService(pool);
   const indentsService = new IndentsService(pool);
   const purchaseOrdersService = new PurchaseOrdersService(pool);
+  const poApprovalsService = new PoApprovalsService(pool);
   const grnsService = new GrnsService(pool);
   const procurementReportsService = new ProcurementReportsService(pool);
 
@@ -251,6 +254,7 @@ export async function buildApp(): Promise<BuiltApp> {
   const mrpService = new MrpService(pool);
   const reportsService = new ReportsService(pool);
   const ecnsService = new EcnsService(pool);
+  const productionOverviewService = new ProductionOverviewService(pool);
 
   // QC services — Phase 2 §12.1 #6 / §13.4. Inspection templates, inspections
   // with DRAFT → IN_PROGRESS → PASSED/FAILED lifecycle, and append-only
@@ -445,6 +449,7 @@ export async function buildApp(): Promise<BuiltApp> {
     vendors: vendorsService,
     indents: indentsService,
     purchaseOrders: purchaseOrdersService,
+    poApprovals: poApprovalsService,
     grns: grnsService,
     reports: procurementReportsService,
     guardInternal: {
@@ -463,6 +468,7 @@ export async function buildApp(): Promise<BuiltApp> {
     mrp: mrpService,
     reports: reportsService,
     ecns: ecnsService,
+    overview: productionOverviewService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
