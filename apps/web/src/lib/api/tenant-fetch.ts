@@ -75,6 +75,7 @@ interface JwtClaimsLike {
   email?: string;
   name?: string;
   exp?: number;
+  roles?: string[];
   [k: string]: unknown;
 }
 
@@ -109,6 +110,13 @@ export function getTenantUserId(): string | null {
   const t = getTenantAccessToken();
   if (!t) return null;
   return decodeJwtClaims(t)?.sub ?? null;
+}
+
+/** Read the logged-in user's role list from the current access token. */
+export function getTenantRoles(): string[] {
+  const t = getTenantAccessToken();
+  if (!t) return [];
+  return decodeJwtClaims(t)?.roles ?? [];
 }
 
 // ─── Core fetch ──────────────────────────────────────────────────────────────

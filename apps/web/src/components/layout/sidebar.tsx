@@ -227,26 +227,10 @@ const navSections: NavSection[] = [
   },
 ];
 
-const ALL_ROLES: UserRole[] = [
-  "SUPER_ADMIN",
-  "MANAGEMENT",
-  "SALES_REP",
-  "SALES_MANAGER",
-  "FINANCE",
-  "PRODUCTION",
-  "PRODUCTION_MANAGER",
-  "RD",
-  "QC_INSPECTOR",
-  "QC_MANAGER",
-  "STORES",
-  "CUSTOMER",
-];
-
 export const Sidebar = React.memo(function Sidebar() {
   const pathname = usePathname();
   // Selective Zustand subscriptions — only the fields used
   const role = useAuthStore((s) => s.role);
-  const setRole = useAuthStore((s) => s.setRole);
   const [collapsed, setCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
 
@@ -409,26 +393,6 @@ export const Sidebar = React.memo(function Sidebar() {
           );
         })}
       </nav>
-
-      {/* Dev Role Switcher */}
-      {process.env.NODE_ENV === "development" && !collapsed && (
-        <div className="border-t px-3 py-2 shrink-0">
-          <label className="block text-[10px] font-semibold text-muted-foreground mb-1">
-            🛠 Dev: Switch Role
-          </label>
-          <select
-            value={role ?? ""}
-            onChange={(e) => setRole(e.target.value as UserRole)}
-            className="w-full text-xs rounded border border-border bg-background px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {ALL_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
 
       {/* Collapse Toggle */}
       <div className="border-t p-2 shrink-0">
