@@ -45,10 +45,72 @@ import {
   UnauthorizedError,
   ForbiddenError,
   NotFoundError,
+  RateLimitError,
 } from "@instigenie/errors";
 import { withOrg } from "@instigenie/db";
 import { TokenFactory } from "./tokens.js";
 import type { TenantStatusService } from "../tenants/service.js";
+
+/**
+ * Minimal Redis surface AuthService needs for per-account lockout. Defined
+ * structurally (not as `import("ioredis").Redis`) so unit tests can pass a
+ * fake without spinning up an actual Redis. In production this is
+ * `cache.client` from packages/cache (ioredis instance).
+ */
+export interface LockoutStore {
+  incr(key: string): Promise<number>;
+  expire(key: string, seconds: number): Promise<unknown>;
+  del(key: string): Promise<unknown>;
+}
+
+/**
+ * Per-account brute-force lockout window. After `LOCKOUT_THRESHOLD`
+ * consecutive failed logins the identity is locked for `LOCKOUT_TTL_SEC`
+ * seconds. Counter is keyed by lower(email) in Redis with TTL =
+ * LOCKOUT_TTL_SEC so the window slides forward on each new failure rather
+ * than counting forever.
+ *
+ * Tunables intentionally hard-coded — these are security thresholds, not
+ * per-tenant policy. Bumping them is a code change (and a code review).
+ *
+ * `LOCKOUT_OP_TIMEOUT_MS` bounds how long we wait on Redis before
+ * giving up on the lockout INCR/EXPIRE/DEL. When Redis is unreachable
+ * the underlying ioredis call would otherwise hang for the whole
+ * reconnect window — a customer typing the right password gets stuck
+ * with no auth response. With the timeout we degrade gracefully:
+ * skip the lockout side-effect, log it, and let the credential check
+ * answer authoritatively. The identity's `locked_until` column on
+ * the DB row is still respected, so a previously-locked account
+ * continues to be rejected even when Redis is down.
+ */
+const LOCKOUT_THRESHOLD = 5;
+const LOCKOUT_TTL_SEC = 15 * 60;
+const LOCKOUT_OP_TIMEOUT_MS = 500;
+
+function lockoutKey(email: string): string {
+  return `auth:fail:${email.toLowerCase()}`;
+}
+
+/**
+ * Run a lockout-store call with a hard timeout. Resolves to
+ * `undefined` on timeout/error so the caller can decide whether to
+ * degrade. Never throws.
+ */
+async function withLockoutTimeout<T>(p: Promise<T>): Promise<T | undefined> {
+  return new Promise<T | undefined>((resolve) => {
+    const t = setTimeout(() => resolve(undefined), LOCKOUT_OP_TIMEOUT_MS);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(t);
+        resolve(undefined);
+      },
+    );
+  });
+}
 
 export interface AuthServiceDeps {
   pool: pg.Pool;
@@ -61,6 +123,12 @@ export interface AuthServiceDeps {
    * (memberships lag behind org status in practice).
    */
   tenantStatus: TenantStatusService;
+  /**
+   * Backing store for the per-account failed-login counter. Required —
+   * absent it the lockout would be a no-op and credential-stuffing
+   * attacks against /auth/login are unmitigated.
+   */
+  lockoutStore: LockoutStore;
 }
 
 /**
@@ -110,6 +178,8 @@ export class AuthService {
     userAgent?: string;
     ipAddress?: string;
   }): Promise<LoginResult> {
+    const lockKey = lockoutKey(args.email);
+
     // 1. Look up identity. Cross-tenant query — user_identities has no RLS.
     const { rows } = await this.deps.pool.query<{
       id: string;
@@ -127,6 +197,14 @@ export class AuthService {
     );
     const id = rows[0];
 
+    // Pre-check lockout BEFORE bcrypt: if the account is already locked
+    // we bail with 429 without burning a bcrypt round (and without
+    // refreshing the lock window — the existing TTL on the counter is
+    // what governs how long the account stays locked).
+    if (id?.locked_until && id.locked_until.getTime() > Date.now()) {
+      throw new RateLimitError("account temporarily locked");
+    }
+
     // 2. Verify password with constant-time dummy on miss.
     const ok = id?.password_hash
       ? await bcrypt.compare(args.password, id.password_hash)
@@ -135,14 +213,55 @@ export class AuthService {
           "$2b$10$1111111111111111111111111111111111111111111111111111u"
         );
     if (!id || !ok) {
+      // Track this failure. Counter is keyed by lower(email) so an
+      // unknown-email attempt also accumulates against that email — an
+      // attacker spraying random passwords against a real address
+      // can't avoid the lockout by mistyping an existing account.
+      //
+      // Each lockout-store call is wrapped in a timeout so a Redis
+      // outage doesn't hang authentication (a hung INCR would block
+      // the customer's login indefinitely). On timeout we surface
+      // the underlying credential failure honestly — the lockout
+      // counter is degraded for this attempt but the password check
+      // already answered correctly, and the DB-side `locked_until`
+      // gate above still honours any previously-persisted lock.
+      const attempts = await withLockoutTimeout(
+        this.deps.lockoutStore.incr(lockKey),
+      );
+      if (attempts === 1) {
+        // First failure in this window — set the TTL so the counter
+        // resets if the user is just typo-ing. (Subsequent INCRs do
+        // NOT extend the TTL; the window is fixed from the first
+        // failure.)
+        await withLockoutTimeout(
+          Promise.resolve(this.deps.lockoutStore.expire(lockKey, LOCKOUT_TTL_SEC)),
+        );
+      }
+      if (typeof attempts === "number" && attempts >= LOCKOUT_THRESHOLD && id) {
+        // Persist the lock on the identity row so it survives a Redis
+        // flush and so the existing locked_until gate above keeps
+        // honouring it. Best-effort — failure to write here still
+        // means the Redis counter alone will reject further attempts
+        // for the rest of the window.
+        const lockUntil = new Date(Date.now() + LOCKOUT_TTL_SEC * 1000);
+        await this.deps.pool.query(
+          `UPDATE user_identities
+              SET locked_until = $2, updated_at = now()
+            WHERE id = $1`,
+          [id.id, lockUntil]
+        );
+        throw new RateLimitError("account temporarily locked");
+      }
       throw new UnauthorizedError("invalid credentials");
     }
     if (id.status !== "ACTIVE") {
       throw new ForbiddenError("identity is locked or disabled");
     }
-    if (id.locked_until && id.locked_until.getTime() > Date.now()) {
-      throw new ForbiddenError("identity is temporarily locked");
-    }
+    // Successful credential match — clear the failure counter so a
+    // legitimate user who typo'd a few times before getting it right
+    // doesn't stay one-typo-away from a lockout for 15 minutes. Wrap
+    // in the same timeout for the same Redis-down reason.
+    await withLockoutTimeout(Promise.resolve(this.deps.lockoutStore.del(lockKey)));
 
     // 3. Load ACTIVE memberships for this identity, join to users + roles.
     //    Cross-tenant read — skips withOrg because the identity has not

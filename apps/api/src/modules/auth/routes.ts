@@ -22,6 +22,7 @@ import {
   AUDIENCE,
 } from "@instigenie/contracts";
 import { z } from "zod";
+import { UnauthorizedError } from "@instigenie/errors";
 import type { AuthService } from "./service.js";
 import { createAuthGuard, type AuthGuardOptions } from "./guard.js";
 import { requireUser } from "../../context/request-context.js";
@@ -100,7 +101,7 @@ export async function registerAuthRoutes(
         await createAuthGuard(opts.guardPortal)(req, reply);
         user = await opts.service.me(requireUser(req).id, requireUser(req).orgId);
       } catch {
-        throw new Error("unreachable");
+        throw new UnauthorizedError("invalid or expired token");
       }
     }
 

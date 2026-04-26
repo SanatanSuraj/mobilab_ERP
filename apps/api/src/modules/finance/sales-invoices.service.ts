@@ -69,6 +69,7 @@ import { requireUser } from "../../context/request-context.js";
 import type {
   ApprovalsService,
   ApprovalFinaliserContext,
+  ApprovalCancelFinaliserContext,
 } from "../approvals/approvals.service.js";
 
 type SalesInvoiceListQuery = z.infer<typeof SalesInvoiceListQuerySchema>;
@@ -406,12 +407,20 @@ export class SalesInvoicesService {
       }
 
       // Recompute totals so the chain-band lookup uses an authoritative
-      // grandTotal even if a stale header total slipped through.
+      // grandTotal even if a stale header total slipped through. NOTE:
+      // this UPDATE fires the `tg_bump_version` trigger which bumps the
+      // row's version, so the OCC handle the caller passed in is no
+      // longer valid for any subsequent UPDATE in this transaction. We
+      // re-read the row to pick up the bumped version before the flip.
       const totals = await recomputeAndPersistHeaderTotals(client, id);
       if (m(totals.grandTotal).lte(ZERO)) {
         throw new ConflictError(
           "cannot post an invoice with non-positive grandTotal",
         );
+      }
+      const afterRecompute = await salesInvoicesRepo.getById(client, id);
+      if (!afterRecompute) {
+        throw new NotFoundError("sales invoice");
       }
 
       // Open the approval_request first. createRequestForEntity throws on
@@ -428,7 +437,7 @@ export class SalesInvoicesService {
       const flipped = await salesInvoicesRepo.markAwaitingApproval(
         client,
         id,
-        input.expectedVersion,
+        afterRecompute.version,
       );
       if (flipped === null) throw new NotFoundError("sales invoice");
       if (flipped === "version_conflict") {
@@ -527,6 +536,45 @@ export class SalesInvoicesService {
         referenceNumber: posted.invoiceNumber,
         description: `Sales invoice ${posted.invoiceNumber}`,
       });
+    }
+  }
+
+  /**
+   * Cancel-finaliser. Called by `ApprovalsService.cancelRequest()` when
+   * the user cancels a PENDING approval for a sales invoice. Mirrors the
+   * REJECT path of {@link applyDecisionFromApprovals} — reverts
+   * AWAITING_APPROVAL → DRAFT so the invoice is editable + resubmittable.
+   *
+   * The {@link cancel} method below explicitly forces the user through
+   * this path when the invoice is AWAITING_APPROVAL — this is the
+   * "approvals.cancelRequest first, then revertToDraft" hand-off it
+   * promises in its error message.
+   */
+  async applyCancelFromApprovals(
+    client: PoolClient,
+    ctx: ApprovalCancelFinaliserContext,
+  ): Promise<void> {
+    const { request } = ctx;
+    const cur = await salesInvoicesRepo.getById(client, request.entityId);
+    if (!cur) {
+      throw new NotFoundError("sales invoice");
+    }
+    if (cur.status !== "AWAITING_APPROVAL") {
+      // Invoice already advanced past AWAITING_APPROVAL (concurrent
+      // post or independent state change). Approvals.cancelRequest's
+      // PENDING-status guard should have rejected the cancel before we
+      // got here; if execution reached this branch we no-op rather
+      // than corrupt the invoice.
+      return;
+    }
+    const reverted = await salesInvoicesRepo.revertToDraft(
+      client,
+      request.entityId,
+    );
+    if (!reverted) {
+      throw new ConflictError(
+        "invoice is no longer AWAITING_APPROVAL and cannot be reverted",
+      );
     }
   }
 

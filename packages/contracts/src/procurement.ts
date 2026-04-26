@@ -34,6 +34,30 @@ const qtyStr = z
   .trim()
   .regex(/^-?\d+(\.\d{1,3})?$/u, 'must be a quantity string like "12.500"');
 
+/**
+ * Line-item quantity. Must be strictly positive — a PO/indent/GRN
+ * line for "negative apples" makes no business sense, and the DB has
+ * a CHECK constraint enforcing it. Without this refine the API
+ * accepts a negative string at the schema layer and surfaces the
+ * eventual constraint violation as a 500. Applied to indent/PO/GRN
+ * line schemas so the validation error is the request-time 400 the
+ * client can act on.
+ */
+const positiveQtyStr = qtyStr.refine(
+  (v) => !v.startsWith("-") && Number(v) > 0,
+  { message: "quantity must be greater than zero" },
+);
+
+/**
+ * Line-item unit price. Must be non-negative. Free-of-charge items
+ * (price=0) are legitimate — promotional samples, replacement
+ * shipments — so we allow 0 but reject negative.
+ */
+const nonNegativeDecimalStr = decimalStr.refine(
+  (v) => !v.startsWith("-"),
+  { message: "must be non-negative" },
+);
+
 const uuid = z.string().uuid();
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
@@ -224,9 +248,9 @@ export type IndentWithLines = z.infer<typeof IndentWithLinesSchema>;
 export const CreateIndentLineSchema = z.object({
   itemId: uuid,
   lineNo: z.number().int().positive().optional(), // auto-assigned if absent
-  quantity: qtyStr,
+  quantity: positiveQtyStr,
   uom: z.string().trim().min(1).max(16),
-  estimatedCost: decimalStr.default("0"),
+  estimatedCost: nonNegativeDecimalStr.default("0"),
   notes: z.string().trim().max(2000).optional(),
 });
 export type CreateIndentLine = z.infer<typeof CreateIndentLineSchema>;
@@ -341,9 +365,9 @@ export const CreatePoLineSchema = z.object({
   indentLineId: uuid.optional(),
   lineNo: z.number().int().positive().optional(),
   description: z.string().trim().max(500).optional(),
-  quantity: qtyStr,
+  quantity: positiveQtyStr,
   uom: z.string().trim().min(1).max(16),
-  unitPrice: decimalStr,
+  unitPrice: nonNegativeDecimalStr,
   discountPct: decimalStr.default("0"),
   taxPct: decimalStr.default("0"),
   notes: z.string().trim().max(2000).optional(),
@@ -508,19 +532,27 @@ export const GrnWithLinesSchema = GrnSchema.extend({
 });
 export type GrnWithLines = z.infer<typeof GrnWithLinesSchema>;
 
+/**
+ * GRN line: receipted quantity must be > 0 (negative GRN is what the
+ * RTV / reversal flow is for, not a sneaky negative number on
+ * receipt). qcRejectedQty is allowed at 0 — `nonNegativeDecimalStr`
+ * is permissive enough since rejected can legitimately be zero, and
+ * the business rule "rejected ≤ received" is enforced at the
+ * service layer rather than the schema.
+ */
 export const CreateGrnLineSchema = z.object({
   poLineId: uuid,
   itemId: uuid,
   lineNo: z.number().int().positive().optional(),
-  quantity: qtyStr,
+  quantity: positiveQtyStr,
   uom: z.string().trim().min(1).max(16),
-  unitCost: decimalStr.default("0"),
+  unitCost: nonNegativeDecimalStr.default("0"),
   batchNo: z.string().trim().max(64).optional(),
   serialNo: z.string().trim().max(64).optional(),
   mfgDate: z.string().date().optional(),
   expiryDate: z.string().date().optional(),
   qcStatus: GrnLineQcStatusSchema.optional(),
-  qcRejectedQty: qtyStr.default("0"),
+  qcRejectedQty: nonNegativeDecimalStr.default("0"),
   notes: z.string().trim().max(2000).optional(),
 });
 export type CreateGrnLine = z.infer<typeof CreateGrnLineSchema>;

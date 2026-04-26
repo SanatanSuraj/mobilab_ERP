@@ -50,6 +50,7 @@ import { poApprovalsRepo } from "./po-approvals.repository.js";
 import type {
   ApprovalsService,
   ApprovalFinaliserContext,
+  ApprovalCancelFinaliserContext,
 } from "../approvals/approvals.service.js";
 
 /** Statuses from which an approve/reject action is permitted. */
@@ -243,6 +244,57 @@ export class PoApprovalsService {
       newStatus: finalStatus,
       remarks: comment,
     });
+  }
+
+  /**
+   * Cancel-finaliser. Called by `ApprovalsService.cancelRequest()` when
+   * the user (or a cancel-permissioned role) cancels a PENDING approval
+   * for a purchase_order. Reverts the PO from PENDING_APPROVAL back to
+   * DRAFT inside the same transaction so the user can edit + resubmit.
+   *
+   * Idempotent against a PO that was already advanced past
+   * PENDING_APPROVAL (e.g. an APPROVE that landed in the same window):
+   * we no-op rather than rolling APPROVED → DRAFT, because the approval
+   * row's atomic FOR-UPDATE in act() already made one of the two writes
+   * the loser. In practice ApprovalsService rejects the cancel before
+   * we get here when the request isn't PENDING — this branch is
+   * defensive belt-and-suspenders.
+   */
+  async applyCancelFromApprovals(
+    client: pg.PoolClient,
+    ctx: ApprovalCancelFinaliserContext,
+  ): Promise<void> {
+    const { request, actor, reason } = ctx;
+    const header = await purchaseOrdersRepo.getById(client, request.entityId);
+    if (!header) {
+      throw new NotFoundError("purchase order");
+    }
+    if (header.status !== "PENDING_APPROVAL") {
+      // PO is no longer in the awaiting state (e.g. it was approved
+      // through a concurrent step decision). The approval row's own
+      // PENDING-status guard upstream should have rejected the cancel
+      // already; if execution reached here we treat the entity as
+      // already-advanced and do nothing rather than corrupt it.
+      return;
+    }
+
+    await client.query(
+      `UPDATE purchase_orders
+          SET status     = 'DRAFT',
+              version    = version + 1,
+              updated_at = now()
+        WHERE id = $1`,
+      [header.id],
+    );
+
+    // We deliberately do NOT write a po_approvals audit row here. Its
+    // CHECK constraint only allows ('APPROVE', 'REJECT') and a cancel
+    // is neither — the canonical "this approval was cancelled" record
+    // already lives in workflow_transitions, written by
+    // ApprovalsService.cancelRequest() one statement earlier in the
+    // same transaction. Reference unused params to keep eslint quiet.
+    void actor;
+    void reason;
   }
 
   // ── Internal ────────────────────────────────────────────────────────────────

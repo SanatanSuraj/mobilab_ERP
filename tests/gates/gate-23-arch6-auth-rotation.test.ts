@@ -65,11 +65,21 @@ describe("gate-23 (arch-6): auth flow — login → refresh rotates → old refr
       assertActive: async () => undefined,
     } as unknown as ConstructorParameters<typeof AuthService>[0]["tenantStatus"];
 
+    // No-op lockout store — this gate doesn't exercise per-account
+    // lockout, but AuthService now requires the dep so credential-
+    // stuffing protection is impossible to forget at the call site.
+    const lockoutStore = {
+      incr: async () => 0,
+      expire: async () => 1,
+      del: async () => 0,
+    };
+
     auth = new AuthService({
       pool,
       tokens,
       refreshTtlSec: 60 * 60 * 24 * 14,
       tenantStatus,
+      lockoutStore,
     });
   });
 

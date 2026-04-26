@@ -139,6 +139,28 @@ export type ApprovalFinaliser = (
   ctx: ApprovalFinaliserContext,
 ) => Promise<void>;
 
+/**
+ * Context handed to a cancel-finaliser when an approval request is
+ * cancelled (status CANCELLED). Distinct from {@link ApprovalFinaliserContext}
+ * because cancellation does not carry an e-signature and its only
+ * required side-effect on the parent entity is to revert it to its
+ * pre-approval state (e.g. PO PENDING_APPROVAL → DRAFT). Without this
+ * dispatch the parent entity gets orphaned: the approval row is
+ * CANCELLED but the entity stays "awaiting approval", uneditable and
+ * unsubmittable.
+ */
+export interface ApprovalCancelFinaliserContext {
+  request: ApprovalRequest;
+  actor: RequestUser;
+  reason: string;
+  cancelledAt: string;
+}
+
+export type ApprovalCancelFinaliser = (
+  client: pg.PoolClient,
+  ctx: ApprovalCancelFinaliserContext,
+) => Promise<void>;
+
 /** Type-guard for the overloaded constructor. pg.Pool has no `pool` own
  *  key, so this discriminates cleanly without instanceof coupling. */
 function isApprovalsServiceDeps(
@@ -160,6 +182,17 @@ export class ApprovalsService {
    */
   private readonly finalisers: Map<ApprovalEntityType, ApprovalFinaliser> =
     new Map();
+  /**
+   * Optional per-entity-type cancel hooks. When a CANCEL is processed we
+   * dispatch into the corresponding finaliser inside the same transaction
+   * as the approval-row write so the parent entity reverts atomically.
+   * Entity types without a registered cancel-finaliser (e.g. work_order
+   * whose submit-for-approval doesn't change WO status) silently skip.
+   */
+  private readonly cancelFinalisers: Map<
+    ApprovalEntityType,
+    ApprovalCancelFinaliser
+  > = new Map();
 
   // Two accepted shapes so Phase 3 gates (which pre-date §4.2 and hand
   // the service a bare pool) keep compiling. Phase 4 callers pass a
@@ -193,6 +226,20 @@ export class ApprovalsService {
     fn: ApprovalFinaliser,
   ): void {
     this.finalisers.set(entityType, fn);
+  }
+
+  /**
+   * Register a cancel-finaliser for a given entity type. Mirrors
+   * {@link registerFinaliser} but fires when the approval is cancelled
+   * instead of approved/rejected. Re-registering replaces the previous
+   * handler. Optional — types without a handler keep the prior
+   * "approval cancels but entity is left where it was" behaviour.
+   */
+  registerCancelFinaliser(
+    entityType: ApprovalEntityType,
+    fn: ApprovalCancelFinaliser,
+  ): void {
+    this.cancelFinalisers.set(entityType, fn);
   }
 
   // ── Chain definitions ─────────────────────────────────────────────────────
@@ -660,6 +707,27 @@ export class ApprovalsService {
         eSignatureHash: null,
         metadata: null,
       });
+
+      // Dispatch into the domain module so the parent entity reverts to
+      // its pre-approval state (e.g. PO PENDING_APPROVAL → DRAFT) inside
+      // the same transaction as the approval-row write. Without this
+      // step the entity would be orphaned: approval CANCELLED but the
+      // entity row still flagged "awaiting approval", uneditable and
+      // unsubmittable.
+      //
+      // Throwing here rolls back the cancel — the approval stays PENDING
+      // and the user gets a clear conflict error rather than a half-
+      // completed state.
+      const cancelFinaliser = this.cancelFinalisers.get(existing.entityType);
+      if (cancelFinaliser) {
+        await cancelFinaliser(client, {
+          request: cancelled,
+          actor: user,
+          reason,
+          cancelledAt: new Date().toISOString(),
+        });
+      }
+
       return cancelled;
     });
   }

@@ -33,6 +33,7 @@ import {
 import { installNumericTypeParser } from "@instigenie/db";
 import { AUDIENCE, validatePermissionMap } from "@instigenie/contracts";
 import { Cache } from "@instigenie/cache";
+import { createBullConnection } from "@instigenie/queue";
 import {
   FeatureFlagService,
   PlanResolverService,
@@ -124,6 +125,13 @@ export interface BuiltApp {
   pool: pg.Pool;
   vendorPool: pg.Pool;
   cache: Cache;
+  /**
+   * Lightweight ioredis client pointed at redis-bull, owned by the API
+   * process for liveness probing only — the API does not enqueue jobs
+   * (the worker does). Exposed so the main()-side shutdown can quit
+   * it cleanly alongside `pool` and `cache`.
+   */
+  bullProbe: ReturnType<typeof createBullConnection>;
   env: ReturnType<typeof loadEnv>;
 }
 
@@ -162,8 +170,45 @@ export async function buildApp(): Promise<BuiltApp> {
     application_name: "instigenie-api-vendor",
   });
 
+  // Resilience: a pg.Pool emits "error" on every idle-client failure
+  // (TCP RST when Postgres restarts, libpq EOF mid-pool-recycle, …). If
+  // these events have no listener, Node treats them as unhandled and
+  // crashes the process — verified in chaos testing where `docker stop
+  // instigenie-postgres` killed the API. The handler logs and lets pg
+  // recycle the bad client; in-flight queries fail naturally with a
+  // 5xx that the global error handler converts to RFC7807, and the
+  // next request opens a fresh client once Postgres is back.
+  pool.on("error", (err) => {
+    log.error({ err }, "pg pool error (idle client)");
+  });
+  vendorPool.on("error", (err) => {
+    log.error({ err }, "pg vendor pool error (idle client)");
+  });
+
   const cache = new Cache({ url: env.cacheRedisUrl });
   await cache.connect();
+  // Same rationale as the pg.Pool listener — ioredis emits "error" on
+  // every reconnect attempt while the server is unreachable, which
+  // would crash the process without a listener. The cache itself
+  // continues to retry in the background; downstream code that calls
+  // `cache.client.*` will get a rejected promise and surface a 5xx
+  // (caught by the global error handler).
+  cache.client.on("error", (err) => {
+    log.error({ err: { code: (err as { code?: string }).code, message: err.message } },
+              "redis cache client error");
+  });
+
+  // Bull-redis health probe. The API itself doesn't enqueue jobs (the
+  // worker does), but readiness must reflect the *whole* job pipeline
+  // is up — a bull outage means notifications/PDF render/outbox don't
+  // fire even though Postgres is fine. Construction is lazyConnect so
+  // it doesn't block boot, and the "error" listener prevents the same
+  // process-crash failure mode as the cache client.
+  const bullProbe = createBullConnection(env.bullRedisUrl);
+  bullProbe.on("error", (err) => {
+    log.error({ err: { code: (err as { code?: string }).code, message: err.message } },
+              "redis bull probe error");
+  });
 
   // Verify the database is bootstrapped correctly BEFORE we wire any
   // services. RLS not enabled on a tenant table would mean every
@@ -205,6 +250,10 @@ export async function buildApp(): Promise<BuiltApp> {
     tokens,
     refreshTtlSec: env.refreshTokenTtlSec,
     tenantStatus,
+    // Reuse the cache Redis client for the per-account brute-force
+    // counter — separate logical Redis DB from BullMQ so a queue flush
+    // never wipes lockout state.
+    lockoutStore: cache.client,
   });
 
   // E-signature primitive — Phase 4 §4.2 / §9.5. Shared across any
@@ -330,6 +379,12 @@ export async function buildApp(): Promise<BuiltApp> {
   approvalsService.registerFinaliser("purchase_order", (client, ctx) =>
     poApprovalsService.applyDecisionFromApprovals(client, ctx),
   );
+  // Cancel-finaliser: reverts PO PENDING_APPROVAL → DRAFT inside the
+  // approval-cancel transaction so cancelling the approval doesn't
+  // orphan the PO header in an unsubmittable, uneditable limbo.
+  approvalsService.registerCancelFinaliser("purchase_order", (client, ctx) =>
+    poApprovalsService.applyCancelFromApprovals(client, ctx),
+  );
 
   // Quotation + deal-discount approvals — same shape as PoApprovalsService.
   // QuotationsService takes the deps form so transitionStatus() can dispatch
@@ -359,6 +414,13 @@ export async function buildApp(): Promise<BuiltApp> {
   });
   approvalsService.registerFinaliser("invoice", (client, ctx) =>
     salesInvoicesService.applyDecisionFromApprovals(client, ctx),
+  );
+  // Cancel-finaliser: AWAITING_APPROVAL → DRAFT, mirroring the REJECT
+  // path. Without this, the cancel handler in SalesInvoicesService.cancel
+  // (which already requires the approval be cancelled first) would never
+  // see the invoice leave AWAITING_APPROVAL.
+  approvalsService.registerCancelFinaliser("invoice", (client, ctx) =>
+    salesInvoicesService.applyCancelFromApprovals(client, ctx),
   );
 
   // Work-order approvals — chain seeded in 14-approvals-dev-data.sql with
@@ -416,9 +478,31 @@ export async function buildApp(): Promise<BuiltApp> {
     allowList: (req) =>
       process.env.NODE_ENV !== "production" &&
       req.headers["x-load-test-bypass"] === "instigenie-dev-loadtest",
+    // Return RFC7807 Problem+JSON with the correct 429 status. Without
+    // this builder the plugin throws a FastifyError that the global
+    // error handler can't match, ending up as a generic 500 — which
+    // both leaks "this is unhandled" and breaks 4xx/5xx SLO accounting.
+    errorResponseBuilder: (req, ctx) => ({
+      type: "https://instigenie.dev/problems/rate_limited",
+      title: "rate_limited",
+      status: 429,
+      detail: `Rate limit exceeded, retry in ${ctx.after}`,
+      instance: req.url,
+      code: "rate_limited",
+      details: { limit: ctx.max, ttl: ctx.ttl, retryAfter: ctx.after },
+    }),
   });
 
   registerProblemHandler(app);
+
+  // Echo Fastify's per-request `req.id` back to the caller. Without
+  // this header a customer-reported error has no field to grep against
+  // server logs — the value is already the `reqId` field on every
+  // pino log line, so SREs only need to ask "what request id did your
+  // browser see" to pull the full trace.
+  app.addHook("onSend", async (req, reply) => {
+    reply.header("x-request-id", req.id);
+  });
 
   // ─── Request/response observability ─────────────────────────────────────────
   app.addHook("onRequest", async (req) => {
@@ -451,17 +535,69 @@ export async function buildApp(): Promise<BuiltApp> {
   });
 
   // ─── Health + metrics ───────────────────────────────────────────────────────
-  app.get("/health", async () => ({ status: "ok" }));
+  // `/health` is the canonical name; `/healthz` is the same handler so
+  // Kubernetes-style probes (which conventionally hit `*z` paths) and
+  // generic uptime monitors that use either spelling both succeed.
+  const healthHandler = async () => ({ status: "ok" });
+  app.get("/health", healthHandler);
+  app.get("/healthz", healthHandler);
 
   app.get("/readyz", async (_req, reply) => {
-    try {
-      await pool.query("SELECT 1");
-      await cache.client.ping();
-      return reply.send({ status: "ready" });
-    } catch (err) {
-      log.error({ err }, "readiness check failed");
-      return reply.code(503).send({ status: "degraded" });
+    // Probe every external dependency the request path needs. A
+    // partial-up state (e.g. Postgres healthy but bull dead) means
+    // we'd accept traffic that creates rows whose downstream jobs
+    // never fire — caller never sees notifications, outbox builds up
+    // unboundedly. Better to shed traffic until the whole pipeline
+    // is healthy.
+    //
+    // Per-probe timeout matters: ioredis "offline queue" makes a
+    // ping() hang for the full reconnect window when the server is
+    // gone — without the race the readiness probe itself would time
+    // out the LB instead of cleanly returning 503. 1500ms gives a
+    // healthy server plenty of headroom while shedding traffic
+    // promptly when something is dead.
+    const PROBE_TIMEOUT_MS = 1500;
+    const checks: Array<{ name: string; ok: boolean; err?: string }> = [];
+    const withTimeout = async <T>(p: Promise<T>): Promise<T> =>
+      new Promise<T>((resolve, reject) => {
+        const t = setTimeout(
+          () => reject(new Error(`probe timeout after ${PROBE_TIMEOUT_MS}ms`)),
+          PROBE_TIMEOUT_MS,
+        );
+        p.then(
+          (v) => {
+            clearTimeout(t);
+            resolve(v);
+          },
+          (e) => {
+            clearTimeout(t);
+            reject(e);
+          },
+        );
+      });
+    const probe = async (name: string, fn: () => Promise<unknown>) => {
+      try {
+        await withTimeout(fn());
+        checks.push({ name, ok: true });
+      } catch (err) {
+        checks.push({
+          name,
+          ok: false,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    await Promise.all([
+      probe("postgres", () => pool.query("SELECT 1")),
+      probe("redis-cache", () => cache.client.ping()),
+      probe("redis-bull", () => bullProbe.ping()),
+    ]);
+    const allOk = checks.every((c) => c.ok);
+    if (!allOk) {
+      log.warn({ checks }, "readiness check failed");
+      return reply.code(503).send({ status: "degraded", checks });
     }
+    return reply.send({ status: "ready", checks });
   });
 
   app.get("/metrics", async (_req, reply) => {
@@ -680,7 +816,7 @@ export async function buildApp(): Promise<BuiltApp> {
     portalRateLimit,
   });
 
-  return { app, pool, vendorPool, cache, env };
+  return { app, pool, vendorPool, cache, bullProbe, env };
 }
 
 /**
@@ -690,7 +826,7 @@ export async function buildApp(): Promise<BuiltApp> {
  */
 async function main(): Promise<void> {
   const built = await buildApp();
-  const { app, pool, vendorPool, cache, env } = built;
+  const { app, pool, vendorPool, cache, bullProbe, env } = built;
   const log = createLogger({ service: "api", level: env.logLevel });
 
   await app.listen({ port: env.port, host: env.host });
@@ -702,10 +838,34 @@ async function main(): Promise<void> {
     await pool.end().catch(() => undefined);
     await vendorPool.end().catch(() => undefined);
     await cache.quit().catch(() => undefined);
+    await bullProbe.quit().catch(() => undefined);
     process.exit(0);
   };
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
+
+  // Last-resort process-level safety net. Without these any unhandled
+  // exception or rejection (typically from an idle ioredis/pg client
+  // emitting late) brings the whole process down — verified in chaos
+  // testing. We log loudly and stay alive so in-flight requests can
+  // complete and the auto-recovering clients (ioredis re-dials, pg
+  // pool recycles bad clients) can heal in the background.
+  //
+  // Crucially we do NOT `process.exit()`. Fastify keeps serving; the
+  // first dependent operation will surface a 5xx to the caller, and
+  // /readyz fails so an LB sheds traffic until the dep returns.
+  process.on("uncaughtException", (err) => {
+    log.error(
+      { err: { name: err.name, message: err.message, stack: err.stack } },
+      "uncaughtException — keeping process alive",
+    );
+  });
+  process.on("unhandledRejection", (reason) => {
+    log.error(
+      { reason: reason instanceof Error ? { name: reason.name, message: reason.message } : String(reason) },
+      "unhandledRejection — keeping process alive",
+    );
+  });
 }
 
 // Only launch the server when NOT running under Vitest. Vitest sets

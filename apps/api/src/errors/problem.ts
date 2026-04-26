@@ -67,6 +67,28 @@ export function registerProblemHandler(app: FastifyInstance): void {
       return sendProblem(req, reply, mapped);
     }
 
+    // Infrastructure-down classifier. When Postgres or Redis is
+    // unreachable, the underlying client throws errors with stable
+    // signatures (ECONNREFUSED, ETIMEDOUT, "Connection is closed",
+    // pg "connection terminated unexpectedly"). These deserve a 503,
+    // not a 500 — the system is healthy, the dependency is down, and
+    // the right caller behaviour is "retry with backoff" (which 503
+    // signals; 500 typically does not). The Retry-After header gives
+    // the client a hint without committing to a specific window.
+    if (isInfraUnavailable(err)) {
+      const dep = classifyDependency(err);
+      req.log.warn(
+        { err: { code: (err as { code?: string }).code, message: (err as Error).message } },
+        `dependency unavailable: ${dep}`,
+      );
+      reply.header("Retry-After", "5");
+      return sendProblem(req, reply, {
+        code: "service_unavailable",
+        status: 503,
+        message: `${dep} unavailable`,
+      });
+    }
+
     // Unknown → 500. Do NOT leak the message — log it instead.
     //
     // NOTE: Fastify is booted with `logger: false` in apps/api/src/index.ts
@@ -83,6 +105,56 @@ export function registerProblemHandler(app: FastifyInstance): void {
       message: "Internal server error",
     });
   });
+}
+
+/**
+ * Classify whether an error indicates an infra dep is unreachable, so
+ * the global handler can return 503 instead of 500. Pattern-matches on
+ * the stable signatures ioredis + node-postgres emit when a peer
+ * disappears — keeping this central means individual route handlers
+ * don't each have to wrap calls in try/catch just to remap the code.
+ */
+function isInfraUnavailable(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: string; name?: string };
+  const code = e.code ?? "";
+  if (
+    code === "ECONNREFUSED" ||
+    code === "ETIMEDOUT" ||
+    code === "ENOTFOUND" ||
+    code === "EAI_AGAIN" ||
+    code === "ECONNRESET" ||
+    code === "EPIPE"
+  ) {
+    return true;
+  }
+  const msg = (e.message ?? "").toLowerCase();
+  return (
+    msg.includes("connection terminated") ||
+    msg.includes("connection is closed") ||
+    msg.includes("connection ended") ||
+    msg.includes("client has encountered a connection error") ||
+    msg.includes("getaddrinfo") ||
+    // ioredis surfaces this when a command arrives while the socket is
+    // mid-reconnect with maxRetriesPerRequest hit.
+    msg.includes("max retries per request")
+  );
+}
+
+function classifyDependency(err: unknown): string {
+  const e = err as { message?: string };
+  const msg = (e.message ?? "").toLowerCase();
+  // ioredis errors mention "Redis" or come from a connectionName tag.
+  if (msg.includes("redis") || msg.includes("max retries per request")) {
+    return "redis";
+  }
+  // pg errors mention "client" / "connection terminated" / pool wording.
+  if (msg.includes("client") || msg.includes("connection terminated")) {
+    return "database";
+  }
+  // ECONNREFUSED on the default postgres port is the most common case
+  // we cannot disambiguate from the message alone.
+  return "database";
 }
 
 interface Problem {

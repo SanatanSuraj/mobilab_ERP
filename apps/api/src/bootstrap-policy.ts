@@ -69,7 +69,7 @@ const TENANT_TABLES = [
   "workflow_transitions",
   // Notifications + audit
   "notifications",
-  "audit_log",
+  "audit.log",
   // Portal
   "account_portal_users",
 ];
@@ -88,31 +88,43 @@ export async function runBootstrapPolicy(
     }
   }
 
-  // 2. RLS enabled on every curated tenant table.
+  // 2. RLS enabled on every curated tenant table. Entries may be bare
+  // ("users" → public.users) or schema-qualified ("audit.log").
+  const tablePairs = TENANT_TABLES.map((t) => {
+    const dot = t.indexOf(".");
+    return dot === -1
+      ? { schema: "public", name: t, qualified: t }
+      : { schema: t.slice(0, dot), name: t.slice(dot + 1), qualified: t };
+  });
   const rls = await pool.query<{
+    schema_name: string;
     table_name: string;
     rowsecurity: boolean;
   }>(
-    `SELECT c.relname AS table_name, c.relrowsecurity AS rowsecurity
+    `SELECT n.nspname AS schema_name, c.relname AS table_name, c.relrowsecurity AS rowsecurity
        FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public' AND c.relname = ANY($1::text[])`,
-    [TENANT_TABLES],
+      WHERE (n.nspname, c.relname) = ANY(
+        SELECT unnest($1::text[]), unnest($2::text[])
+      )`,
+    [tablePairs.map((p) => p.schema), tablePairs.map((p) => p.name)],
   );
-  const seen = new Set(rls.rows.map((r) => r.table_name));
+  const seen = new Set(
+    rls.rows.map((r) => `${r.schema_name}.${r.table_name}`),
+  );
   for (const row of rls.rows) {
     if (!row.rowsecurity) {
       throw new Error(
-        `bootstrap: RLS not enabled on ${row.table_name} — refusing to start (apply ops/sql/rls/)`,
+        `bootstrap: RLS not enabled on ${row.schema_name}.${row.table_name} — refusing to start (apply ops/sql/rls/)`,
       );
     }
   }
   // A missing table in pg_class means the schema is out of sync with the
   // contract — treat as fatal.
-  for (const t of TENANT_TABLES) {
-    if (!seen.has(t)) {
+  for (const p of tablePairs) {
+    if (!seen.has(`${p.schema}.${p.name}`)) {
       throw new Error(
-        `bootstrap: tenant-scoped table "${t}" missing from schema — apply ops/sql/init/`,
+        `bootstrap: tenant-scoped table "${p.qualified}" missing from schema — apply ops/sql/init/`,
       );
     }
   }
