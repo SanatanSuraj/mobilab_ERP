@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -133,8 +134,16 @@ export default function TenantsListPage() {
             Every customer org, across every plan and status.
           </p>
         </div>
-        <div className="text-sm text-slate-500">
-          {total.toLocaleString()} total
+        <div className="flex items-center gap-3">
+          <div className="text-sm text-slate-500">
+            {total.toLocaleString()} total
+          </div>
+          <Link
+            href="/vendor-admin/tenants/new"
+            className="inline-flex items-center rounded-md bg-slate-900 text-white text-sm font-medium px-3 py-1.5 hover:bg-slate-800"
+          >
+            + New tenant
+          </Link>
         </div>
       </div>
 

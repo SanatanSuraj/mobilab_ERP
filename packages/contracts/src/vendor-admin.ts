@@ -40,6 +40,7 @@ export const VENDOR_ACTION_TYPES = [
   "vendor.logout",
 
   // Tenant lifecycle
+  "tenant.create",
   "tenant.suspend",
   "tenant.reinstate",
   "tenant.change_plan",
@@ -167,6 +168,73 @@ export const VendorTenantListResponseSchema = z.object({
 export type VendorTenantListResponse = z.infer<
   typeof VendorTenantListResponseSchema
 >;
+
+// ─── Create tenant (POST /vendor-admin/tenants) ─────────────────────────────
+
+/**
+ * Provision a brand-new tenant. Single transaction:
+ *
+ *   organizations  →  ACTIVE/TRIAL row
+ *   subscriptions  →  current_period TRIALING/ACTIVE on the picked plan
+ *   user_invitations → invite for the customer admin (role SUPER_ADMIN)
+ *
+ * In dev (`NODE_ENV !== "production"`) the response includes
+ * `devAcceptUrl` so the vendor admin can hand the link directly to the
+ * customer without SMTP wired up.
+ *
+ * `slug` is unused by the schema today (organizations has no slug column);
+ * we accept it for forward-compat — it's also what we'd use as the
+ * tenant's portal subdomain once subdomain routing lands.
+ */
+export const CreateTenantRequestSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  /** lowercase URL-safe identifier — kept for forward-compat. */
+  slug: z
+    .string()
+    .trim()
+    .min(2)
+    .max(64)
+    .regex(/^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/, "slug must be lower-case alphanumeric/dash")
+    .optional(),
+  planCode: z.enum(PLAN_CODES).default("STARTER"),
+  /**
+   * If set, opens the tenant in TRIAL with the given trial-end date.
+   * Otherwise the org goes straight to ACTIVE.
+   */
+  trialEndsAt: z.string().date().optional(),
+  /** Customer admin email (will receive the accept-invite link). */
+  adminEmail: z.string().trim().email().max(254),
+  /** Optional display name for the customer admin. */
+  adminName: z.string().trim().min(1).max(120).optional(),
+});
+export type CreateTenantRequest = z.infer<typeof CreateTenantRequestSchema>;
+
+export const CreateTenantResponseSchema = z.object({
+  tenant: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    status: z.enum(TENANT_STATUSES),
+    trialEndsAt: z.string().nullable(),
+    createdAt: z.string(),
+  }),
+  subscription: z.object({
+    id: z.string().uuid(),
+    planCode: z.enum(PLAN_CODES),
+    status: z.string(),
+    currentPeriodEnd: z.string(),
+  }),
+  invitation: z.object({
+    id: z.string().uuid(),
+    email: z.string().email(),
+    expiresAt: z.string(),
+  }),
+  /**
+   * Non-prod only — raw accept-invite URL the vendor admin can paste to
+   * the customer when SMTP isn't wired. Production builds omit this.
+   */
+  devAcceptUrl: z.string().url().optional(),
+});
+export type CreateTenantResponse = z.infer<typeof CreateTenantResponseSchema>;
 
 // ─── Action log ─────────────────────────────────────────────────────────────
 

@@ -110,6 +110,8 @@ import { AdminAuditService } from "./modules/admin-audit/service.js";
 import { registerAdminAuditRoutes } from "./modules/admin-audit/routes.js";
 import { AdminUsersService } from "./modules/admin-users/service.js";
 import { registerAdminUsersRoutes } from "./modules/admin-users/routes.js";
+import { OnboardingService } from "./modules/onboarding/service.js";
+import { registerOnboardingRoutes } from "./modules/onboarding/routes.js";
 import { EsignatureService } from "./modules/esignature/service.js";
 import { VendorAuthService, VendorAdminService } from "@instigenie/vendor-admin";
 import { registerVendorRoutes } from "./modules/vendor/routes.js";
@@ -449,6 +451,11 @@ export async function buildApp(): Promise<BuiltApp> {
   const vendorAdminService = new VendorAdminService({
     pool: vendorPool,
     cacheInvalidate: (orgId) => featureFlags.invalidate(orgId),
+    webOrigin: env.webOrigin,
+    // Same dev-only treatment as the tenant-side admin invite flow:
+    // surface the raw accept URL on the response so vendor admins can
+    // hand it over without SMTP wired up.
+    includeDevAcceptUrl: env.nodeEnv !== "production",
   });
 
   const app = Fastify({
@@ -771,6 +778,20 @@ export async function buildApp(): Promise<BuiltApp> {
   });
   await registerAdminUsersRoutes(app, {
     service: adminUsersService,
+    guardInternal: {
+      tokens,
+      expectedAudience: AUDIENCE.internal,
+      tenantStatus,
+    },
+  });
+
+  // Onboarding — guided post-invite setup wizard. Reuses existing
+  // warehouse/item/account/vendor repos for the optional sample-data
+  // seed (1 row per resource), all inside one transaction so a
+  // partial-seed retry can re-attempt cleanly.
+  const onboardingService = new OnboardingService({ pool });
+  await registerOnboardingRoutes(app, {
+    service: onboardingService,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,

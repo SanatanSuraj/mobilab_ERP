@@ -31,3 +31,4 @@ export * from "./vendor-admin.js";
 export * from "./admin-audit.js";
 export * from "./admin-users.js";
 export * from "./portal.js";
+export * from "./onboarding.js";

@@ -905,11 +905,12 @@ export async function invalidateByPattern(pattern: string): Promise<number> {
 ### 9.1 Authentication Stack
 
 - **`jose`** for JWT (full JOSE spec; better ergonomics than `jsonwebtoken`).
-- **Access token**: 60 min, RS256 in prod, HS256 in dev.
-- **Refresh token**: 7 days, HttpOnly + Secure + SameSite=Strict cookie, **rotated on every use** (gate 23 proves old refresh rejected after one rotation).
-- **Password hashing**: `argon2id` (`memory=64MB`, `time=3`, `parallelism=4`). Never `bcryptjs`.
-- **JWT claims are identity-only** (`sub`, `org`, `idn`, `roles`, `jti`, `aud`). Permissions resolved at runtime with Redis-CACHE + PG fallback.
-- **Token revocation**: `jti` → `revoked:{jti}` in Redis-CACHE with TTL=token_remaining, AND to `auth.revoked_tokens` table (Redis fallback).
+- **Access token**: HS256, TTL configurable via `ACCESS_TOKEN_TTL_SEC` (default 900s / 15 min).
+- **Refresh token**: TTL configurable via `REFRESH_TOKEN_TTL_SEC` (default 1,209,600s / 14 days), HttpOnly + Secure + SameSite=Strict cookie, **rotated on every use** (gate 23 proves old refresh rejected after one rotation).
+- **Password hashing**: `bcrypt` (cost 10) — constant-time dummy compare on miss to prevent email-enumeration timing attacks.
+- **JWT claims are identity-only** (`sub`, `org`, `idn`, `roles`, `jti`, `aud`, `capabilities`). Permissions resolved at runtime from `ROLE_PERMISSIONS` (in-process map, no DB hit per request).
+- **Token revocation**: refresh tokens are stored hashed in `refresh_tokens` and rotated atomically (used row marked `revoked_at`, new row inserted in same transaction). Access-token revocation is TTL-bound (15 min ceiling).
+- **JWT verification errors → 401, never 500.** `verifyAccess()` catches `jose` `JWSInvalid`/`JWTExpired`/etc. and rethrows `UnauthorizedError`. The `/auth/me` dual-audience fallback (`internal` → `portal`) also rethrows `UnauthorizedError` when both guards reject — verified post-fix in chaos round.
 
 #### 9.1.1 Multi-Tenant Membership
 
@@ -931,6 +932,19 @@ Authentication needs a few DB lookups that must cross tenant boundaries: loading
 Both functions are the **only** sanctioned cross-tenant auth reads. `apps/api` connects as `instigenie_app` (`NOBYPASSRLS`) — it invokes these functions without being privileged itself. The invocation is narrow (identity-by-email, token-by-hash) and fully logged. SQL lives in `ops/sql/rls/03-auth-cross-tenant.sql`.
 
 **Why not just bypass RLS in the auth service's connection?** Because `instigenie_app` runs both auth and business queries; giving it `BYPASSRLS` would defeat Gate 1 globally. SECURITY DEFINER functions scope the privilege to the exact two queries that need it.
+
+#### 9.1.3 Login Lockout & Brute-Force Protection
+
+Per-account lockout, layered for survivability across a Redis outage:
+
+- **Hot counter (Redis-CACHE):** key `auth:fail:<lower(email)>`, `INCR` on every failed login, `EXPIRE` set on first increment to `LOCKOUT_TTL_SEC` (900s = 15 min). Window is fixed from first failure — subsequent fails do NOT extend.
+- **Cold lock (Postgres):** when the counter reaches `LOCKOUT_THRESHOLD` (5), `user_identities.locked_until` is set to `now() + 15 min`. Survives Redis flush and is the authoritative gate consulted before bcrypt on every login.
+- **Threshold response:** `RateLimitError` → **HTTP 429** RFC7807 `{ "code": "rate_limited", "detail": "account temporarily locked" }`. The 5th wrong attempt that triggers the lock returns 429 immediately; subsequent attempts during the window also 429, regardless of password correctness.
+- **On success:** Redis counter is `DEL`'d so a legitimate user who typo'd a few times doesn't stay one-typo from a 15-minute lockout.
+- **Graceful degradation:** every `lockoutStore.{incr,expire,del}` call is wrapped with `withLockoutTimeout()` (500ms ceiling). If Redis is unreachable the credential check still answers — the DB-side `locked_until` continues to reject previously-locked accounts, so the security guarantee that matters most (no auth for already-locked accounts) does not depend on Redis liveness.
+- **Counter is keyed by lower(email) — not by user id** — so an attacker spraying random passwords against an unknown email still accumulates against that email (preventing the "unknown account guess + correct guess" two-step bypass).
+
+The thresholds are deliberately hard-coded constants (`LOCKOUT_THRESHOLD`, `LOCKOUT_TTL_SEC`, `LOCKOUT_OP_TIMEOUT_MS`) in `apps/api/src/modules/auth/service.ts` — these are security parameters, not per-tenant policy. Bumping them is a code change and a code review.
 
 ### 9.2 Tenant Isolation — Defense in Depth
 
@@ -986,28 +1000,44 @@ Gate 15 (`gate-15-tenant-status-guard`) asserts a suspended org's users cannot a
 ### 9.3 HTTP Security
 
 ```typescript
-// apps/api/src/plugins/security.ts
-await fastify.register(helmet, {
-  contentSecurityPolicy: { directives: { /* per-environment */ } },
-});
-await fastify.register(cors, {
-  origin: process.env.FRONTEND_URLS!.split(','),
+// apps/api/src/index.ts (excerpt)
+await app.register(helmet, { /* CSP per-environment */ });
+await app.register(cors, {
+  origin: env.webOrigin,
   credentials: true,
 });
-await fastify.register(rateLimit, {
-  global: true,
-  max: 200,
-  timeWindow: '1 minute',
-  // Composite key: prevents DoS against a user via their userId
-  keyGenerator: (req) => req.user?.id ? `${req.user.id}:${req.ip}` : req.ip,
-  redis: redisCache,
+await app.register(rateLimit, {
+  max: 300,
+  timeWindow: "1 minute",
+  keyGenerator: (req) => req.ip ?? "anon",
+  // Dev-only escape hatch so local k6 / load tests aren't strangled by
+  // 300/min from a single 127.0.0.1. Honored only when NODE_ENV !==
+  // "production"; in prod the header is ignored.
+  allowList: (req) =>
+    process.env.NODE_ENV !== "production" &&
+    req.headers["x-load-test-bypass"] === "instigenie-dev-loadtest",
+  // 429 RFC7807 — without this builder the plugin throws a FastifyError
+  // the global problem handler doesn't recognize, falling through to 500
+  // (verified bug; fixed in v1.3 chaos round).
+  errorResponseBuilder: (req, ctx) => ({
+    type: "https://instigenie.dev/problems/rate_limited",
+    title: "rate_limited",
+    status: 429,
+    detail: `Rate limit exceeded, retry in ${ctx.after}`,
+    instance: req.url,
+    code: "rate_limited",
+    details: { limit: ctx.max, ttl: ctx.ttl, retryAfter: ctx.after },
+  }),
 });
 
-// Stricter limits on auth endpoints
-fastify.post('/auth/login',
-  { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } },
-  loginHandler
-);
+// Stricter per-route limits on auth endpoints (login: 5/min, refresh: 10/min).
+// Per-account lockout at 5 failed attempts is a separate layer — see §9.1.3.
+
+// Every response carries x-request-id (Fastify req.id). Customer-reported
+// errors then map directly to a single line in pino logs.
+app.addHook("onSend", async (req, reply) => {
+  reply.header("x-request-id", req.id);
+});
 ```
 
 ### 9.4 RBAC — Roles, Permission Format, Capability Layer
@@ -1206,27 +1236,40 @@ A secondary concern: NodeSDK bundles its own `sdk-trace-base` one minor version 
 
 ### 10.2 Health Check (Must Actually Detect Failure)
 
+Two endpoints with distinct contracts:
+
+- **`GET /health`** (and `/healthz` alias) — **liveness**. Returns `{ "status": "ok" }` and 200 as long as the Node process is responsive. Does NOT touch any dependency. K8s `livenessProbe` uses this; an LB load-balancing on liveness should also use this.
+- **`GET /readyz`** — **readiness**. Probes every external dep the request path needs. Returns 503 with a per-check breakdown when any is down.
+
 ```typescript
-// apps/api/src/routes/health.ts
-fastify.get('/health', async () => {
-  const checks = await Promise.allSettled([
-    // pg_is_in_recovery fails loudly on the primary if PG is down
-    dbRW.execute(sql`SELECT pg_is_in_recovery()`),
-    dbRO.execute(sql`SELECT 1`),
-    redisCache.ping(),
-    bullConnection.ping(),
-  ]);
-  const [pgRW, pgRO, cache, bull] = checks.map(c => c.status === 'fulfilled' ? 'ok' : 'down');
-  const healthy = pgRW === 'ok' && pgRO === 'ok' && cache === 'ok' && bull === 'ok';
-  return {
-    status: healthy ? 'ok' : 'degraded',
-    components: { pgRW, pgRO, cache, bull },
-    uptime: process.uptime(),
-    version: process.env.RELEASE_VERSION,
-    timestamp: new Date().toISOString(),
+// apps/api/src/index.ts (excerpt)
+const healthHandler = async () => ({ status: "ok" });
+app.get("/health", healthHandler);
+app.get("/healthz", healthHandler); // alias for k8s/uptime probes that hit `*z`
+
+app.get("/readyz", async (_req, reply) => {
+  const PROBE_TIMEOUT_MS = 1500; // ioredis offline queue can hang otherwise
+  const checks: Array<{ name: string; ok: boolean; err?: string }> = [];
+  const withTimeout = <T>(p: Promise<T>) =>
+    new Promise<T>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error(`probe timeout after ${PROBE_TIMEOUT_MS}ms`)), PROBE_TIMEOUT_MS);
+      p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+    });
+  const probe = async (name: string, fn: () => Promise<unknown>) => {
+    try { await withTimeout(fn()); checks.push({ name, ok: true }); }
+    catch (err) { checks.push({ name, ok: false, err: err instanceof Error ? err.message : String(err) }); }
   };
+  await Promise.all([
+    probe("postgres", () => pool.query("SELECT 1")),
+    probe("redis-cache", () => cache.client.ping()),
+    probe("redis-bull", () => bullProbe.ping()),
+  ]);
+  const allOk = checks.every((c) => c.ok);
+  return reply.code(allOk ? 200 : 503).send({ status: allOk ? "ready" : "degraded", checks });
 });
 ```
+
+**Per-probe timeout matters.** Without `withTimeout`, ioredis's offline queue makes `ping()` hang for the full reconnect window when the server is gone, and `/readyz` itself times out the LB instead of cleanly returning 503. 1500ms is generous for healthy deps and prompt for shedding traffic when something is dead — verified end-to-end in chaos round (v1.3).
 
 ### 10.3 Critical Alerts
 
@@ -1243,6 +1286,31 @@ fastify.get('/health', async () => {
 | `erp_api_p99_latency_ms` | > 2000ms | HIGH | Slow query or pool wait |
 | `erp_api_error_rate_5xx` | > 1% | HIGH | Check logs + traces |
 | `erp_backup_last_success_hours` | > 25h | CRITICAL | Backup missed |
+
+### 10.4 Process Resilience (Survive-the-Dependency-Outage Pattern)
+
+**Rule: a dependency outage must produce 5xx responses, not a process crash.** The earlier chaos round showed `docker stop instigenie-postgres` killing the API process outright (no listener on the pg.Pool `error` event → unhandled → Node `uncaughtException` → exit). Fixed in v1.3 with five layered guards:
+
+1. **`pool.on('error', …)` for every pg.Pool** — `pool` and `vendorPool` both. pg.Pool emits `error` on every idle-client TCP failure (Postgres restart, libpq EOF mid-pool-recycle); without a listener these crash the process.
+2. **`cache.client.on('error', …)` for ioredis** — same rationale; ioredis emits `error` on every reconnect attempt while the server is unreachable.
+3. **`bullProbe` ioredis client owned by the API** — separate connection used only for `/readyz` liveness, with its own `error` listener. The API itself does not enqueue jobs (the worker does), but readiness must reflect the *whole* job pipeline is up.
+4. **`process.on('uncaughtException', …)` and `process.on('unhandledRejection', …)`** — log loudly and **do not exit**. Last-resort safety net for late events from idle clients. Fastify keeps serving; in-flight requests can complete; the auto-recovering clients heal in the background.
+5. **Global error handler classifies infra errors → 503 RFC7807.** `apps/api/src/errors/problem.ts` matches on `ECONNREFUSED`/`ETIMEDOUT`/`ENOTFOUND`/`ECONNRESET`/`EPIPE` plus ioredis ("Connection is closed", "max retries per request") and pg ("connection terminated unexpectedly") error signatures, and emits `503 service_unavailable` with `Retry-After: 5` instead of 500. Without this every Redis hiccup looks like a 5xx bug to monitoring.
+
+#### 10.4.1 Validated Failure Modes (chaos round v1.3)
+
+| Failure injected | API liveness | `/readyz` | Request behaviour | Auto-recovery |
+|---|---|---|---|---|
+| `docker stop instigenie-postgres` | **alive** | **503** with `postgres: ok=false` | Read/write → 503 `database unavailable` | `/readyz` → 200 within 1s of pg returning |
+| `docker stop instigenie-redis-cache` | **alive** | **503** in <1.5s with `redis-cache: probe timeout` | Login still answers (`401`) — lockout degrades, DB `locked_until` still authoritative | Auto |
+| `docker stop instigenie-redis-bull` | **alive** | **503** | DB-only routes continue serving (`/crm/leads = 200`) | Auto |
+| Combined: pg + redis-cache simultaneously | **alive** | **503** with both deps marked down | 503 RFC7807 on every dep-touching route | Auto |
+
+**Data integrity preserved end-to-end** through every cycle — verified by row counts pre/post chaos.
+
+#### 10.4.2 Worker process
+
+The same pattern (`pool.on('error')`, `redis.on('error')`, process-level handlers) MUST be mirrored in `apps/worker/src/index.ts`. Open follow-up: the API was hardened in v1.3, the worker still needs the same edit.
 
 ---
 
@@ -1337,19 +1405,22 @@ Gate tests that enforce these (gate-20 PgBouncer URL guard, gate-21 noeviction, 
 
 ### 11.4 Failure & Resilience Matrix
 
+Updated in v1.3 to reflect what's verified by the chaos suite (`/tmp/qa10k/chaos2.log` reproducible via `chaos2.sh`). API process now stays alive across every dep outage and auto-recovers when the dep returns; the matrix below names the user-facing behaviour during the outage window.
+
 | Failure | Detection | Auto Response | Manual Step |
 |---------|-----------|---------------|-------------|
-| PG primary crash | PgBouncer health check | Patroni promotes replica; PgBouncer reconnects; writes fail ~30s | Update DATABASE_URL; rolling restart api |
+| PG primary crash | PgBouncer health check + `/readyz` 503 (`postgres: ok=false`) | Patroni promotes replica; PgBouncer reconnects. **API process stays alive**; in-flight DB queries return `503 service_unavailable` RFC7807 with `Retry-After: 5`. `/readyz` flips back to 200 within ~1s of pg returning — no manual restart. | None — automatic (was: rolling restart api) |
 | Replica lag > 10s | Prometheus alert | Reports route to primary temporarily | Investigate replica I/O |
-| Redis-BULL primary crash | Sentinel | Replica promoted ~30s; 503 for event-producing writes during window | Replace failed node ≤24h |
+| Redis-BULL primary crash | Sentinel + `/readyz` 503 (`redis-bull: probe timeout`) | Replica promoted ~30s. API stays alive; DB-only routes continue serving (verified `/crm/leads = 200` during outage); event-producing writes fail with 503 until bull returns. | Replace failed node ≤24h |
 | Redis-BULL out of memory | Prometheus | Writes fail loudly (noeviction) — API surfaces clear error | Scale Redis-BULL memory |
-| Redis-CACHE primary crash | Sentinel | Replica promoted; cache miss → PG fallback transparently | Replace failed node |
+| Redis-CACHE primary crash | Sentinel + `/readyz` 503 (`redis-cache: probe timeout`) | Replica promoted. API stays alive. Login still answers `401` — lockout INCR/EXPIRE/DEL each wrapped in 500ms timeout (`withLockoutTimeout`); DB-side `locked_until` remains authoritative. Cached reads degrade to PG fallback transparently. | Replace failed node |
 | Worker pod crash | K8s liveness | K8s restarts; stalled job re-delivered after `lockDuration` | None — automatic |
 | Listener process crash | pino fatal + k8s | Pod restarts ≤5s; 30s poller is the safety net | None — automatic |
 | NIC EWB API down | Circuit breaker 5 fails | Circuit opens; Finance alerted; dispatch proceeds | Finance generates EWB manually |
 | WhatsApp API down | 3 consecutive fails | Email fallback; WhatsApp queued | None |
 | MinIO down | PDF write errors | PDF jobs retry 3× @60s | Restore MinIO; jobs auto-retry |
 | PgBouncer down | App connection errors | 2 replicas eliminate SPOF | Restart failed pod |
+| **Multiple deps simultaneously** (e.g. pg + redis-cache) | `/readyz` 503 with all failed deps named in `checks[]` body | API process stays alive; routes fail with 503 per-dep; recovers in ~1s once both deps return. | None — automatic |
 
 ---
 
@@ -2200,6 +2271,12 @@ Patterns explicitly rejected. Cite this section in PR reviews.
 | JWT carries `permissions[]` | Stale up to token TTL after role change | Identity-only JWT; perms resolved at runtime |
 | One Fastify monolith + workers in-process | CPU-bound jobs block event loop | Separate worker processes per queue |
 | Gate tests that reimplement the invariant | Passing test ≠ passing production; invariant drifts silently | Extract to a module (`assertDirectPgUrl`, `createOutboxDrain`) and import it from both (Rule §2.16) |
+| Letting infra-client `error` events crash the process | pg.Pool / ioredis emit `error` on idle-client failures; one unhandled event crashes Node — verified in chaos round | Register `pool.on('error')` + `client.on('error')` per construction site; add `process.on('uncaughtException'/'unhandledRejection')` that logs, never `exit()`s |
+| Letting JWT-decode errors bubble to the global handler | `jose` throws `JWSInvalid`/`JWTExpired` — without a catch, becomes 500 internal_error; both leaks "this path is unhandled" and breaks 4xx/5xx SLO accounting | Catch in `verifyAccess()` and re-raise as `UnauthorizedError`; mirror in any dual-audience fallback path (`/auth/me`) |
+| Letting rate-limit hits return 500 | `@fastify/rate-limit` without an `errorResponseBuilder` throws a `FastifyError` the global problem handler doesn't recognize → 500 — every throttled client looks like a server bug | Configure `errorResponseBuilder` to return `429 RFC7807` with `Retry-After` |
+| Cancelling an approval without reverting the parent entity | Approval row goes to CANCELLED, parent (PO/invoice/…) stays in `*_APPROVAL` — orphan, uneditable, unsubmittable | Approvals service dispatches a registered cancel-finaliser per entity type inside the same DB transaction (PO: PENDING_APPROVAL → DRAFT; invoice: AWAITING_APPROVAL → DRAFT via existing revertToDraft) |
+| Schema-allowed negative quantities on line items | Bare `qtyStr` regex permits `-10`; downstream DB CHECK fires as 23514 → 500 | Refine line-item schemas with `positiveQtyStr` + `nonNegativeDecimalStr` so validation hits at request time as 400 with a clear field path |
+| `/readyz` that pings deps without per-probe timeout | A hung Redis makes readiness probe time out the LB before it can answer — readiness becomes unobservable instead of "503 degraded" | Wrap each probe in `Promise.race` with a hard 1500ms timeout; report per-check status in the body |
 
 ---
 
@@ -2448,13 +2525,33 @@ Before Phase 2 production module work begins:
 | Field | Value |
 |-------|-------|
 | Document ID | ERP-ARCH-INSTIGENIE-2026-001 |
-| Version | 1.2 |
-| Supersedes | v1.1 (2026-04-20) |
+| Version | 1.3 |
+| Supersedes | v1.2 (2026-04-21) |
 | Translates From | `ERP-ARCH-MIDSCALE-2025-005` (Python reference) + `ERP-ARCH-UNIFIED-2026-001` (unified doc) |
 | Next Review | End of Phase 2 CRM rollout (all web pages on real API) |
 | Change Control | Material changes require the same PR approval process as ledger schema changes |
 
 ### Changelog
+
+**v1.3 — Resilience, Bug Fixes, Validation Tightening (2026-04-26)**
+
+In-place update reflecting changes that landed during the resilience-fix round and the chaos-engineering pass. No section numbers reused; existing inline `ARCHITECTURE.md §X.Y` references in code remain valid. Sections refreshed to match production code; new sub-sections added rather than renumbering.
+
+- **§9.1** — Auth stack accuracy pass: now correctly states `bcrypt` (was: argon2id), HS256 only (was: RS256-prod/HS256-dev), TTLs match `.env.example` (15 min access / 14 day refresh). Added bullet on JWT-error → 401 contract — `verifyAccess()` translates `jose` errors, dual-audience `/auth/me` fallback rethrows `UnauthorizedError` instead of `Error("unreachable")` (chaos finding).
+- **§9.1.3** *(new)* — Login Lockout & Brute-Force Protection: Redis hot counter (`auth:fail:<email>`, 15-min TTL) + Postgres cold lock (`user_identities.locked_until`); 5 failed attempts → 429 RFC7807; Redis-down degrades gracefully via `withLockoutTimeout` (500ms) so credential check still answers; DB-side lock is authoritative.
+- **§9.3** — HTTP security code refreshed: `max: 300`/min; `errorResponseBuilder` now configured so rate-limit hits return 429 RFC7807 instead of 500 (chaos finding); dev-only `x-load-test-bypass` allowList; new `onSend` hook adds `x-request-id` to every response.
+- **§10.2** — Health check rewritten. Two endpoints: `/health` + `/healthz` alias (liveness, no dep checks) and `/readyz` (per-dep checks: postgres, redis-cache, redis-bull). Each probe wrapped with a 1500ms `withTimeout` so a hung Redis can't make readiness time out the LB itself.
+- **§10.4** *(new)* — Process Resilience: pg.Pool `error` listeners, ioredis `error` listeners, dedicated `bullProbe` ioredis client, `process.on('uncaughtException'/'unhandledRejection')` that log and stay alive, global error handler classifies `ECONNREFUSED`/ioredis "Connection is closed"/pg "connection terminated" → 503 RFC7807 with `Retry-After: 5`. Includes §10.4.1 verified-failure-modes table from the chaos suite.
+- **§11.4** — Failure & resilience matrix updated for chaos-verified behaviour: API stays alive across pg / redis-cache / redis-bull / combined outages; `/readyz` returns 503 with per-check breakdown; auto-recovers in ~1s when each dep returns. New row for "multiple deps simultaneously".
+- **§14** — Six new anti-patterns added: unhandled infra `error` events, JWT-error bubbling, rate-limit-as-500, approval cancel without parent revert, line-item schemas allowing negative quantities, `/readyz` without per-probe timeout.
+- **Bug fixes documented** (no doc section needed for each, but worth surfacing in the catalogue):
+  - Cancelled approval no longer orphans parent entity — `ApprovalsService.cancelRequest()` dispatches a `cancelFinaliser` per entity type inside the same transaction; `PoApprovalsService` and `SalesInvoicesService` both register one (PO: `PENDING_APPROVAL → DRAFT`; invoice: `AWAITING_APPROVAL → DRAFT` via existing `revertToDraft`).
+  - Bootstrap policy `TENANT_TABLES` now accepts schema-qualified entries (`audit.log`) — earlier the API refused to start because the curated list expected `public.audit_log` while the schema defines `audit.log`.
+  - `CreatePoLineSchema` / `CreateIndentLineSchema` / `CreateGrnLineSchema` use `positiveQtyStr` + `nonNegativeDecimalStr` — negative quantity / negative unit price now fail validation at 400 instead of crashing as 500 from the DB CHECK.
+- **Open follow-ups** (non-blocking but called out):
+  - `apps/worker/src/index.ts` needs the same resilience pattern (pg/redis `error` listeners + `uncaughtException`/`unhandledRejection`).
+  - `quotation` and `deal_discount` entity types do not yet register cancel-finalisers — same orphan risk as the PO bug, lower blast radius.
+  - One-shot SQL to heal historical orphan POs (any `purchase_order` with `status='PENDING_APPROVAL'` whose only `approval_request` is `CANCELLED`) is documented in the bug-fix report.
 
 **v1.2 — Multi-Tenancy, Vendor Admin, Entitlements, Gate Expansion (2026-04-21)**
 

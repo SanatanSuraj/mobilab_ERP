@@ -16,15 +16,25 @@
  * guard (no cache) — nothing to invalidate there.
  */
 
+import crypto from "node:crypto";
 import type pg from "pg";
-import { NotFoundError, ValidationError } from "@instigenie/errors";
+import { ConflictError, NotFoundError, ValidationError } from "@instigenie/errors";
 import type {
+  CreateTenantRequest,
+  CreateTenantResponse,
   PlanCode,
   VendorActionType,
   VendorAuditListQuery,
   VendorTenantListQuery,
 } from "@instigenie/contracts";
 import { recordVendorAction } from "./audit.js";
+
+const INVITE_TTL_HOURS = 72;
+const SUBSCRIPTION_PERIOD_DAYS = 30;
+
+function sha256Hex(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
 
 export interface VendorAdminContext {
   vendorAdminId: string;
@@ -40,6 +50,18 @@ export interface VendorAdminServiceDeps {
    * plan change so FeatureFlagService refetches the snapshot on next hit.
    */
   cacheInvalidate?: (orgId: string) => Promise<void> | void;
+  /**
+   * Origin used to build the dev accept-invite URL surfaced on the
+   * createTenant response. Same value the API service uses for tenant-
+   * side admin invites — see apps/api/src/index.ts.
+   */
+  webOrigin?: string;
+  /**
+   * When true, include `devAcceptUrl` on the createTenant response so the
+   * vendor admin can hand the link to the customer without SMTP wired up.
+   * Honored by the API only outside production.
+   */
+  includeDevAcceptUrl?: boolean;
 }
 
 export class VendorAdminService {
@@ -175,6 +197,167 @@ export class VendorAdminService {
       })),
       total: Number(totalRes.rows[0]?.count ?? 0),
     };
+  }
+
+  // ─── Create tenant ────────────────────────────────────────────────────
+
+  /**
+   * Provision a brand-new tenant. One transaction:
+   *
+   *   1. organizations  — name, status (TRIAL or ACTIVE), trial_ends_at
+   *   2. subscriptions  — period bounded by SUBSCRIPTION_PERIOD_DAYS,
+   *                       status TRIALING or ACTIVE, picked plan
+   *   3. user_invitations — invite for the customer admin
+   *                         (role SUPER_ADMIN, expires INVITE_TTL_HOURS)
+   *
+   * On any failure the whole insert rolls back — no orphan org / dangling
+   * subscription / unreachable invite.
+   *
+   * Idempotency: there's no natural unique constraint on (org name +
+   * admin email) so re-calls produce a new tenant. The vendor UI is
+   * expected to gate this with a confirmation dialog. The invitation
+   * unique-by-(orgId, lower(email)) catches the same admin being
+   * invited twice for the same just-created org, which would itself
+   * be a UI bug.
+   */
+  async createTenant(
+    input: CreateTenantRequest,
+    ctx: VendorAdminContext,
+  ): Promise<CreateTenantResponse> {
+    return this.withTxn(async (client) => {
+      // Resolve plan first — fail before we write the org row if the plan
+      // doesn't exist, to keep the rollback shallow.
+      const planRes = await client.query<{ id: string; code: PlanCode; name: string }>(
+        `SELECT id, code, name FROM plans WHERE code = $1 AND is_active = true`,
+        [input.planCode],
+      );
+      const plan = planRes.rows[0];
+      if (!plan) {
+        throw new ValidationError(
+          `plan "${input.planCode}" not found or inactive`,
+          { planCode: input.planCode },
+        );
+      }
+
+      const trialEndsAt = input.trialEndsAt ? new Date(input.trialEndsAt) : null;
+      const orgStatus = trialEndsAt ? "TRIAL" : "ACTIVE";
+
+      // 1. Org
+      const orgRes = await client.query<{
+        id: string;
+        name: string;
+        status: string;
+        trial_ends_at: Date | null;
+        created_at: Date;
+      }>(
+        `INSERT INTO organizations (name, status, trial_ends_at)
+         VALUES ($1, $2, $3)
+         RETURNING id, name, status, trial_ends_at, created_at`,
+        [input.name, orgStatus, trialEndsAt],
+      );
+      const org = orgRes.rows[0]!;
+
+      // 2. Subscription. Period is a fixed 30-day window from now; billing
+      // integration will replace this with the real period from Stripe.
+      const periodEnd = new Date(Date.now() + SUBSCRIPTION_PERIOD_DAYS * 86400_000);
+      const subStatus = trialEndsAt ? "TRIALING" : "ACTIVE";
+      const subRes = await client.query<{
+        id: string;
+        status: string;
+        current_period_end: Date;
+      }>(
+        `INSERT INTO subscriptions
+           (org_id, plan_id, status, current_period_end, trial_ends_at)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, status, current_period_end`,
+        [org.id, plan.id, subStatus, periodEnd, trialEndsAt],
+      );
+      const sub = subRes.rows[0]!;
+
+      // 3. Invitation. invited_by is NULL because the vendor admin isn't
+      // a row in users (which is per-tenant). The schema allows this
+      // (FK is ON DELETE SET NULL).
+      const rawToken = crypto.randomBytes(32).toString("hex");
+      const tokenHash = sha256Hex(rawToken);
+      const inviteExpiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 3600_000);
+      const inviteMetadata: Record<string, unknown> = {
+        provisionedByVendorAdmin: true,
+        ...(input.adminName ? { name: input.adminName } : {}),
+      };
+      let inviteRow: { id: string; email: string; expires_at: Date };
+      try {
+        const inviteRes = await client.query<{
+          id: string;
+          email: string;
+          expires_at: Date;
+        }>(
+          `INSERT INTO user_invitations
+             (org_id, email, role_id, token_hash, invited_by, expires_at, metadata)
+           VALUES ($1, lower($2), 'SUPER_ADMIN', $3, NULL, $4, $5)
+           RETURNING id, email, expires_at`,
+          [org.id, input.adminEmail, tokenHash, inviteExpiresAt, inviteMetadata],
+        );
+        inviteRow = inviteRes.rows[0]!;
+      } catch (err) {
+        if (
+          err && typeof err === "object" && "code" in err &&
+          (err as { code: string }).code === "23505"
+        ) {
+          // Should be unreachable for a freshly-created org, but kept as
+          // a safety net so we surface the right HTTP status.
+          throw new ConflictError(
+            "an active invitation for this email already exists for the new tenant",
+          );
+        }
+        throw err;
+      }
+
+      // 4. Audit. Inside the same transaction so a failed audit rolls the
+      // tenant creation back too.
+      await this.audit(client, ctx, "tenant.create", {
+        targetId: org.id,
+        orgId: org.id,
+        details: {
+          name: org.name,
+          planCode: plan.code,
+          status: org.status,
+          trialEndsAt: org.trial_ends_at?.toISOString() ?? null,
+          adminEmail: input.adminEmail.toLowerCase(),
+          inviteId: inviteRow.id,
+        },
+      });
+
+      const includeDevUrl = this.deps.includeDevAcceptUrl === true;
+      return {
+        tenant: {
+          id: org.id,
+          name: org.name,
+          status: org.status as CreateTenantResponse["tenant"]["status"],
+          trialEndsAt: org.trial_ends_at?.toISOString() ?? null,
+          createdAt: org.created_at.toISOString(),
+        },
+        subscription: {
+          id: sub.id,
+          planCode: plan.code,
+          status: sub.status,
+          currentPeriodEnd: sub.current_period_end.toISOString(),
+        },
+        invitation: {
+          id: inviteRow.id,
+          email: inviteRow.email,
+          expiresAt: inviteRow.expires_at.toISOString(),
+        },
+        ...(includeDevUrl && this.deps.webOrigin
+          ? {
+              devAcceptUrl: (() => {
+                const u = new URL("/auth/accept-invite", this.deps.webOrigin);
+                u.searchParams.set("token", rawToken);
+                return u.toString();
+              })(),
+            }
+          : {}),
+      };
+    });
   }
 
   // ─── Suspend ──────────────────────────────────────────────────────────

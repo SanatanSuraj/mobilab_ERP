@@ -18,6 +18,8 @@
  */
 
 import type {
+  CreateTenantRequest,
+  CreateTenantResponse,
   VendorAuditListResponse,
   VendorLoginRequest,
   VendorLoginResponse,
@@ -204,6 +206,22 @@ export async function apiVendorGetTenant(
     });
   }
   return found;
+}
+
+/**
+ * Provision a brand-new tenant. Returns the org row, the just-created
+ * subscription, and the customer admin invitation. In dev the response
+ * includes `devAcceptUrl` so the vendor admin can hand the link over
+ * without SMTP wired up — production omits it.
+ */
+export async function apiVendorCreateTenant(
+  req: CreateTenantRequest,
+): Promise<CreateTenantResponse> {
+  const res = await vendorFetch(`/vendor-admin/tenants`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+  return (await parseJsonOrThrow(res)) as CreateTenantResponse;
 }
 
 export async function apiVendorSuspendTenant(

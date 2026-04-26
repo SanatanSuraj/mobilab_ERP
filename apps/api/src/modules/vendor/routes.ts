@@ -22,6 +22,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   VendorLoginRequestSchema,
+  CreateTenantRequestSchema,
   SuspendTenantRequestSchema,
   ReinstateTenantRequestSchema,
   ChangePlanRequestSchema,
@@ -112,6 +113,24 @@ export async function registerVendorRoutes(
   );
 
   const orgIdParamSchema = z.object({ orgId: z.string().uuid() });
+
+  // Provision a brand-new tenant. Vendor-admin gated; the response
+  // carries an invite link the vendor admin hands to the customer's
+  // primary admin (dev only — production sends email).
+  app.post(
+    "/vendor-admin/tenants",
+    { preHandler: [vendorGuard] },
+    async (req, reply) => {
+      const admin = requireVendorAdmin(req);
+      const body = CreateTenantRequestSchema.parse(req.body ?? {});
+      const result = await opts.adminService.createTenant(body, {
+        vendorAdminId: admin.id,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+      return reply.code(201).send(result);
+    }
+  );
 
   app.post(
     "/vendor-admin/tenants/:orgId/suspend",

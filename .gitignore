@@ -56,3 +56,5 @@ worker_node.log
 listen-notify_node.log
 web_node.log
 api_4001_v2.log.claude/worktrees/
+# Added by code-review-graph
+.code-review-graph/
