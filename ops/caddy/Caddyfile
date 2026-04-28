@@ -1,22 +1,22 @@
-# Caddy reverse proxy + automatic HTTPS for the Instigenie ERP stack.
+# Caddy reverse proxy + automatic HTTPS for the Instigenie ERP api.
 #
-# Two virtual hosts: web app + JSON API. Caddy automatically obtains
-# Let's Encrypt certificates for any real public hostname (port 80 + 443
-# must be reachable from the internet for the ACME HTTP-01 challenge).
+# Single virtual host: the JSON API. The Next.js frontend is hosted
+# on Vercel (apps/web/vercel.json) so Caddy doesn't proxy it here —
+# Vercel handles its own TLS for the web origin.
 #
 # Variables come from the compose env block:
-#   WEB_HOSTNAME   user-facing app host       (default: localhost)
 #   API_HOSTNAME   user-facing JSON API host  (default: api.localhost)
 #   ACME_EMAIL     Let's Encrypt registration email (recommended)
 #
 # Local development:
-#   - Defaults to `localhost` and `api.localhost`. Caddy generates
-#     self-signed certs from its built-in internal CA. Install the
-#     root once with `caddy trust` (or accept the browser warning).
+#   - Defaults to `api.localhost`. Caddy generates a self-signed cert
+#     from its built-in internal CA. Install the root once with
+#     `caddy trust` (or accept the browser warning).
 #
 # Production:
-#   - Point real DNS at the box (A or AAAA record), set WEB_HOSTNAME
-#     and API_HOSTNAME, and Caddy fetches Let's Encrypt certs at boot.
+#   - Point real DNS at the box (A or AAAA record), set API_HOSTNAME,
+#     and Caddy fetches Let's Encrypt certs at boot. Port 80 + 443
+#     must be reachable from the internet for the ACME HTTP-01 challenge.
 #
 # This file is hot-reloaded — `docker exec caddy caddy reload --config
 # /etc/caddy/Caddyfile` after edits, no full restart needed.
@@ -30,32 +30,6 @@
 	# is enabled below.
 	servers {
 		trusted_proxies static private_ranges
-	}
-}
-
-{$WEB_HOSTNAME:localhost} {
-	encode zstd gzip
-
-	# Forward client info so the api can see real IPs in logs / rate
-	# limits even though it's two hops behind the wire.
-	reverse_proxy web:3000 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-Proto {scheme}
-	}
-
-	# Standard browser hardening. CSP is intentionally loose because
-	# Next.js + the workspace UI use inline styles in places — tighten
-	# this once a CSP audit pass is done.
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		X-Frame-Options "DENY"
-	}
-
-	log {
-		output stdout
-		format json
 	}
 }
 
