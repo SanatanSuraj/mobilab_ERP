@@ -39,15 +39,24 @@ import {
 } from "./sales-order-dispatched.js";
 import { observeSettlement } from "./payment-received.js";
 import { makeSendInvitationEmail } from "./user-invite-created.js";
+import { createMailer } from "../email/mailer.js";
 import { loadEnv } from "../env.js";
 import type { HandlerEntry } from "./types.js";
 
-// The user.invite.created handler needs the web origin to render accept
-// URLs. Build the handler once at module load from the same env source the
-// rest of the worker uses, then register it below like any other entry.
-// (No DI wiring needed: webOrigin is static per process.)
+// The user.invite.created handler needs the web origin (for accept URLs)
+// and a mailer (for the actual SMTP/Resend send). Both are static per
+// process, so build them once at module load. The mailer auto-returns
+// SKIPPED_DEV when RESEND_API_KEY is absent or EMAIL_DISABLED=true.
+const _env = loadEnv();
 const sendInvitationEmail = makeSendInvitationEmail({
-  webOrigin: loadEnv().webOrigin,
+  webOrigin: _env.webOrigin,
+  mailer: createMailer({
+    smtp: _env.smtp,
+    resendApiKey: _env.resendApiKey,
+    emailDisabled: _env.emailDisabled,
+  }),
+  mailFrom: _env.mailFrom,
+  mailReplyTo: _env.mailReplyTo,
 });
 
 export const HANDLER_CATALOGUE: HandlerEntry[] = [
@@ -148,8 +157,9 @@ export const HANDLER_CATALOGUE: HandlerEntry[] = [
   },
 
   // user.invite.created → admin.sendInvitationEmail
-  // Writes a row to invitation_emails (dev mailbox). Production swaps this
-  // for a transactional-email adapter; the handler contract is unchanged.
+  // Calls the mailer (Resend in prod, dev stub otherwise) and records the
+  // dispatch attempt in `invitation_emails`. Single source of truth for
+  // both tenant-side admin invites and vendor-side tenant onboarding.
   {
     eventType: "user.invite.created",
     handlerName: "admin.sendInvitationEmail",

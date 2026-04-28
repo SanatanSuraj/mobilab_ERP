@@ -1,0 +1,435 @@
+# Instigenie ERP — production single-host stack.
+#
+# Scope: app containers + their direct dependencies (Postgres, Redis-BULL,
+# Redis-CACHE). Excluded by request: PgBouncer, MinIO, OpenTelemetry
+# collector, Prometheus, Grafana, NGINX/TLS-terminator. For real production
+# you should add at least: a TLS-terminating reverse proxy in front of
+# `web` and `api`, an object store for PDFs (MinIO or S3), and a metrics
+# stack. The §11 topology in ARCHITECTURE.md is the canonical reference.
+#
+# Startup order (strict; enforced via depends_on + healthchecks):
+#   1. postgres            (no deps; pg_cron preloaded)
+#   2. redis-bull          (noeviction — required by BullMQ)
+#   3. redis-cache         (allkeys-lru)
+#   4. listen-notify       (after postgres + redis-bull; uses DIRECT PG URL,
+#                           NEVER through a pooler — assertDirectPgUrl() will
+#                           exit fatally on boot if you point it at PgBouncer)
+#   5. worker              (after pg + both redises + listen-notify)
+#   6. api                 (after pg + both redises + worker)
+#   7. web                 (after api)
+#
+# Required environment (place in .env or pass via your secrets manager —
+# do NOT commit secrets):
+#
+#   VERSION                  image tag, e.g. v0.1.0 or git SHA
+#   POSTGRES_DB              db name
+#   POSTGRES_USER            db user
+#   POSTGRES_PASSWORD        db password
+#   REDIS_BULL_PASSWORD      Redis-BULL AUTH (avoid : / @ in the value)
+#   REDIS_CACHE_PASSWORD     Redis-CACHE AUTH (avoid : / @ in the value)
+#   JWT_SECRET               ≥ 32-byte random; rotate via packages/auth flow
+#   API_PUBLIC_URL           e.g. https://api.example.com  (CORS + browser fetch)
+#   WEB_PUBLIC_URL           e.g. https://app.example.com  (CORS allow-list)
+#
+# Optional:
+#   LOG_LEVEL                default info
+#   WORKER_CONCURRENCY       default 4
+#   API_PORT, WEB_PORT       host ports to publish (default 4000, 3000)
+#   POSTGRES_IMAGE           default instigenie/postgres:16-pgcron
+#                            (build first: docker build -t instigenie/postgres:16-pgcron ops/postgres)
+#
+# Deploy:
+#   docker compose -f ops/compose/docker-compose.prod.yml --env-file .env up -d
+#
+# Tear down (preserves volumes):
+#   docker compose -f ops/compose/docker-compose.prod.yml down
+#
+# Tear down + wipe data (DESTRUCTIVE):
+#   docker compose -f ops/compose/docker-compose.prod.yml down -v
+
+name: instigenie-prod
+
+# ─── Shared snippets (YAML anchors) ──────────────────────────────────────
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app-base: &app-base
+  restart: always
+  logging: *default-logging
+  networks: [erp]
+  # Run as the non-root user baked into the Dockerfiles. uid/gid 1001
+  # matches `addgroup -g 1001` in ops/docker/*.Dockerfile.
+  user: "1001:1001"
+
+# ─── Services ────────────────────────────────────────────────────────────
+services:
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-instigenie/postgres:16-pgcron}
+    container_name: erp-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      # scram-sha-256 is the production auth method; md5 is for dev only.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_cron
+      -c cron.database_name=${POSTGRES_DB}
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c wal_level=logical
+      -c log_statement=none
+      -c log_min_duration_statement=500
+      -c log_connections=on
+      -c log_disconnections=on
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+    networks: [erp]
+
+  redis-bull:
+    # BullMQ MUST run with maxmemory-policy=noeviction (job state cannot be
+    # silently evicted). Boot-time assertBullRedisNoeviction() in workers
+    # and listen-notify will exit fatally if this drifts.
+    image: redis:7-alpine
+    container_name: erp-redis-bull
+    restart: always
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory-policy noeviction
+      --requirepass ${REDIS_BULL_PASSWORD:?REDIS_BULL_PASSWORD required}
+    volumes:
+      - redis-bull-data:/data
+    environment:
+      REDIS_BULL_PASSWORD: ${REDIS_BULL_PASSWORD}
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "redis-cli -a $${REDIS_BULL_PASSWORD} --no-auth-warning ping | grep -q PONG"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+    networks: [erp]
+
+  redis-cache:
+    # Cache only; LRU eviction, no AOF, no snapshots.
+    image: redis:7-alpine
+    container_name: erp-redis-cache
+    restart: always
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory ${REDIS_CACHE_MAXMEMORY:-512mb}
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_CACHE_PASSWORD:?REDIS_CACHE_PASSWORD required}
+    environment:
+      REDIS_CACHE_PASSWORD: ${REDIS_CACHE_PASSWORD}
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "redis-cli -a $${REDIS_CACHE_PASSWORD} --no-auth-warning ping | grep -q PONG"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+    networks: [erp]
+
+  listen-notify:
+    <<: *app-base
+    # Build locally if the tagged image isn't present. Compose will tag
+    # the build output as `instigenie/listen-notify:${VERSION}`, so a
+    # subsequent `up` reuses the cached image until you `--build` again.
+    build:
+      context: ../..
+      dockerfile: ops/docker/listen-notify.Dockerfile
+    image: ${LISTEN_NOTIFY_IMAGE:-instigenie/listen-notify:${VERSION:?VERSION required}}
+    container_name: erp-listen-notify
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LISTEN_NOTIFY_PORT: 4002
+      # CRITICAL: direct PG URL — must NEVER route through PgBouncer or any
+      # pooler. assertDirectPgUrl() (packages/db/src/direct-url.ts) exits
+      # fatally on boot if it does. The hostname `postgres` is the service
+      # name in this compose, port 5432 is the in-network postgres port.
+      DATABASE_DIRECT_URL: ${DATABASE_DIRECT_URL:?DATABASE_DIRECT_URL required}
+      REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-bull:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+process.env.LISTEN_NOTIFY_PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    <<: *app-base
+    build:
+      context: ../..
+      dockerfile: ops/docker/worker.Dockerfile
+    image: ${WORKER_IMAGE:-instigenie/worker:${VERSION:?VERSION required}}
+    container_name: erp-worker
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      WORKER_PORT: 4001
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      # The worker process can use a pooled URL safely; this compose has no
+      # pooler so it points at postgres directly via the same DSN.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+      REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:?REDIS_CACHE_URL required}
+      # Email backend — see apps/worker/src/email/mailer.ts. Selection at
+      # boot: SMTP_HOST takes priority, else RESEND_API_KEY, else
+      # SKIPPED_DEV stub. EMAIL_DISABLED=true forces the stub.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_DISABLED: ${EMAIL_DISABLED:-false}
+      MAIL_FROM: ${MAIL_FROM:-InstiGenie <onboarding@resend.dev>}
+      MAIL_REPLY_TO: ${MAIL_REPLY_TO:-}
+      # Web origin used by the invite handler to render accept URLs in the
+      # email body. Should match WEB_PUBLIC_URL in production.
+      WEB_ORIGIN: ${WEB_PUBLIC_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-bull:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      listen-notify:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+process.env.WORKER_PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  api:
+    <<: *app-base
+    build:
+      context: ../..
+      dockerfile: ops/docker/api.Dockerfile
+    image: ${API_IMAGE:-instigenie/api:${VERSION:?VERSION required}}
+    container_name: erp-api
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+      REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:?REDIS_CACHE_URL required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required (≥32 bytes random)}
+      # Must match VendorAdminClaimsSchema literal in
+      # packages/contracts/src/vendor-admin.ts (`iss: "instigenie-api"`).
+      # Changing this without updating the schema will break vendor logins.
+      JWT_ISSUER: ${JWT_ISSUER:-instigenie-api}
+      ACCESS_TOKEN_TTL_SEC: ${ACCESS_TOKEN_TTL_SEC:-900}
+      ESIGNATURE_PEPPER: ${ESIGNATURE_PEPPER:?ESIGNATURE_PEPPER required (≥32 chars)}
+      # WEB_ORIGIN is the CORS allow-list value the api consumes (see
+      # apps/api/src/env.ts). Defaults to localhost web for single-host
+      # bring-up.
+      WEB_ORIGIN: ${WEB_PUBLIC_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-bull:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+    ports:
+      # Bind to localhost only — front this with a TLS-terminating proxy
+      # (NGINX/Traefik/Caddy) instead of exposing 0.0.0.0:4000 to the
+      # internet. Override with API_BIND=0.0.0.0 if your network is
+      # already segmented.
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-4000}:4000"
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  web:
+    <<: *app-base
+    build:
+      context: ../..
+      dockerfile: ops/docker/web.Dockerfile
+    image: ${WEB_IMAGE:-instigenie/web:${VERSION:?VERSION required}}
+    container_name: erp-web
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: 1
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      # Browser-side fetches go to the public API URL (not the in-network
+      # `http://api:4000` address), because this var is inlined at build
+      # time AND read in the browser. If you change it, rebuild the web
+      # image — Next.js bakes NEXT_PUBLIC_* into the client bundle.
+      NEXT_PUBLIC_API_BASE_URL: ${API_PUBLIC_URL:-http://localhost:4000}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+process.env.PORT+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # ─── Reverse proxy + auto-HTTPS ─────────────────────────────────────────
+  # Caddy terminates TLS for both web and api. Set WEB_HOSTNAME and
+  # API_HOSTNAME to real DNS names + point ports 80/443 at this host
+  # and certificates are obtained from Let's Encrypt automatically.
+  # Defaults are localhost/api.localhost (self-signed via Caddy's
+  # internal CA) so the stack still works on a dev machine.
+  caddy:
+    image: caddy:2-alpine
+    container_name: erp-caddy
+    restart: always
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    environment:
+      WEB_HOSTNAME: ${WEB_HOSTNAME:-localhost}
+      API_HOSTNAME: ${API_HOSTNAME:-api.localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@localhost}
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
+    networks: [erp]
+
+  # ─── Daily Postgres backup ──────────────────────────────────────────────
+  # Runs pg_dump once per day, gzips, retains BACKUP_RETENTION_DAYS files.
+  # Volume `pg-backups` is intentionally separate from `pg-data` so a
+  # bad volume on the data side doesn't take backups with it. For real
+  # off-host durability, mount this volume to S3-via-rclone or a separate
+  # disk via `driver: local, opts: type=none, device=/mnt/backups`.
+  backup:
+    image: postgres:16-alpine
+    container_name: erp-backup
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - pg-backups:/backups
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "[backup] retention=$${BACKUP_RETENTION_DAYS}d interval=$${BACKUP_INTERVAL_SECONDS}s target=/backups"
+        while true; do
+          TS=$$(date -u +%Y%m%dT%H%M%SZ)
+          FILE=/backups/instigenie-$$TS.sql.gz
+          echo "[backup $$TS] starting"
+          if PGPASSWORD=$$POSTGRES_PASSWORD pg_dump \
+               -h $$POSTGRES_HOST -U $$POSTGRES_USER -d $$POSTGRES_DB \
+               --no-owner --no-acl --format=plain | gzip -9 > $$FILE; then
+            SIZE=$$(stat -c%s $$FILE 2>/dev/null || stat -f%z $$FILE)
+            echo "[backup $$TS] OK file=$$FILE size=$$SIZE"
+          else
+            echo "[backup $$TS] FAILED — removing partial $$FILE"
+            rm -f $$FILE
+          fi
+          # Prune old archives. find -mtime +N matches files modified more
+          # than N*24h ago, so retention=14 keeps ~15 daily snapshots.
+          find /backups -type f -name 'instigenie-*.sql.gz' \
+            -mtime +$${BACKUP_RETENTION_DAYS} -delete 2>/dev/null || true
+          sleep $${BACKUP_INTERVAL_SECONDS}
+        done
+    logging: *default-logging
+    networks: [erp]
+
+# ─── Volumes ─────────────────────────────────────────────────────────────
+volumes:
+  pg-data:
+    name: instigenie-prod-pg-data
+  pg-backups:
+    name: instigenie-prod-pg-backups
+  redis-bull-data:
+    name: instigenie-prod-redis-bull-data
+  caddy-data:
+    name: instigenie-prod-caddy-data
+  caddy-config:
+    name: instigenie-prod-caddy-config
+  # redis-cache: no volume — cache is ephemeral by design.
+
+# ─── Networks ────────────────────────────────────────────────────────────
+networks:
+  erp:
+    name: instigenie-prod
+    driver: bridge

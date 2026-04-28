@@ -41,7 +41,7 @@ import { withOrg } from "@instigenie/db";
 import {
   verifyQcCertChain,
   type VerifyChainResult,
-} from "@instigenie/api/qc/cert-hash";
+} from "@instigenie/qc/cert-hash";
 
 export type AuditHashchainTrigger = "SCHEDULED" | "MANUAL";
 

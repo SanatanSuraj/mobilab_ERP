@@ -18,6 +18,7 @@
 
 import crypto from "node:crypto";
 import type pg from "pg";
+import { enqueueOutbox } from "@instigenie/db";
 import { ConflictError, NotFoundError, ValidationError } from "@instigenie/errors";
 import type {
   CreateTenantRequest,
@@ -311,6 +312,33 @@ export class VendorAdminService {
         }
         throw err;
       }
+
+      // 3a. Outbox event so the worker `admin.sendInvitationEmail` handler
+      // dispatches the actual email. Mirrors apps/api admin-users.invite()
+      // — same event_type, same payload shape, same idempotency-key style.
+      // Inside the same txn as the user_invitations insert so either both
+      // land or both roll back.
+      await enqueueOutbox(client, {
+        aggregateType: "user_invitation",
+        aggregateId: inviteRow.id,
+        eventType: "user.invite.created",
+        payload: {
+          invitationId: inviteRow.id,
+          orgId: org.id,
+          orgName: org.name,
+          recipient: inviteRow.email,
+          roleId: "SUPER_ADMIN",
+          rawToken,
+          expiresAt: inviteRow.expires_at.toISOString(),
+          // Vendor admins aren't rows in `users`, so there's no inviter UUID
+          // to record. The handler renders "A teammate" when invitedByName
+          // is null, which is appropriate here.
+          invitedByUserId: null,
+          invitedByName: null,
+          inviteeNameHint: input.adminName ?? null,
+        },
+        idempotencyKey: `user.invite.created:${inviteRow.id}`,
+      });
 
       // 4. Audit. Inside the same transaction so a failed audit rolls the
       // tenant creation back too.

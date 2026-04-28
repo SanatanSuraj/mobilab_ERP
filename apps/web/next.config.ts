@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Standalone output bundles only the deps Next traced as needed at runtime,
+  // so the production Docker image (ops/docker/web.Dockerfile) can ship just
+  // .next/standalone + .next/static + public — no node_modules layer.
+  output: "standalone",
+
   // @instigenie/contracts is consumed as a precompiled workspace package:
   // its package.json "exports" map points at ./dist/*.js (with ./dist/*.d.ts
   // for types), so we do NOT need `transpilePackages` here. Turbopack is

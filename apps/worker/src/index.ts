@@ -118,13 +118,22 @@ async function main(): Promise<void> {
   });
 
   const mailer = createMailer({
+    smtp: env.smtp,
     resendApiKey: env.resendApiKey,
     emailDisabled: env.emailDisabled,
   });
   if (env.emailDisabled) {
     log.warn(
       {},
-      "email sending is DISABLED (set RESEND_API_KEY + EMAIL_DISABLED=false to enable)",
+      "email sending is DISABLED (configure SMTP_HOST or RESEND_API_KEY, and ensure EMAIL_DISABLED!=true)",
+    );
+  } else {
+    log.info(
+      {
+        backend: env.smtp ? "smtp" : "resend",
+        ...(env.smtp ? { smtpHost: env.smtp.host, smtpPort: env.smtp.port } : {}),
+      },
+      "email backend configured",
     );
   }
 

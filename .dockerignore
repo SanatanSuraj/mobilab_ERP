@@ -1,0 +1,53 @@
+# Anything not in this list is sent to the Docker daemon as build context.
+# Keep this tight — every byte here slows every build.
+
+# VCS
+.git
+.github
+
+# Editor / tooling state
+.claude
+.code-review-graph
+.cursor
+.cursorrules
+.kiro
+.opencode.json
+.windsurfrules
+.turbo
+**/.DS_Store
+
+# Installed dependencies — Dockerfiles install fresh inside the image.
+**/node_modules
+
+# Build outputs — Dockerfiles rebuild from source.
+**/dist
+**/.next
+**/.turbo
+**/tsconfig.tsbuildinfo
+
+# Local env / secrets — never bake into images.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Test artifacts
+coverage
+.vitest
+
+# Local infra state
+ops/compose/data
+ops/postgres/data
+
+# Logs
+*.log
+api*.log
+
+# Docs that shouldn't bloat the image
+docs
+ARCHITECTURE.md
+TESTING_PLAN.md
+automate.md
+scratch

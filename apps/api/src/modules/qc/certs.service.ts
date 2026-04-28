@@ -45,7 +45,7 @@ import { planPagination } from "../shared/pagination.js";
 import { certsRepo } from "./certs.repository.js";
 import { inspectionsRepo } from "./inspections.repository.js";
 import { nextQcNumber } from "./numbering.js";
-import { computeCertHash } from "./cert-hash.js";
+import { computeCertHash } from "@instigenie/qc/cert-hash";
 import { requireUser } from "../../context/request-context.js";
 
 type QcCertListQuery = z.infer<typeof QcCertListQuerySchema>;

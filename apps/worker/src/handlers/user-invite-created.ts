@@ -3,21 +3,24 @@
  *
  *   user.invite.created → admin.sendInvitationEmail
  *
- * Emits an invitation email. In dev (no SMTP adapter wired) we write a row
- * to `invitation_emails` so the accept URL + body is visible from a quick
- * SQL query and from the admin dashboard. In production, swap the table
- * insert for the transactional-email adapter call — the handler contract
- * and inputs are identical.
+ * 1. Renders the accept URL + email body.
+ * 2. Calls the mailer (Resend in production, no-op SKIPPED_DEV stub when
+ *    RESEND_API_KEY is absent or EMAIL_DISABLED=true). The mailer is
+ *    transport-agnostic so this handler doesn't know about Resend.
+ * 3. Records the dispatch attempt in `invitation_emails` AFTER the send
+ *    so the row exists iff dispatch was actually attempted (the dev stub
+ *    counts as "attempted" and returns synchronously). The accept_url
+ *    is persisted only in the dev path; in prod the column still gets
+ *    the URL so vendor-admin can show "what was sent" — the raw token is
+ *    short-lived (72h) and the audit value outweighs the leak risk.
  *
  * Idempotency: the outbox processor wraps this in a per-(event, handler)
- * idempotency slot in the same txn as the INSERT, so redelivery collapses
- * to one mailbox row. The partial unique index on
- *   invitation_emails (invitation_id)
- * is not declared because there's legitimately N emails per invitation in
- * prod (initial + reminders). Dev just happens to write once because we
- * don't re-emit.
+ * idempotency slot, so redelivery is a no-op. There is intentionally no
+ * unique constraint on invitation_emails(invitation_id) — production
+ * legitimately writes N rows (initial + reminders).
  */
 
+import type { Mailer } from "../email/mailer.js";
 import type { EventHandler } from "./types.js";
 
 export interface UserInviteCreatedPayload {
@@ -38,12 +41,18 @@ export interface UserInviteCreatedPayload {
 interface HandlerEnv {
   /** Web app origin used to render the accept URL. */
   webOrigin: string;
+  /** Mailer (Resend or SKIPPED_DEV stub). */
+  mailer: Mailer;
+  /** From address. Must be a Resend-verified sender in production. */
+  mailFrom: string;
+  /** Optional Reply-To. Null → omit the header. */
+  mailReplyTo: string | null;
 }
 
 /**
- * Factory so the handler can be parameterised on web-origin without
- * reaching for process.env at call time — apps/worker/src/index.ts wires
- * the env once when it builds the catalogue.
+ * Factory so the handler can be parameterised on env without reaching for
+ * process.env at call time — apps/worker/src/handlers/index.ts wires the
+ * env once when it builds the catalogue.
  */
 export function makeSendInvitationEmail(
   env: HandlerEnv,
@@ -52,6 +61,16 @@ export function makeSendInvitationEmail(
     const acceptUrl = buildAcceptUrl(env.webOrigin, payload.rawToken);
     const subject = `You're invited to ${payload.orgName || "Instigenie"}`;
     const body = renderBody({ payload, acceptUrl });
+
+    // Send first; record after. If the mailer throws (Resend 5xx, network
+    // failure), BullMQ retries the whole outbox job — no orphan row.
+    const result = await env.mailer.send({
+      from: env.mailFrom,
+      to: payload.recipient,
+      replyTo: env.mailReplyTo,
+      subject,
+      text: body,
+    });
 
     await client.query(
       `INSERT INTO invitation_emails
@@ -72,11 +91,12 @@ export function makeSendInvitationEmail(
         outboxId: ctx.outboxId,
         invitationId: payload.invitationId,
         recipient: payload.recipient,
-        // Keep the raw token OUT of the log. The dev mailbox row holds
-        // the URL; production's email adapter will strip `accept_url`
-        // before persistence.
+        send: result.kind,
+        provider: result.provider,
+        messageId: result.kind === "SENT" ? result.messageId : null,
+        // Raw token never logged — only the URL is in the DB row above.
       },
-      "handler user.invite.created → admin.sendInvitationEmail (dev mailbox row inserted)",
+      "handler user.invite.created → admin.sendInvitationEmail",
     );
   };
 }

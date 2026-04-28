@@ -3,13 +3,29 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./logger": "./src/logger.ts",
-    "./tracing": "./src/tracing.ts",
-    "./metrics": "./src/metrics.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./logger": {
+      "types": "./dist/logger.d.ts",
+      "import": "./dist/logger.js",
+      "default": "./dist/logger.js"
+    },
+    "./tracing": {
+      "types": "./dist/tracing.d.ts",
+      "import": "./dist/tracing.js",
+      "default": "./dist/tracing.js"
+    },
+    "./metrics": {
+      "types": "./dist/metrics.d.ts",
+      "import": "./dist/metrics.js",
+      "default": "./dist/metrics.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -33,5 +49,8 @@
     "@instigenie/config": "workspace:*",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }

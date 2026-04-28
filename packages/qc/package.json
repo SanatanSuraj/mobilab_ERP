@@ -1,5 +1,5 @@
 {
-  "name": "@instigenie/cache",
+  "name": "@instigenie/qc",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,23 +10,31 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./cert-hash": {
+      "types": "./dist/cert-hash.d.ts",
+      "import": "./dist/cert-hash.js",
+      "default": "./dist/cert-hash.js"
     }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "lint": "eslint src"
   },
-  "dependencies": {
-    "ioredis": "^5.4.1"
+  "peerDependencies": {
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@instigenie/config": "workspace:*",
+    "@types/pg": "^8.11.10",
+    "pg": "^8.13.1",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"
-  },
-  "files": [
-    "dist"
-  ]
+  }
 }
