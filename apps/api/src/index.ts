@@ -110,6 +110,10 @@ import { AdminAuditService } from "./modules/admin-audit/service.js";
 import { registerAdminAuditRoutes } from "./modules/admin-audit/routes.js";
 import { AdminUsersService } from "./modules/admin-users/service.js";
 import { registerAdminUsersRoutes } from "./modules/admin-users/routes.js";
+import { PasswordResetService } from "./modules/password-reset/service.js";
+import { registerPasswordResetRoutes } from "./modules/password-reset/routes.js";
+import { VendorPasswordResetService } from "./modules/vendor-password-reset/service.js";
+import { registerVendorPasswordResetRoutes } from "./modules/vendor-password-reset/routes.js";
 import { OnboardingService } from "./modules/onboarding/service.js";
 import { registerOnboardingRoutes } from "./modules/onboarding/routes.js";
 import { EsignatureService } from "./modules/esignature/service.js";
@@ -229,7 +233,12 @@ export async function buildApp(): Promise<BuiltApp> {
 
   // Sprint 1B — tenant lifecycle gate. Shared singleton: AuthService uses
   // it at token-issue time, AuthGuard uses it on every request.
-  const tenantStatus = new TenantStatusService({ pool });
+  //
+  // Cache wiring (added 2026-05): the row is memoized in Redis with a
+  // 30s TTL. Eliminates a DB round-trip on every authenticated request
+  // after the first within the window. See service.ts header for the
+  // eventual-consistency rationale and invalidate() for the override.
+  const tenantStatus = new TenantStatusService({ pool, cache });
 
   // Sprint 1C — feature-flag read path. Resolver hits Postgres; FeatureFlag
   // caches the FeatureSnapshot blob in Redis for 60s. Every /crm/* request
@@ -256,6 +265,10 @@ export async function buildApp(): Promise<BuiltApp> {
     // counter — separate logical Redis DB from BullMQ so a queue flush
     // never wipes lockout state.
     lockoutStore: cache.client,
+    // /auth/me cache (60s TTL). Hits on every page mount; caching here
+    // eliminates the users + user_roles roundtrip on the common path.
+    // See AuthService.invalidateMe for the post-write override.
+    cache,
   });
 
   // E-signature primitive — Phase 4 §4.2 / §9.5. Shared across any
@@ -500,6 +513,78 @@ export async function buildApp(): Promise<BuiltApp> {
     }),
   });
 
+  // ─── Per-credential rate-limit configs for unauth surfaces ─────────────────
+  //
+  // The global 300/min/IP limiter above is fine for browsing but laughably
+  // wide for credential-stuffing (300 attempts/min × botnet-scale IPs). These
+  // configs are applied per-route via { config: { rateLimit: ... } } and key
+  // on the email from the request body so the same email can't be hammered
+  // from many IPs simultaneously.
+  //
+  // NOTE: @fastify/rate-limit v10's `app.rateLimit(opts)` returns a marker
+  // preHandler that does nothing on its own — the real per-route override is
+  // the `config.rateLimit` object the route handler reads at registration
+  // time. Pass these objects to the route registrars instead of a preHandler.
+  //
+  // Both fall back to req.ip when the body is missing/malformed so the
+  // limiter still fires on a flood of garbage POSTs.
+  function emailKey(req: import("fastify").FastifyRequest): string {
+    const body = req.body as { email?: unknown } | undefined;
+    const raw = typeof body?.email === "string" ? body.email : null;
+    const email = raw?.trim().toLowerCase();
+    return email && email.length > 0 ? `email:${email}` : `ip:${req.ip ?? "anon"}`;
+  }
+
+  const allowLoadTestBypass = (req: import("fastify").FastifyRequest) =>
+    process.env.NODE_ENV !== "production" &&
+    req.headers["x-load-test-bypass"] === "instigenie-dev-loadtest";
+
+  // Per-route 429 builder. The global one above is set on the plugin
+  // registration; per-route configs do NOT inherit it, so without this
+  // override an exceeded route-level limit throws a generic FastifyError
+  // that the problem handler turns into a 500.
+  const credentialRateLimitErrorResponse = (
+    req: import("fastify").FastifyRequest,
+    ctx: { max: number; ttl: number; after: string },
+  ) => ({
+    type: "https://instigenie.dev/problems/rate_limited",
+    title: "rate_limited",
+    status: 429,
+    detail: `Too many attempts for this account, retry in ${ctx.after}`,
+    instance: req.url,
+    code: "rate_limited",
+    details: { limit: ctx.max, ttl: ctx.ttl, retryAfter: ctx.after },
+  });
+
+  // `hook: "preHandler"` is REQUIRED — @fastify/rate-limit defaults to
+  // onRequest, which fires BEFORE body parsing, so the email-from-body
+  // keyGenerator above would see `req.body === undefined` and fall back
+  // to req.ip every time. preHandler runs after preValidation, so the
+  // body is parsed and emailKey() returns the real per-account key.
+
+  // Login: 5 attempts / minute / email. Tight enough to make brute-force
+  // expensive, loose enough to survive a legit user mis-typing twice.
+  const loginRateLimit = {
+    max: 5,
+    timeWindow: "1 minute",
+    hook: "preHandler",
+    keyGenerator: emailKey,
+    allowList: allowLoadTestBypass,
+    errorResponseBuilder: credentialRateLimitErrorResponse,
+  } as const;
+
+  // Forgot-password: 5 attempts / hour / email. Defends against email-bomb
+  // abuse. The service-layer PasswordResetService also has a 5/hour DB-side
+  // limit; this is a cheaper upstream sieve so the DB never sees the spam.
+  const forgotPasswordRateLimit = {
+    max: 5,
+    timeWindow: "1 hour",
+    hook: "preHandler",
+    keyGenerator: emailKey,
+    allowList: allowLoadTestBypass,
+    errorResponseBuilder: credentialRateLimitErrorResponse,
+  } as const;
+
   registerProblemHandler(app);
 
   // Echo Fastify's per-request `req.id` back to the caller. Without
@@ -620,6 +705,7 @@ export async function buildApp(): Promise<BuiltApp> {
   // ─── Routes ─────────────────────────────────────────────────────────────────
   await registerAuthRoutes(app, {
     service: authService,
+    loginRateLimit,
     guardInternal: {
       tokens,
       expectedAudience: AUDIENCE.internal,
@@ -785,6 +871,22 @@ export async function buildApp(): Promise<BuiltApp> {
     },
   });
 
+  // Password reset — three public (unauthenticated) endpoints. The reset
+  // token in the email IS the auth. Tables touched (user_identities,
+  // password_reset_tokens, refresh_tokens) are global / no-RLS, so the
+  // service uses a bare pool. devResetUrl is appended to the
+  // forgot-password response in non-prod so QA / curl loops can advance
+  // the flow without a real mailbox.
+  const passwordResetService = new PasswordResetService({
+    pool,
+    webOrigin: env.webOrigin,
+    includeDevResetUrl: env.nodeEnv !== "production",
+  });
+  await registerPasswordResetRoutes(app, {
+    service: passwordResetService,
+    forgotPasswordRateLimit,
+  });
+
   // Onboarding — guided post-invite setup wizard. Reuses existing
   // warehouse/item/account/vendor repos for the optional sample-data
   // seed (1 row per resource), all inside one transaction so a
@@ -805,6 +907,22 @@ export async function buildApp(): Promise<BuiltApp> {
     authService: vendorAuthService,
     adminService: vendorAdminService,
     guard: { tokens },
+    loginRateLimit,
+  });
+
+  // Vendor password reset — public endpoints under /vendor-admin/auth/*.
+  // Mirrors the tenant flow but writes/reads vendor.* tables and lands the
+  // user on /vendor-admin/reset-password instead of /auth/reset-password.
+  // Uses the BYPASSRLS vendorPool because vendor schema is global and the
+  // instigenie_vendor role is the only one with write access to it.
+  const vendorPasswordResetService = new VendorPasswordResetService({
+    pool: vendorPool,
+    webOrigin: env.webOrigin,
+    includeDevResetUrl: env.nodeEnv !== "production",
+  });
+  await registerVendorPasswordResetRoutes(app, {
+    service: vendorPasswordResetService,
+    forgotPasswordRateLimit,
   });
 
   // Phase 3 §3.7 — Customer portal surface at /portal/*.
@@ -821,11 +939,20 @@ export async function buildApp(): Promise<BuiltApp> {
   // rejects portal tokens. So "portal tokens blocked from non-/portal/* " is
   // enforced at the JWT layer — no per-route hook needed.
   const portalService = new PortalService({ pool });
-  const portalRateLimit = app.rateLimit({
+  // Per-user 60 rpm cap. Originally wired as a preHandler from
+  // app.rateLimit({...}), which in @fastify/rate-limit v10 returns a
+  // no-op marker — meaning the previous portal limit was silently
+  // disabled. Switched to the per-route `config.rateLimit` shape that
+  // the plugin actually honours. `hook: "preHandler"` runs after the
+  // authGuard's preHandler so req.user is populated for keying.
+  const portalRateLimit = {
     max: 60,
     timeWindow: "1 minute",
-    keyGenerator: (req) => req.user?.id ?? req.ip ?? "anon",
-  });
+    hook: "preHandler",
+    keyGenerator: (req: import("fastify").FastifyRequest) =>
+      req.user?.id ? `user:${req.user.id}` : `ip:${req.ip ?? "anon"}`,
+    errorResponseBuilder: credentialRateLimitErrorResponse,
+  } as const;
   await registerPortalRoutes(app, {
     service: portalService,
     pool,

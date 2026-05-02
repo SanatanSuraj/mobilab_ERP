@@ -28,7 +28,7 @@
  * surface edit affordances that would 409 on save.
  */
 
-import { use, useEffect, useMemo, useState } from "react";
+import { memo, use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -357,14 +357,21 @@ export default function PoDetailPage({
     }
   }
 
-  async function handleDeleteLine(lineId: string): Promise<void> {
-    setActionError(null);
-    try {
-      await deleteLine.mutateAsync(lineId);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Delete failed");
-    }
-  }
+  // useCallback so EditableLineRow's React.memo bail-out keeps the row from
+  // re-rendering on every parent state change (header edits, dialog opens,
+  // etc.). deleteLine is a TanStack Query mutation result whose .mutateAsync
+  // identity is stable, so this dep keeps the callback stable too.
+  const handleDeleteLine = useCallback(
+    async (lineId: string): Promise<void> => {
+      setActionError(null);
+      try {
+        await deleteLine.mutateAsync(lineId);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Delete failed");
+      }
+    },
+    [deleteLine],
+  );
 
   const canSubmit = po.status === "DRAFT" && po.lines.length > 0;
   const canApprove = po.status === "PENDING_APPROVAL";
@@ -827,7 +834,7 @@ export default function PoDetailPage({
                         items={items}
                         editable={editable}
                         updateLine={updateLine}
-                        onDelete={() => handleDeleteLine(line.id)}
+                        onDelete={handleDeleteLine}
                         deleting={deleteLine.isPending}
                       />
                     ))}
@@ -1040,7 +1047,10 @@ type EditableLineRowProps = {
   items: Item[];
   editable: boolean;
   updateLine: ReturnType<typeof useApiUpdatePoLine>;
-  onDelete: () => void;
+  /** Receives line.id so the parent can pass a stable handler reference
+   *  (necessary for the React.memo wrapper below to actually skip
+   *  re-renders when only sibling rows or unrelated parent state change). */
+  onDelete: (lineId: string) => void;
   deleting: boolean;
 };
 
@@ -1053,7 +1063,12 @@ type EditableLineRowProps = {
  * (`poVersion` is passed in to force a re-seed on unrelated header saves
  *  that bump the parent version.)
  */
-function EditableLineRow({
+// Wrapped in React.memo so a parent re-render (header field edit, dialog
+// open/close, totals refresh, etc.) doesn't redundantly re-render every
+// row. With the parent's onDelete now useCallback'd, items referentially
+// stable from useApiItems, and primitive props (editable, deleting,
+// poVersion), the memo bail-out kicks in cleanly.
+const EditableLineRow = memo(function EditableLineRow({
   line,
   poVersion,
   items,
@@ -1243,7 +1258,7 @@ function EditableLineRow({
               variant="ghost"
               className="h-7 w-7 text-red-600"
               disabled={deleting}
-              onClick={onDelete}
+              onClick={() => onDelete(line.id)}
               aria-label={`Delete line ${line.lineNo}`}
               title="Delete line"
             >
@@ -1254,4 +1269,4 @@ function EditableLineRow({
       )}
     </TableRow>
   );
-}
+});

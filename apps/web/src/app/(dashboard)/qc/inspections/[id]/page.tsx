@@ -21,7 +21,7 @@
  * 409 and re-fetch.
  */
 
-import { use, useMemo, useState } from "react";
+import { memo, use, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -117,6 +117,18 @@ export default function QcInspectionDetailPage({
   const completeMutation = useApiCompleteQcInspection(id);
   const updateFinding = useApiUpdateQcFinding(id);
   const issueCert = useApiIssueQcCert();
+
+  // Lifted out of the inline closure on FindingRow's onUpdate prop so the
+  // parent passes a stable handler reference. Without this, every parent
+  // re-render created a new closure per row, defeating React.memo on
+  // FindingRow.
+  const handleUpdateFinding = useCallback(
+    (
+      findingId: string,
+      body: Parameters<FindingRowProps["onUpdate"]>[1],
+    ) => updateFinding.mutateAsync({ findingId, body }),
+    [updateFinding],
+  );
 
   const [completeDialog, setCompleteDialog] = useState<
     null | { verdict: QcVerdict }
@@ -442,12 +454,7 @@ export default function QcInspectionDetailPage({
                       key={f.id}
                       finding={f}
                       locked={isLocked}
-                      onUpdate={(body) =>
-                        updateFinding.mutateAsync({
-                          findingId: f.id,
-                          body,
-                        })
-                      }
+                      onUpdate={handleUpdateFinding}
                     />
                   ))}
                 </tbody>
@@ -530,16 +537,30 @@ export default function QcInspectionDetailPage({
 interface FindingRowProps {
   finding: QcFinding;
   locked: boolean;
-  onUpdate: (body: {
-    actualValue?: string;
-    actualNumeric?: string;
-    actualBoolean?: boolean;
-    result?: QcFindingResult;
-    inspectorNotes?: string;
-  }) => Promise<QcFinding>;
+  /** Receives findingId so the parent can pass a stable handler reference
+   *  (necessary for the React.memo wrapper below to actually skip
+   *  re-renders when only sibling rows or unrelated parent state change). */
+  onUpdate: (
+    findingId: string,
+    body: {
+      actualValue?: string;
+      actualNumeric?: string;
+      actualBoolean?: boolean;
+      result?: QcFindingResult;
+      inspectorNotes?: string;
+    },
+  ) => Promise<QcFinding>;
 }
 
-function FindingRow({ finding, locked, onUpdate }: FindingRowProps) {
+// Wrapped in React.memo so a parent re-render (header status, dialog
+// open/close, etc.) doesn't redundantly re-render every finding row.
+// Each row already maintains its own local edit state, so memo'ing also
+// guarantees in-progress text isn't disturbed by parent re-renders.
+const FindingRow = memo(function FindingRow({
+  finding,
+  locked,
+  onUpdate,
+}: FindingRowProps) {
   const [actual, setActual] = useState<string>(
     finding.actualNumeric ?? finding.actualValue ?? "",
   );
@@ -567,12 +588,12 @@ function FindingRow({ finding, locked, onUpdate }: FindingRowProps) {
   }, [finding]);
 
   const saveField = async (
-    body: Parameters<typeof onUpdate>[0],
+    body: Parameters<typeof onUpdate>[1],
   ): Promise<void> => {
     setRowError(null);
     setSaving(true);
     try {
-      await onUpdate(body);
+      await onUpdate(finding.id, body);
     } catch (err) {
       setRowError(err instanceof Error ? err.message : "save failed");
     } finally {
@@ -702,4 +723,4 @@ function FindingRow({ finding, locked, onUpdate }: FindingRowProps) {
       </td>
     </tr>
   );
-}
+});

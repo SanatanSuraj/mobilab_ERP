@@ -18,12 +18,23 @@
  *   SUSPENDED                              → TenantSuspendedError  (403)
  *   DELETED  OR  deleted_at IS NOT NULL    → TenantDeletedError  (410)
  *
- * One indexed PK lookup per call. No cache yet — add a 10s LRU in front
- * when real load demands it. The query itself is <1ms on pg with a PK
- * equality predicate.
+ * Caching: every authenticated request hits this service via AuthGuard, so
+ * an unindexed status flip from "ACTIVE" → "SUSPENDED" was previously
+ * felt only after the next DB roundtrip (~1-3ms). With the optional
+ * `cache` dep below, the status row is memoized in Redis with a 30s TTL,
+ * cutting the DB hit out of every request after the first.
+ *
+ * Eventual consistency window: ≤ TTL_SEC (30s). A vendor-admin suspend
+ * takes effect on a logged-in user's next request once the cached row
+ * expires. Acceptable because vendor admin operations are rare; if a P0
+ * incident demands immediate cutoff, call `cache.invalidateOrg(orgId)`
+ * out-of-band. Not adding explicit per-mutation invalidation here to
+ * keep the dependency direction clean (vendor-admin package shouldn't
+ * import @instigenie/cache; the api layer knows about both).
  */
 
 import type pg from "pg";
+import type { Cache } from "@instigenie/cache";
 import { withOrg } from "@instigenie/db";
 import {
   TenantDeletedError,
@@ -33,8 +44,18 @@ import {
 } from "@instigenie/errors";
 import type { TenantStatus } from "@instigenie/contracts";
 
+const CACHE_RESOURCE = "tenant_status";
+const CACHE_TTL_SEC = 30;
+
 export interface TenantStatusServiceDeps {
   pool: pg.Pool;
+  /**
+   * Optional Redis-backed cache. If undefined, every getStatus() call hits
+   * the DB. If provided, the row is memoized for 30s. Cache failures are
+   * logged-and-swallowed — never fatal to the auth path, since the DB
+   * remains the source of truth.
+   */
+  cache?: Cache;
 }
 
 interface TenantStatusRow {
@@ -46,6 +67,28 @@ interface TenantStatusRow {
   deleted_at: Date | null;
 }
 
+/** Same shape as TenantStatusRow but with Dates as ISO strings — what
+ *  Redis stores after JSON serialization. Re-hydrated to Date on read. */
+interface CachedTenantStatusRow {
+  id: string;
+  status: TenantStatus;
+  trial_ends_at: string | null;
+  suspended_at: string | null;
+  suspended_reason: string | null;
+  deleted_at: string | null;
+}
+
+function rehydrate(row: CachedTenantStatusRow): TenantStatusRow {
+  return {
+    id: row.id,
+    status: row.status,
+    trial_ends_at: row.trial_ends_at ? new Date(row.trial_ends_at) : null,
+    suspended_at: row.suspended_at ? new Date(row.suspended_at) : null,
+    suspended_reason: row.suspended_reason,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+  };
+}
+
 export class TenantStatusService {
   constructor(private readonly deps: TenantStatusServiceDeps) {}
 
@@ -55,13 +98,57 @@ export class TenantStatusService {
    * unauthorized — usually unauthorized, since the orgId came from a JWT
    * claim the user controlled).
    *
-   * `organizations` has an RLS policy `id = app.current_org`, so we must
-   * run under withOrg(orgId). A malicious actor who guesses a foreign
-   * orgId still gets zero rows because they can't set app.current_org to
-   * that value without passing auth — the JWT claim IS the orgId we're
-   * about to look up, which closes the loop.
+   * `organizations` has an RLS policy `id = app.current_org`, so the DB
+   * fallback must run under withOrg(orgId). A malicious actor who guesses
+   * a foreign orgId still gets zero rows because they can't set
+   * app.current_org to that value without passing auth — the JWT claim
+   * IS the orgId we're about to look up, which closes the loop.
+   *
+   * Cache layer (when configured): namespaced as
+   * `cache:{orgId}:tenant_status:{orgId}` — the orgId appears twice
+   * because the cache lib's key shape is `{prefix}:{orgId}:{resource}:{id}`
+   * and there's only one tenant-status row per tenant, so `id == orgId`.
    */
   async getStatus(orgId: string): Promise<TenantStatusRow | null> {
+    const cache = this.deps.cache;
+
+    if (cache) {
+      try {
+        const hit = await cache.get<CachedTenantStatusRow>(
+          orgId,
+          CACHE_RESOURCE,
+          orgId,
+        );
+        if (hit !== null) return rehydrate(hit);
+      } catch {
+        // Redis transient failure — fall through to DB. Don't log here;
+        // the underlying client already emits its own connection-level
+        // events to the pino logger.
+      }
+    }
+
+    const row = await this.dbLookup(orgId);
+
+    if (cache && row) {
+      try {
+        await cache.set(orgId, CACHE_RESOURCE, orgId, row, CACHE_TTL_SEC);
+      } catch {
+        // Cache populate failure is benign — next request will see the
+        // same DB row and try again.
+      }
+    }
+
+    return row;
+  }
+
+  /** Direct DB read, no cache. Exposed so callers that explicitly want
+   *  fresh state (e.g. a just-flipped status during a vendor-admin op)
+   *  can bypass the 30s TTL. */
+  async getStatusFresh(orgId: string): Promise<TenantStatusRow | null> {
+    return this.dbLookup(orgId);
+  }
+
+  private async dbLookup(orgId: string): Promise<TenantStatusRow | null> {
     return withOrg(this.deps.pool, orgId, async (client) => {
       const { rows } = await client.query<TenantStatusRow>(
         `SELECT o.id, o.status, o.trial_ends_at, o.suspended_at,
@@ -72,6 +159,18 @@ export class TenantStatusService {
       );
       return rows[0] ?? null;
     });
+  }
+
+  /** Drop the cached row for one tenant. Call after a vendor-admin write
+   *  that flips status (suspend/reinstate/delete) to skip the eventual-
+   *  consistency window for that orgId. Safe to call without a cache. */
+  async invalidate(orgId: string): Promise<void> {
+    if (!this.deps.cache) return;
+    try {
+      await this.deps.cache.del(orgId, CACHE_RESOURCE, orgId);
+    } catch {
+      // Same swallow rule as the read path.
+    }
   }
 
   /**

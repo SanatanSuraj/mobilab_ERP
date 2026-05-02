@@ -20,7 +20,7 @@
  *   - Activity feed is derived from WO/stage timestamps only.
  */
 
-import { use, useState } from "react";
+import { memo, use, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -234,14 +234,18 @@ export default function WorkOrderDetailPage({
     }
   }
 
-  async function handleStageAction(
-    stage: WipStage,
+  // Signature lifted to take stageId directly (instead of the WipStage
+  // object) so the parent can pass a stable handler reference to StageRow.
+  // useCallback keeps the ref stable across re-renders so the row's
+  // React.memo bail-out fires.
+  const handleStageAction = useCallback(async (
+    stageId: string,
     action: AdvanceWipStage["action"]
-  ): Promise<void> {
+  ): Promise<void> => {
     setActionError(null);
     try {
       await advanceStage.mutateAsync({
-        stageId: stage.id,
+        stageId,
         body: { action },
       });
     } catch (err) {
@@ -249,7 +253,7 @@ export default function WorkOrderDetailPage({
         err instanceof Error ? err.message : "Stage transition failed"
       );
     }
-  }
+  }, [advanceStage]);
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
@@ -346,7 +350,7 @@ export default function WorkOrderDetailPage({
                         isCurrent={idx === wo.currentStageIndex}
                         woStatus={wo.status}
                         disabled={advanceStage.isPending}
-                        onAction={(action) => handleStageAction(stage, action)}
+                        onAction={handleStageAction}
                       />
                     ))}
                   </div>
@@ -614,7 +618,11 @@ export default function WorkOrderDetailPage({
 
 // ─── Stage row subcomponent ────────────────────────────────────────────────
 
-function StageRow({
+// Wrapped in React.memo so a parent re-render (header status edit, dialog
+// open, action error toast, etc.) doesn't redundantly re-render every
+// stage card. With handleStageAction useCallback'd in the parent and the
+// remaining props being primitives, the memo bail-out fires cleanly.
+const StageRow = memo(function StageRow({
   stage,
   index,
   isCurrent,
@@ -627,7 +635,8 @@ function StageRow({
   isCurrent: boolean;
   woStatus: WoStatus;
   disabled: boolean;
-  onAction: (action: AdvanceWipStage["action"]) => void;
+  /** Receives stageId so the parent can pass a stable handler reference. */
+  onAction: (stageId: string, action: AdvanceWipStage["action"]) => void;
 }) {
   const isDone = stage.status === "COMPLETED";
   const isActive = stage.status === "IN_PROGRESS";
@@ -732,7 +741,7 @@ function StageRow({
               {isPending && (
                 <Button
                   size="sm"
-                  onClick={() => onAction("START")}
+                  onClick={() => onAction(stage.id, "START")}
                   disabled={disabled}
                 >
                   <ChevronRight className="h-4 w-4 mr-1" />
@@ -742,7 +751,7 @@ function StageRow({
               {isActive && (
                 <Button
                   size="sm"
-                  onClick={() => onAction("COMPLETE")}
+                  onClick={() => onAction(stage.id, "COMPLETE")}
                   disabled={disabled}
                 >
                   <CheckCircle2 className="h-4 w-4 mr-1" />
@@ -755,7 +764,7 @@ function StageRow({
                     size="sm"
                     variant="outline"
                     className="border-green-300 text-green-700 hover:bg-green-50"
-                    onClick={() => onAction("QC_PASS")}
+                    onClick={() => onAction(stage.id, "QC_PASS")}
                     disabled={disabled}
                   >
                     <Shield className="h-4 w-4 mr-1" />
@@ -765,7 +774,7 @@ function StageRow({
                     size="sm"
                     variant="outline"
                     className="border-red-300 text-red-700 hover:bg-red-50"
-                    onClick={() => onAction("QC_FAIL")}
+                    onClick={() => onAction(stage.id, "QC_FAIL")}
                     disabled={disabled}
                   >
                     <Shield className="h-4 w-4 mr-1" />
@@ -776,7 +785,7 @@ function StageRow({
               {isRework && (
                 <Button
                   size="sm"
-                  onClick={() => onAction("REWORK_DONE")}
+                  onClick={() => onAction(stage.id, "REWORK_DONE")}
                   disabled={disabled}
                 >
                   <RotateCcw className="h-4 w-4 mr-1" />
@@ -788,7 +797,7 @@ function StageRow({
       </div>
     </div>
   );
-}
+});
 
 // ─── Helper component ──────────────────────────────────────────────────────
 

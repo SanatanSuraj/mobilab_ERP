@@ -28,7 +28,7 @@
  * feel the same to the user.
  */
 
-import { use, useEffect, useMemo, useState } from "react";
+import { memo, use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -296,14 +296,20 @@ export default function IndentDetailPage({
     }
   }
 
-  async function handleDeleteLine(lineId: string): Promise<void> {
-    setActionError(null);
-    try {
-      await deleteLine.mutateAsync(lineId);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Delete failed");
-    }
-  }
+  // useCallback so EditableIndentLineRow's React.memo bail-out keeps the
+  // row from re-rendering on every parent state change. deleteLine is a
+  // TanStack Query mutation result — its identity is stable across renders.
+  const handleDeleteLine = useCallback(
+    async (lineId: string): Promise<void> => {
+      setActionError(null);
+      try {
+        await deleteLine.mutateAsync(lineId);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Delete failed");
+      }
+    },
+    [deleteLine],
+  );
 
   const canSubmit = indent.status === "DRAFT" && indent.lines.length > 0;
   const canApproveOrReject = indent.status === "SUBMITTED";
@@ -609,7 +615,7 @@ export default function IndentDetailPage({
                         items={items}
                         editable={editable}
                         updateLine={updateLine}
-                        onDelete={() => handleDeleteLine(line.id)}
+                        onDelete={handleDeleteLine}
                         deleting={deleteLine.isPending}
                       />
                     ))}
@@ -780,11 +786,18 @@ type EditableIndentLineRowProps = {
   items: Item[];
   editable: boolean;
   updateLine: ReturnType<typeof useApiUpdateIndentLine>;
-  onDelete: () => void;
+  /** Receives line.id so the parent can pass a stable handler reference
+   *  (necessary for the React.memo wrapper below to actually skip
+   *  re-renders when only sibling rows or unrelated parent state change). */
+  onDelete: (lineId: string) => void;
   deleting: boolean;
 };
 
-function EditableIndentLineRow({
+// Wrapped in React.memo to skip redundant re-renders when only sibling rows
+// or unrelated parent state changes. With handleDeleteLine useCallback'd
+// in the parent, items referentially stable from useApiItems, and the
+// remaining props being primitives, the memo bail-out kicks in cleanly.
+const EditableIndentLineRow = memo(function EditableIndentLineRow({
   line,
   indentVersion,
   items,
@@ -926,7 +939,7 @@ function EditableIndentLineRow({
               variant="ghost"
               className="h-7 w-7 text-red-600"
               disabled={deleting}
-              onClick={onDelete}
+              onClick={() => onDelete(line.id)}
               aria-label={`Delete line ${line.lineNo}`}
               title="Delete line"
             >
@@ -937,4 +950,4 @@ function EditableIndentLineRow({
       )}
     </TableRow>
   );
-}
+});

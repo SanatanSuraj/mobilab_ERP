@@ -15,11 +15,22 @@
  * lifting (ILIKE, LEFT LATERAL join) and the filter state lives in local
  * component state, not the URL, to keep the code simple for now. If we
  * want shareable filter URLs later, this is the place to add it.
+ *
+ * Data layer (2026-05): migrated to TanStack Query (`useQuery`).
+ *   - `placeholderData: keepPreviousData` keeps the old rows visible while
+ *     a new filter / page loads — no flash of empty rows.
+ *   - 30s staleTime (root QueryProvider default) means navigating to a
+ *     tenant detail page and back within 30s renders instantly from cache,
+ *     no refetch. This is the headline UX win on this page.
+ *   - Cancellation is automatic: when the queryKey changes (filter swap,
+ *     page change), an in-flight fetch is aborted by the client.
+ *   - Errors come back as `query.error`, never thrown into render.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   Loader2,
@@ -74,12 +85,9 @@ export default function TenantsListPage() {
   const [draftQuery, setDraftQuery] = useState("");
   const [offset, setOffset] = useState(0);
 
-  const [rows, setRows] = useState<VendorTenantRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Debounce the search input so we don't fire a request on every keystroke.
+  // Debounce the search input so we don't refetch on every keystroke.
+  // Only `filters.q` participates in the queryKey, so changes to the draft
+  // input don't trigger fetches until this effect commits.
   useEffect(() => {
     const handle = setTimeout(() => {
       setFilters((f) => ({ ...f, q: draftQuery.trim() }));
@@ -88,39 +96,46 @@ export default function TenantsListPage() {
     return () => clearTimeout(handle);
   }, [draftQuery]);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await apiVendorListTenants({
-          status:
-            filters.status === "ALL" ? undefined : (filters.status as TenantStatus),
-          plan: filters.plan === "ALL" ? undefined : (filters.plan as PlanCode),
-          q: filters.q || undefined,
-          limit: PAGE_SIZE,
-          offset,
-        });
-        if (cancelled) return;
-        setRows(res.items);
-        setTotal(res.total);
-      } catch (err) {
-        if (cancelled) return;
-        setError(
-          err instanceof ApiProblem
-            ? err.problem.detail ?? err.problem.title
-            : "Could not load tenants."
-        );
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  // The single source of truth for the table rows. queryKey covers every
+  // input the API call depends on so a filter / page swap produces a
+  // distinct cache entry instead of overwriting the previous one.
+  const query = useQuery({
+    queryKey: [
+      "vendor-tenants",
+      filters.status,
+      filters.plan,
+      filters.q,
+      offset,
+    ],
+    queryFn: () =>
+      apiVendorListTenants({
+        status:
+          filters.status === "ALL" ? undefined : (filters.status as TenantStatus),
+        plan: filters.plan === "ALL" ? undefined : (filters.plan as PlanCode),
+        q: filters.q || undefined,
+        limit: PAGE_SIZE,
+        offset,
+      }),
+    placeholderData: keepPreviousData,
+  });
+
+  const rows: VendorTenantRow[] = query.data?.items ?? [];
+  const total = query.data?.total ?? 0;
+
+  // First-load spinner shows ONLY when there's no data yet at all (initial
+  // mount, or query failed). Background refetches use isFetching for a
+  // subtle indicator instead of blanking the table.
+  const isFirstLoad = query.isPending && !query.data;
+  const isBackgroundRefetch = query.isFetching && !!query.data;
+
+  const errorMessage = useMemo(() => {
+    if (!query.isError) return null;
+    const err = query.error;
+    if (err instanceof ApiProblem) {
+      return err.problem.detail ?? err.problem.title;
     }
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [filters, offset]);
+    return "Could not load tenants.";
+  }, [query.isError, query.error]);
 
   const showingFrom = total === 0 ? 0 : offset + 1;
   const showingTo = Math.min(offset + rows.length, total);
@@ -220,19 +235,19 @@ export default function TenantsListPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loading && rows.length === 0 ? (
+                {isFirstLoad ? (
                   <TableRow>
                     <TableCell colSpan={6} className="py-10 text-center">
                       <Loader2 className="h-5 w-5 animate-spin text-slate-400 inline-block" />
                     </TableCell>
                   </TableRow>
-                ) : error ? (
+                ) : errorMessage ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
                       className="py-10 text-center text-rose-600"
                     >
-                      {error}
+                      {errorMessage}
                     </TableCell>
                   </TableRow>
                 ) : rows.length === 0 ? (
@@ -287,10 +302,10 @@ export default function TenantsListPage() {
 
           <div className="flex items-center justify-between text-sm text-slate-500">
             <div>
-              {loading ? (
+              {isBackgroundRefetch ? (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Loading…
+                  Updating…
                 </span>
               ) : (
                 <span>
@@ -303,7 +318,7 @@ export default function TenantsListPage() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={offset === 0 || loading}
+                disabled={offset === 0 || query.isFetching}
                 onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               >
                 Previous
@@ -311,7 +326,7 @@ export default function TenantsListPage() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={offset + rows.length >= total || loading}
+                disabled={offset + rows.length >= total || query.isFetching}
                 onClick={() => setOffset(offset + PAGE_SIZE)}
               >
                 Next

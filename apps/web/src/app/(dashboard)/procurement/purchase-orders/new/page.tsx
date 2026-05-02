@@ -31,7 +31,7 @@
  * different header title.
  */
 
-import { useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -309,13 +309,23 @@ export default function NewPurchaseOrderPage() {
   }, [rows, additionalDiscountPct]);
 
   // ─── Line-item helpers ───────────────────────────────────────────────────
-  function patchLine(idx: number, patch: Partial<LineDraft>): void {
+  //
+  // Wrapped in useCallback so the LineItemRow memo below has stable handler
+  // references — without this, every keystroke in any field re-creates these
+  // functions, which makes memo() useless and re-renders every row in the
+  // table on every keystroke. With stable refs, only the changed row
+  // re-renders.
+  const patchLine = useCallback((idx: number, patch: Partial<LineDraft>): void => {
     setLines((prev) =>
       prev.map((l, i) => (i === idx ? { ...l, ...patch } : l))
     );
-  }
+  }, []);
 
-  function handlePickItem(idx: number, newItemId: string): void {
+  // handlePickItem closes over `items` (the full catalogue from useApiItems).
+  // useApiItems returns a referentially-stable array as long as the query
+  // hasn't refetched, so the dep array keeps this callback stable across
+  // renders that don't change the catalogue.
+  const handlePickItem = useCallback((idx: number, newItemId: string): void => {
     const item = items.find((p) => p.id === newItemId);
     if (!item) {
       patchLine(idx, { itemId: newItemId });
@@ -328,15 +338,15 @@ export default function NewPurchaseOrderPage() {
       uom: item.uom,
       price: item.unitCost ?? "0",
     });
-  }
+  }, [items, patchLine]);
 
   function addLine(): void {
     setLines((prev) => [...prev, emptyLine()]);
   }
 
-  function removeLine(idx: number): void {
+  const removeLine = useCallback((idx: number): void => {
     setLines((prev) => prev.filter((_, i) => i !== idx));
-  }
+  }, []);
 
   const filteredItems = useMemo(() => {
     if (!itemSearch.trim()) return items;
@@ -1022,100 +1032,16 @@ export default function NewPurchaseOrderPage() {
               </thead>
               <tbody>
                 {lines.map((l, idx) => (
-                  <tr key={l.key} className="border-t">
-                    <td className="p-2 align-top text-muted-foreground">
-                      {idx + 1}
-                    </td>
-                    <td className="p-2 align-top">
-                      <Select
-                        value={l.itemId}
-                        onValueChange={(v) => handlePickItem(idx, v ?? "")}
-                      >
-                        <SelectTrigger className="h-8 w-[160px]">
-                          <SelectValue placeholder="Pick item" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {filteredItems.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.sku}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </td>
-                    <td className="p-2 align-top">
-                      <Input
-                        value={l.description}
-                        onChange={(e) =>
-                          patchLine(idx, { description: e.target.value })
-                        }
-                        className="h-8 min-w-[200px]"
-                      />
-                    </td>
-                    <td className="p-2 align-top">
-                      <Input
-                        value={l.hsnCode}
-                        onChange={(e) =>
-                          patchLine(idx, { hsnCode: e.target.value })
-                        }
-                        className="h-8 w-[110px] font-mono"
-                      />
-                    </td>
-                    <td className="p-2 align-top">
-                      <Input
-                        type="number"
-                        value={l.quantity}
-                        onChange={(e) =>
-                          patchLine(idx, { quantity: e.target.value })
-                        }
-                        className="h-8 w-[80px]"
-                      />
-                    </td>
-                    <td className="p-2 align-top">
-                      <Input
-                        value={l.uom}
-                        onChange={(e) =>
-                          patchLine(idx, { uom: e.target.value })
-                        }
-                        className="h-8 w-[80px]"
-                      />
-                    </td>
-                    <td className="p-2 align-top text-muted-foreground">
-                      —
-                    </td>
-                    <td className="p-2 align-top text-right">
-                      <Input
-                        type="number"
-                        value={l.price}
-                        onChange={(e) =>
-                          patchLine(idx, { price: e.target.value })
-                        }
-                        className="h-8 w-[90px] text-right"
-                      />
-                    </td>
-                    <td className="p-2 align-top text-right">
-                      <Input
-                        type="number"
-                        value={l.tax}
-                        onChange={(e) =>
-                          patchLine(idx, { tax: e.target.value })
-                        }
-                        className="h-8 w-[70px] text-right"
-                      />
-                    </td>
-                    <td className="p-2 align-top">
-                      {lines.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeLine(idx)}
-                          className="rounded-md p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-                          aria-label={`Remove line ${idx + 1}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                  <LineItemRow
+                    key={l.key}
+                    idx={idx}
+                    line={l}
+                    items={filteredItems}
+                    canRemove={lines.length > 1}
+                    onPickItem={handlePickItem}
+                    onPatch={patchLine}
+                    onRemove={removeLine}
+                  />
                 ))}
               </tbody>
             </table>
@@ -1366,6 +1292,125 @@ export default function NewPurchaseOrderPage() {
     </div>
   );
 }
+
+// ─── Line-item row (memoized) ───────────────────────────────────────────────
+//
+// Extracted out of the parent because the items table is the keystroke
+// hot-spot — every onChange in any field used to call setLines at the page
+// root, which re-rendered the entire 1400-line component tree. With React
+// .memo + useCallback'd handlers (see patchLine / handlePickItem / removeLine
+// in the parent), only the row whose own `line` prop actually changes
+// re-renders. `items` is `filteredItems` — already useMemo'd in the parent
+// so its reference is stable when the search input is unchanged.
+
+// The row's <Select> picker only renders id + sku per item; the parent's
+// onPickItem uses the rest. Structural typing keeps the row decoupled from
+// the full ItemRow contract.
+interface LineItemRowItem {
+  id: string;
+  sku: string;
+}
+
+interface LineItemRowProps {
+  idx: number;
+  line: LineDraft;
+  items: ReadonlyArray<LineItemRowItem>;
+  canRemove: boolean;
+  onPickItem: (idx: number, newItemId: string) => void;
+  onPatch: (idx: number, patch: Partial<LineDraft>) => void;
+  onRemove: (idx: number) => void;
+}
+
+const LineItemRow = memo(function LineItemRow({
+  idx,
+  line,
+  items,
+  canRemove,
+  onPickItem,
+  onPatch,
+  onRemove,
+}: LineItemRowProps) {
+  return (
+    <tr className="border-t">
+      <td className="p-2 align-top text-muted-foreground">{idx + 1}</td>
+      <td className="p-2 align-top">
+        <Select
+          value={line.itemId}
+          onValueChange={(v) => onPickItem(idx, v ?? "")}
+        >
+          <SelectTrigger className="h-8 w-[160px]">
+            <SelectValue placeholder="Pick item" />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.sku}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </td>
+      <td className="p-2 align-top">
+        <Input
+          value={line.description}
+          onChange={(e) => onPatch(idx, { description: e.target.value })}
+          className="h-8 min-w-[200px]"
+        />
+      </td>
+      <td className="p-2 align-top">
+        <Input
+          value={line.hsnCode}
+          onChange={(e) => onPatch(idx, { hsnCode: e.target.value })}
+          className="h-8 w-[110px] font-mono"
+        />
+      </td>
+      <td className="p-2 align-top">
+        <Input
+          type="number"
+          value={line.quantity}
+          onChange={(e) => onPatch(idx, { quantity: e.target.value })}
+          className="h-8 w-[80px]"
+        />
+      </td>
+      <td className="p-2 align-top">
+        <Input
+          value={line.uom}
+          onChange={(e) => onPatch(idx, { uom: e.target.value })}
+          className="h-8 w-[80px]"
+        />
+      </td>
+      <td className="p-2 align-top text-muted-foreground">—</td>
+      <td className="p-2 align-top text-right">
+        <Input
+          type="number"
+          value={line.price}
+          onChange={(e) => onPatch(idx, { price: e.target.value })}
+          className="h-8 w-[90px] text-right"
+        />
+      </td>
+      <td className="p-2 align-top text-right">
+        <Input
+          type="number"
+          value={line.tax}
+          onChange={(e) => onPatch(idx, { tax: e.target.value })}
+          className="h-8 w-[70px] text-right"
+        />
+      </td>
+      <td className="p-2 align-top">
+        {canRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(idx)}
+            className="rounded-md p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+            aria-label={`Remove line ${idx + 1}`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+});
 
 // ─── Small building blocks ──────────────────────────────────────────────────
 

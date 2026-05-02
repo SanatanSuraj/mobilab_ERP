@@ -13,6 +13,7 @@
  */
 
 import { Suspense, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck, Eye, EyeOff, Loader2 } from "lucide-react";
 
@@ -108,9 +109,17 @@ function LoginForm() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="v-password" className="text-slate-200">
-                  Password
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="v-password" className="text-slate-200">
+                    Password
+                  </Label>
+                  <Link
+                    href="/vendor-admin/forgot-password"
+                    className="text-[11px] text-slate-500 hover:text-slate-300 hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <Input
                     id="v-password"
@@ -157,12 +166,6 @@ function LoginForm() {
                 )}
               </Button>
             </form>
-
-            <p className="text-[11px] text-slate-500 leading-snug pt-1">
-              Dev seeds (password <code>instigenie_dev_2026</code>):{" "}
-              <code>vendor@instigenie.local</code>,{" "}
-              <code>vendor2@instigenie.local</code>
-            </p>
           </CardContent>
         </Card>
 

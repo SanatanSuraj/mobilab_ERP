@@ -31,13 +31,20 @@ export interface RegisterAuthRoutesOptions {
   service: AuthService;
   guardInternal: AuthGuardOptions;
   guardPortal: AuthGuardOptions;
+  /**
+   * @fastify/rate-limit per-route config (5/min/email by default — see
+   * apps/api/src/index.ts). Passed via the route's `config.rateLimit`
+   * option. NOT a preHandler — v10's app.rateLimit() preHandler is a
+   * no-op marker; the documented per-route API is `config.rateLimit`.
+   */
+  loginRateLimit: Record<string, unknown>;
 }
 
 export async function registerAuthRoutes(
   app: FastifyInstance,
   opts: RegisterAuthRoutesOptions
 ): Promise<void> {
-  app.post("/auth/login", async (req, reply) => {
+  app.post("/auth/login", { config: { rateLimit: opts.loginRateLimit } }, async (req, reply) => {
     const body = LoginRequestSchema.parse(req.body);
     const result = await opts.service.login({
       email: body.email,

@@ -10,6 +10,14 @@
  *   3. We're not running in production with the dev-seed org present
  *      (a stray `pnpm db:seed` against prod would create a known-id
  *      tenant attackers can target).
+ *   4. The TENANT pool's connecting role is NOT a superuser AND does NOT
+ *      have BYPASSRLS. This is what closes the 2026-05-02 incident loop:
+ *      api was running with DATABASE_URL=postgres://postgres:... → every
+ *      RLS policy was decorative because superusers bypass RLS silently,
+ *      and a Mobilab tenant admin briefly saw webkul's user list. Use a
+ *      NOSUPERUSER NOBYPASSRLS role (e.g. `instigenie_app`).
+ *      Vendor pool is checked separately and is allowed to have BYPASSRLS
+ *      because vendor-admin traffic is intentionally cross-tenant.
  *
  * Why duplicate this in the API on top of the worker:
  *   - The worker enforces it on its own boot, but the API may come up
@@ -129,6 +137,36 @@ export async function runBootstrapPolicy(
     }
   }
 
+  // 4. Tenant pool's connecting role attributes. (Numbered before #3 to
+  //    fail fast — if the role is wrong, the RLS check above could pass
+  //    while every query was actually bypassing RLS.) The query reads
+  //    pg_roles for the role identified by `current_user` on the
+  //    just-connected session, not the bootstrap user — so the check
+  //    reflects what every authenticated request will actually use.
+  const roleRow = await pool.query<{
+    rolname: string;
+    rolsuper: boolean;
+    rolbypassrls: boolean;
+  }>(
+    `SELECT rolname, rolsuper, rolbypassrls
+       FROM pg_roles WHERE rolname = current_user`,
+  );
+  const role = roleRow.rows[0];
+  if (!role) {
+    throw new Error(
+      "bootstrap: could not resolve current_user against pg_roles — refusing to start",
+    );
+  }
+  if (role.rolsuper || role.rolbypassrls) {
+    throw new Error(
+      `bootstrap: tenant pool connected as "${role.rolname}" ` +
+        `(rolsuper=${role.rolsuper}, rolbypassrls=${role.rolbypassrls}) — ` +
+        `RLS would be bypassed silently. Use a NOSUPERUSER + NOBYPASSRLS ` +
+        `role for DATABASE_URL (e.g. instigenie_app). The vendor pool ` +
+        `(VENDOR_DATABASE_URL) is exempt from this check.`,
+    );
+  }
+
   // 3. Dev-seed org must not exist in production.
   if (process.env.NODE_ENV === "production") {
     const devOrg = await pool.query<{ id: string }>(
@@ -142,5 +180,8 @@ export async function runBootstrapPolicy(
     }
   }
 
-  log.info({ checks: TENANT_TABLES.length }, "bootstrap policy passed");
+  log.info(
+    { checks: TENANT_TABLES.length, role: role.rolname },
+    "bootstrap policy passed",
+  );
 }

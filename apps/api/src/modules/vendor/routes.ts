@@ -40,6 +40,8 @@ export interface RegisterVendorRoutesOptions {
   authService: VendorAuthService;
   adminService: VendorAdminService;
   guard: VendorGuardOptions;
+  /** Per-email login rate limit config (5/min) — see apps/api/src/index.ts. */
+  loginRateLimit: Record<string, unknown>;
 }
 
 export async function registerVendorRoutes(
@@ -50,7 +52,10 @@ export async function registerVendorRoutes(
 
   // ─── Auth ─────────────────────────────────────────────────────────────
 
-  app.post("/vendor-admin/auth/login", async (req, reply) => {
+  app.post(
+    "/vendor-admin/auth/login",
+    { config: { rateLimit: opts.loginRateLimit } },
+    async (req, reply) => {
     const body = VendorLoginRequestSchema.parse(req.body);
     const result = await opts.authService.login({
       email: body.email,

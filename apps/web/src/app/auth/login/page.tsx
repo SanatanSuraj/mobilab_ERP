@@ -19,6 +19,7 @@
  */
 
 import { Suspense, useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FlaskConical, Eye, EyeOff, Loader2, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -293,7 +294,15 @@ function LoginForm() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <Link
+                    href="/auth/forgot-password"
+                    className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <Input
                     id="password"
@@ -336,13 +345,6 @@ function LoginForm() {
                 )}
               </Button>
             </form>
-
-            <p className="text-[11px] text-muted-foreground leading-snug pt-1">
-              Dev seeds (password <code>instigenie_dev_2026</code>):{" "}
-              <code>admin@instigenie.local</code>,{" "}
-              <code>finance@instigenie.local</code>,{" "}
-              <code>prodmgr@instigenie.local</code>, etc.
-            </p>
           </CardContent>
         </Card>
 

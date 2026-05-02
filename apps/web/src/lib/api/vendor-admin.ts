@@ -33,6 +33,13 @@ import type {
   VendorAuditListQuery,
 } from "@instigenie/contracts/vendor-admin";
 import type { Problem } from "@instigenie/contracts/auth";
+import type {
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
+  ResetPasswordPreviewResponse,
+  ResetPasswordRequest,
+  ResetPasswordResponse,
+} from "@instigenie/contracts";
 
 /** Where to reach the real API. Override with NEXT_PUBLIC_API_BASE_URL. */
 export const API_BASE_URL =
@@ -258,6 +265,48 @@ export async function apiVendorChangePlan(
     oldPlanCode: string | null;
     newPlanCode: string;
   };
+}
+
+// ─── Password reset (public — token-authed, no JWT) ──────────────────────
+
+/**
+ * Request a vendor-admin reset email. Always returns 200 OK regardless of
+ * whether the email is registered. In non-prod, the response includes
+ * `devResetUrl` so QA can advance without a real inbox.
+ */
+export async function apiVendorForgotPassword(
+  req: ForgotPasswordRequest,
+): Promise<ForgotPasswordResponse & { devResetUrl?: string }> {
+  const res = await fetch(`${API_BASE_URL}/vendor-admin/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return (await parseJsonOrThrow(res)) as ForgotPasswordResponse & {
+    devResetUrl?: string;
+  };
+}
+
+export async function apiVendorPreviewResetPassword(
+  token: string,
+): Promise<ResetPasswordPreviewResponse> {
+  const url = new URL(
+    `${API_BASE_URL}/vendor-admin/auth/reset-password/preview`,
+  );
+  url.searchParams.set("token", token);
+  const res = await fetch(url.toString());
+  return (await parseJsonOrThrow(res)) as ResetPasswordPreviewResponse;
+}
+
+export async function apiVendorResetPassword(
+  req: ResetPasswordRequest,
+): Promise<ResetPasswordResponse> {
+  const res = await fetch(`${API_BASE_URL}/vendor-admin/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return (await parseJsonOrThrow(res)) as ResetPasswordResponse;
 }
 
 // ─── Audit ───────────────────────────────────────────────────────────────────

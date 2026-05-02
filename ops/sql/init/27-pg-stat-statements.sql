@@ -1,0 +1,28 @@
+-- Enable pg_stat_statements for production query observability.
+--
+-- The extension itself is loaded via `shared_preload_libraries` in the
+-- postgres command (see ops/compose/docker-compose.dev.yml). This
+-- migration only runs the `CREATE EXTENSION` step that exposes the
+-- pg_stat_statements view inside this database.
+--
+-- Once enabled, the view tracks:
+--   * total_exec_time, mean_exec_time, calls per normalised query
+--   * shared_blks_hit / read for buffer-cache analysis
+--   * temp_blks_written for spill-to-disk detection
+--
+-- Top-N slow queries:
+--   SELECT round(total_exec_time::numeric, 1) AS total_ms, calls,
+--          round(mean_exec_time::numeric, 1)  AS avg_ms,
+--          substring(query, 1, 100)           AS q
+--     FROM pg_stat_statements
+--    ORDER BY total_exec_time DESC LIMIT 20;
+--
+-- Reset between measurement windows:
+--   SELECT pg_stat_statements_reset();
+--
+-- DEPLOY NOTE: this migration is a no-op until the postgres process is
+-- running with `shared_preload_libraries` including `pg_stat_statements`.
+-- On a Hostinger / single-box deploy the postgres container's command
+-- must be updated to match dev compose, OR set in postgresql.conf.
+
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;

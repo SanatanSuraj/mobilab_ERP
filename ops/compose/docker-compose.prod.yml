@@ -174,6 +174,13 @@ services:
       HOST: 0.0.0.0
       NODE_OPTIONS: "--max-old-space-size=192"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+      # Vendor pool — REQUIRED on a single-box deploy where Postgres is
+      # local. Falls back to DATABASE_URL only on managed-DB deploys where
+      # the same superuser has cross-schema access. Locally we run the
+      # vendor surface as the BYPASSRLS `instigenie_vendor` role; tenant
+      # surface uses NOBYPASSRLS `instigenie_app`. Both are revoked from
+      # each other's schema, so DON'T fall back to DATABASE_URL here.
+      VENDOR_DATABASE_URL: ${VENDOR_DATABASE_URL:-${DATABASE_URL}}
       REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
       REDIS_CACHE_URL: ${REDIS_CACHE_URL:?REDIS_CACHE_URL required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required (≥32 bytes random)}

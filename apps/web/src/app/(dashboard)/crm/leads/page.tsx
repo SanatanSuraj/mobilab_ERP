@@ -49,8 +49,18 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
+import dynamic from "next/dynamic";
 import { NewApiLeadSheet } from "@/components/crm/leads/NewApiLeadSheet";
-import { BulkImportLeadsDialog } from "@/components/crm/leads/BulkImportLeadsDialog";
+// Lazy-loaded — 693-line dialog with CSV / xlsx parsing only used after the
+// user clicks "Bulk import". Trims the /crm/leads route bundle. ssr:false
+// because nothing is useful in the initial HTML payload for a hidden modal.
+const BulkImportLeadsDialog = dynamic(
+  () =>
+    import("@/components/crm/leads/BulkImportLeadsDialog").then(
+      (m) => m.BulkImportLeadsDialog,
+    ),
+  { ssr: false },
+);
 import { useApiLeads } from "@/hooks/useCrmApi";
 import { useTenantAuthGuard } from "@/hooks/useTenantAuthGuard";
 import { formatCurrencyStr, formatRelativeDate } from "@/lib/format";

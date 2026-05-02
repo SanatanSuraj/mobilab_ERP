@@ -14,11 +14,16 @@
 
 import type {
   AuthenticatedResponse,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
   LoginRequest,
   LoginResponse,
   MeResponse,
   MultiTenantResponse,
   RefreshRequest,
+  ResetPasswordPreviewResponse,
+  ResetPasswordRequest,
+  ResetPasswordResponse,
   SelectTenantRequest,
   Problem,
 } from "@instigenie/contracts";
@@ -99,6 +104,52 @@ export async function apiMe(accessToken: string): Promise<MeResponse> {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return (await parseJsonOrThrow(res)) as MeResponse;
+}
+
+// ─── Password reset (public — token-authed, no JWT) ─────────────────────
+
+/**
+ * Request a reset email. The API always responds 200 OK whether the email
+ * is registered or not — never branch UI based on the response shape.
+ * In non-prod, the response includes `devResetUrl` so QA can advance the
+ * flow without an inbox; production builds strip that field.
+ */
+export async function apiForgotPassword(
+  req: ForgotPasswordRequest,
+): Promise<ForgotPasswordResponse & { devResetUrl?: string }> {
+  const res = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return (await parseJsonOrThrow(res)) as ForgotPasswordResponse & {
+    devResetUrl?: string;
+  };
+}
+
+/**
+ * Validate a reset token before showing the new-password form. 404 from
+ * the API means invalid / expired / already-consumed — surface a single
+ * "this link is invalid or has expired" message in the UI either way.
+ */
+export async function apiPreviewResetPassword(
+  token: string,
+): Promise<ResetPasswordPreviewResponse> {
+  const url = new URL(`${API_BASE_URL}/auth/reset-password/preview`);
+  url.searchParams.set("token", token);
+  const res = await fetch(url.toString());
+  return (await parseJsonOrThrow(res)) as ResetPasswordPreviewResponse;
+}
+
+export async function apiResetPassword(
+  req: ResetPasswordRequest,
+): Promise<ResetPasswordResponse> {
+  const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return (await parseJsonOrThrow(res)) as ResetPasswordResponse;
 }
 
 // Re-export for callers that want to narrow the union at the call site.

@@ -62,7 +62,14 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 
-import { ProductFormDialog } from "./ProductFormDialog";
+import dynamic from "next/dynamic";
+// Lazy-loaded — 507-line form only rendered when the user clicks "New" or
+// "Edit" product. Trims the catalog route bundle. ssr:false: nothing useful
+// at SSR time for a hidden modal.
+const ProductFormDialog = dynamic(
+  () => import("./ProductFormDialog").then((m) => m.ProductFormDialog),
+  { ssr: false },
+);
 import {
   apiListProducts,
   apiDeleteProduct,

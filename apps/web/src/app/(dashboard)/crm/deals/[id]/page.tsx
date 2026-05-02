@@ -35,7 +35,17 @@ import {
 } from "@/hooks/useCrmApi";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { DealStage, Quotation, UpdateDeal } from "@instigenie/contracts";
-import { NewQuotationDialog } from "@/components/crm/quotations/NewQuotationDialog";
+import dynamic from "next/dynamic";
+// Lazy-loaded — 418-line dialog only rendered when the user clicks "New
+// quotation" on a deal. Defers the heavy line-item editor + tax-calc
+// machinery out of the deal-detail bundle. ssr:false: hidden at boot.
+const NewQuotationDialog = dynamic(
+  () =>
+    import("@/components/crm/quotations/NewQuotationDialog").then(
+      (m) => m.NewQuotationDialog,
+    ),
+  { ssr: false },
+);
 import {
   AlertCircle,
   ArrowLeft,

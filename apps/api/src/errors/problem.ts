@@ -38,6 +38,48 @@ export function registerProblemHandler(app: FastifyInstance): void {
       return sendProblem(req, reply, p);
     }
 
+    // Pre-built Problem+JSON errors — e.g. @fastify/rate-limit's
+    // errorResponseBuilder returns an object that the plugin throws as an
+    // Error with our fields spread on it. If a thrown error already carries
+    // the RFC7807 shape (code + numeric status + title), trust it and pass
+    // it through. Avoids subclassing AppError per third-party plugin and
+    // keeps per-route rate-limit responses consistent with the global
+    // limit's response.
+    const candidate = err as {
+      code?: unknown;
+      status?: unknown;
+      title?: unknown;
+      message?: unknown;
+      details?: unknown;
+    };
+    if (
+      typeof candidate.code === "string" &&
+      typeof candidate.status === "number" &&
+      candidate.status >= 400 &&
+      candidate.status < 600 &&
+      typeof candidate.title === "string"
+    ) {
+      const status = candidate.status;
+      if (status >= 500) {
+        req.log.error({ err }, "pre-built problem (5xx)");
+      } else {
+        req.log.warn(
+          { err: { code: candidate.code, status, title: candidate.title } },
+          "pre-built problem",
+        );
+      }
+      return sendProblem(req, reply, {
+        code: candidate.code,
+        status,
+        message:
+          typeof candidate.message === "string" && candidate.message.length > 0
+            ? candidate.message
+            : candidate.title,
+        details:
+          (candidate.details as Record<string, unknown> | undefined) ?? undefined,
+      });
+    }
+
     // Fastify's validation errors expose `validation` on FastifyError.
     const fErr = err as FastifyError;
     if (Array.isArray(fErr.validation)) {

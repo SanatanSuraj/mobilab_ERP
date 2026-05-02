@@ -34,6 +34,7 @@
 
 import pg from "pg";
 import bcrypt from "bcrypt";
+import type { Cache } from "@instigenie/cache";
 import {
   AUDIENCE,
   ROLE_PERMISSIONS,
@@ -112,6 +113,35 @@ async function withLockoutTimeout<T>(p: Promise<T>): Promise<T | undefined> {
   });
 }
 
+// ─── /auth/me cache config ──────────────────────────────────────────────────
+
+/** Cache resource name for `/auth/me`. Key shape ends up
+ *  `cache:{orgId}:auth_me:{userId}` via the Cache lib's standard key format. */
+const ME_CACHE_RESOURCE = "auth_me";
+
+/** 60s TTL is the eventual-consistency window for role + capability changes.
+ *  An admin flipping a user's role via /admin/users/:id will be reflected
+ *  on the user's next /auth/me at most this many seconds later. */
+const ME_CACHE_TTL_SEC = 60;
+
+/** Result shape returned by AuthService.me — exported as a type so the cache
+ *  read/write paths agree on what gets serialized. */
+export interface MeResult {
+  id: string;
+  identityId: string;
+  orgId: string;
+  email: string;
+  name: string;
+  roles: Role[];
+  permissions: string[];
+  capabilities?: {
+    permittedLines: string[];
+    tier?: "T1" | "T2" | "T3";
+    canPCBRework: boolean;
+    canOCAssembly: boolean;
+  };
+}
+
 export interface AuthServiceDeps {
   pool: pg.Pool;
   tokens: TokenFactory;
@@ -129,6 +159,13 @@ export interface AuthServiceDeps {
    * attacks against /auth/login are unmitigated.
    */
   lockoutStore: LockoutStore;
+  /**
+   * Optional Redis-backed cache for /auth/me. Every page mount calls /me;
+   * caching for 60s eliminates the users + user_roles roundtrip on the
+   * common path. Cache failures fall back to a direct DB read — never
+   * fatal. Eventual-consistency window for role changes ≤ ME_CACHE_TTL_SEC.
+   */
+  cache?: Cache;
 }
 
 /**
@@ -502,27 +539,27 @@ export class AuthService {
   async me(
     userId: string,
     orgId: string
-  ): Promise<{
-    id: string;
-    identityId: string;
-    orgId: string;
-    email: string;
-    name: string;
-    roles: Role[];
-    permissions: string[];
-    capabilities?: {
-      permittedLines: string[];
-      tier?: "T1" | "T2" | "T3";
-      canPCBRework: boolean;
-      canOCAssembly: boolean;
-    };
-  }> {
+  ): Promise<MeResult> {
+    const cache = this.deps.cache;
+
+    // Cache hit path. Key shape: `cache:{orgId}:auth_me:{userId}` — scoped
+    // to org so a role change in one tenant can't leak into another.
+    if (cache) {
+      try {
+        const hit = await cache.get<MeResult>(orgId, ME_CACHE_RESOURCE, userId);
+        if (hit !== null) return hit;
+      } catch {
+        // Redis transient failure — fall through to DB. Don't log here;
+        // the underlying client emits its own connection-level events.
+      }
+    }
+
     // users + user_roles are tenant-scoped; the authGuard already
     // verified this caller's access token and passed claims.org as
     // orgId. Running under withOrg guarantees RLS lets us see our
     // own row and rejects any attempt to spoof a different orgId in
     // userId (the RLS predicate requires org_id matches).
-    return withOrg(this.deps.pool, orgId, async (client) => {
+    const result = await withOrg(this.deps.pool, orgId, async (client) => {
       const { rows } = await client.query<{
         id: string;
         org_id: string;
@@ -558,8 +595,41 @@ export class AuthService {
         roles,
         permissions: [...perms],
         capabilities: u.capabilities,
-      };
+      } satisfies MeResult;
     });
+
+    // Cache populate. Failure is benign — next call will see the same DB
+    // row and try again. NotFound errors above thrown before we get here.
+    if (cache) {
+      try {
+        await cache.set(
+          orgId,
+          ME_CACHE_RESOURCE,
+          userId,
+          result,
+          ME_CACHE_TTL_SEC,
+        );
+      } catch {
+        // Same swallow as the read path.
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Drop the cached /auth/me payload for one (orgId, userId). Call after a
+   * vendor-admin role change or membership status flip so the user sees
+   * their new permissions on the next /me without waiting out the TTL.
+   * Safe to call without a cache configured.
+   */
+  async invalidateMe(orgId: string, userId: string): Promise<void> {
+    if (!this.deps.cache) return;
+    try {
+      await this.deps.cache.del(orgId, ME_CACHE_RESOURCE, userId);
+    } catch {
+      // Same swallow rule as the read path.
+    }
   }
 
   // ─── Internals ─────────────────────────────────────────────────────

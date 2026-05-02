@@ -50,8 +50,10 @@ services:
       - ../sql/seed:/docker-entrypoint-initdb.d/04-seed:ro
     command: >
       postgres
-      -c shared_preload_libraries=pg_cron
+      -c shared_preload_libraries=pg_cron,pg_stat_statements
       -c cron.database_name=instigenie
+      -c pg_stat_statements.max=10000
+      -c pg_stat_statements.track=all
       -c max_connections=200
       -c shared_buffers=256MB
       -c effective_cache_size=768MB

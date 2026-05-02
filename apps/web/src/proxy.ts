@@ -50,6 +50,14 @@ const PUBLIC_PATHS = [
   "/login",
   "/auth/login",
   "/auth/accept-invite",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+  // /vendor-admin covers /vendor-admin/login, /vendor-admin/forgot-password,
+  // /vendor-admin/reset-password — the prefix-match logic in `isPublicPath`
+  // also leaves /vendor-admin/* routes open. The vendor surface guards its
+  // own console pages via vendor-auth-store + middleware on the
+  // /vendor-admin/(console) route group, so over-permissive at this layer
+  // is fine.
   "/vendor-admin",
 ];
 

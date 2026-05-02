@@ -39,6 +39,8 @@ import {
 } from "./sales-order-dispatched.js";
 import { observeSettlement } from "./payment-received.js";
 import { makeSendInvitationEmail } from "./user-invite-created.js";
+import { makeSendPasswordResetEmail } from "./password-reset-requested.js";
+import { makeSendVendorPasswordResetEmail } from "./vendor-password-reset-requested.js";
 import { createMailer } from "../email/mailer.js";
 import { loadEnv } from "../env.js";
 import type { HandlerEntry } from "./types.js";
@@ -48,13 +50,26 @@ import type { HandlerEntry } from "./types.js";
 // process, so build them once at module load. The mailer auto-returns
 // SKIPPED_DEV when RESEND_API_KEY is absent or EMAIL_DISABLED=true.
 const _env = loadEnv();
+const _mailer = createMailer({
+  smtp: _env.smtp,
+  resendApiKey: _env.resendApiKey,
+  emailDisabled: _env.emailDisabled,
+});
 const sendInvitationEmail = makeSendInvitationEmail({
   webOrigin: _env.webOrigin,
-  mailer: createMailer({
-    smtp: _env.smtp,
-    resendApiKey: _env.resendApiKey,
-    emailDisabled: _env.emailDisabled,
-  }),
+  mailer: _mailer,
+  mailFrom: _env.mailFrom,
+  mailReplyTo: _env.mailReplyTo,
+});
+const sendPasswordResetEmail = makeSendPasswordResetEmail({
+  webOrigin: _env.webOrigin,
+  mailer: _mailer,
+  mailFrom: _env.mailFrom,
+  mailReplyTo: _env.mailReplyTo,
+});
+const sendVendorPasswordResetEmail = makeSendVendorPasswordResetEmail({
+  webOrigin: _env.webOrigin,
+  mailer: _mailer,
   mailFrom: _env.mailFrom,
   mailReplyTo: _env.mailReplyTo,
 });
@@ -164,6 +179,25 @@ export const HANDLER_CATALOGUE: HandlerEntry[] = [
     eventType: "user.invite.created",
     handlerName: "admin.sendInvitationEmail",
     handler: sendInvitationEmail as unknown as HandlerEntry["handler"],
+  },
+
+  // user.password_reset.requested → auth.sendPasswordResetEmail
+  // Renders the reset URL and ships the email. No DB row is written for
+  // the dispatch itself — the password_reset_tokens table already gives
+  // us the operational view (who requested, when, was it consumed).
+  {
+    eventType: "user.password_reset.requested",
+    handlerName: "auth.sendPasswordResetEmail",
+    handler: sendPasswordResetEmail as unknown as HandlerEntry["handler"],
+  },
+
+  // vendor.password_reset.requested → vendor.sendPasswordResetEmail
+  // Same shape as the tenant version; lands the user on
+  // /vendor-admin/reset-password. Storage is vendor.password_reset_tokens.
+  {
+    eventType: "vendor.password_reset.requested",
+    handlerName: "vendor.sendPasswordResetEmail",
+    handler: sendVendorPasswordResetEmail as unknown as HandlerEntry["handler"],
   },
 ];
 

@@ -1,4 +1,13 @@
 import type { NextConfig } from "next";
+import bundleAnalyzer from "@next/bundle-analyzer";
+
+// Wrap with @next/bundle-analyzer when ANALYZE=true is set in the env. Off
+// by default — adds ~1MB of HTML report files to .next, only useful when
+// hunting bundle bloat. Run with: ANALYZE=true pnpm --filter @instigenie/web build
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+  openAnalyzer: false,
+});
 
 const nextConfig: NextConfig = {
   // Standalone output bundles only the deps Next traced as needed at runtime,
@@ -31,4 +40,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withBundleAnalyzer(nextConfig);
