@@ -395,15 +395,17 @@ services:
       - ../nginx/nginx.conf:/etc/nginx/templates/default.conf.template:ro
       - letsencrypt:/etc/letsencrypt:ro
       - certbot-www:/var/www/certbot:ro
-    # nginx:alpine's default entrypoint runs envsubst on
-    # /etc/nginx/templates/*.template automatically — our template gets
-    # rendered to /etc/nginx/conf.d/default.conf with $DOMAIN substituted.
-    # We only override CMD to add a 6h reload loop so nginx picks up
-    # certs renewed by certbot in the shared volume.
+    # nginx:alpine's docker-entrypoint.sh ONLY runs the docker-entrypoint.d
+    # scripts (including 20-envsubst-on-templates.sh) when $1 = "nginx".
+    # Our override starts with /bin/sh, so it skips that — meaning we
+    # must run envsubst ourselves before launching nginx. We also start
+    # a 6h `nginx -s reload` loop so renewed certs (written by certbot
+    # to the shared `letsencrypt` volume) get picked up automatically.
     command:
       - /bin/sh
       - -c
       - |
+        envsubst '$$DOMAIN' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
         (while :; do sleep 6h; nginx -s reload; done) &
         exec nginx -g 'daemon off;'
     mem_limit: 64m
