@@ -1,0 +1,385 @@
+# Instigenie ERP — single-box production stack.
+#
+# Self-hosted on one VM (Oracle Cloud ARM Ampere A1, 2+ OCPU / 12+ GB RAM).
+# No Vercel, no Neon, no Upstash, no Caddy — every dependency runs as a
+# Docker container on this host. Exposed ports speak plain HTTP; put
+# Cloudflare/nginx/Tailscale in front yourself if you need TLS.
+#
+# Services:
+#   postgres        local Postgres 16 + pg_cron
+#   redis-bull      BullMQ queue (AOF, noeviction)
+#   redis-cache     api response cache (LRU, ephemeral)
+#   minio           S3-compatible object storage (rendered PDFs, archives)
+#   minio-init      one-shot bucket creator (exits after creating buckets)
+#   listen-notify   PG-LISTEN ↔ BullMQ bridge (direct PG connection)
+#   worker          BullMQ consumer + email + PDF rendering
+#   api             Fastify HTTP service (publishes 4000)
+#   web             Next.js standalone server (publishes 3000)
+#
+# Internet-facing ports:
+#   3000  → web   (Next.js)
+#   4000  → api   (Fastify)
+# Localhost-only ports (SSH-tunnel to access):
+#   9001  → minio console
+# All other ports stay on the docker bridge network only.
+#
+# RLS roles (CRITICAL — see memory rls_tenant_isolation.md):
+#   - DATABASE_URL / DATABASE_DIRECT_URL  → instigenie_app    (NOBYPASSRLS)
+#   - VENDOR_DATABASE_URL                 → instigenie_vendor (BYPASSRLS)
+#   - bootstrap superuser (POSTGRES_USER) → only used by 00-apply-prod.sh
+#   Connecting as the superuser silently leaks cross-tenant data.
+#
+# Deploy:
+#   docker compose -f ops/compose/docker-compose.single-box.yml \
+#     --env-file .env.production up -d --build
+#
+# Tail logs:
+#   docker compose -f ops/compose/docker-compose.single-box.yml logs -f
+#
+# Stop without losing data:
+#   docker compose -f ops/compose/docker-compose.single-box.yml down
+#
+# Wipe everything (irreversible):
+#   docker compose -f ops/compose/docker-compose.single-box.yml down -v
+
+name: instigenie-prod
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app-base: &app-base
+  restart: unless-stopped
+  logging: *default-logging
+  networks: [erp]
+  user: "1001:1001"
+
+services:
+
+  # ─── Postgres 16 + pg_cron ────────────────────────────────────────
+  postgres:
+    build:
+      context: ../postgres
+      dockerfile: Dockerfile
+    image: instigenie/postgres:16-pgcron
+    container_name: erp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-instigenie}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      # Consumed by the bootstrap script to rotate role passwords away
+      # from the dev placeholder shipped in seed/99-app-role.sql.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD required}
+      VENDOR_DB_PASSWORD: ${VENDOR_DB_PASSWORD:?VENDOR_DB_PASSWORD required}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      # Bootstrap mounts (see ops/sql/00-apply-prod.sh).
+      - ../sql/00-apply-prod.sh:/docker-entrypoint-initdb.d/00-apply-prod.sh:ro
+      - ../sql/init:/docker-entrypoint-initdb.d/01-init:ro
+      - ../sql/triggers:/docker-entrypoint-initdb.d/02-triggers:ro
+      - ../sql/rls:/docker-entrypoint-initdb.d/03-rls:ro
+      - ../sql/seed:/docker-entrypoint-initdb.d/04-seed:ro
+      - ../sql/migrations:/docker-entrypoint-initdb.d/05-migrations:ro
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_cron,pg_stat_statements
+      -c cron.database_name=${POSTGRES_DB:-instigenie}
+      -c pg_stat_statements.max=10000
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c effective_cache_size=2GB
+      -c work_mem=8MB
+      -c wal_level=logical
+      -c log_statement=none
+      -c log_min_duration_statement=500
+      -c log_min_messages=warning
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-instigenie}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: 2g
+    logging: *default-logging
+    networks: [erp]
+
+  # ─── Redis: BullMQ queue (persistent, noeviction) ─────────────────
+  redis-bull:
+    image: redis:7-alpine
+    container_name: erp-redis-bull
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_BULL_PASSWORD:?REDIS_BULL_PASSWORD required}
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory-policy noeviction
+      --loglevel warning
+    volumes:
+      - redis-bull-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_BULL_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 512m
+    logging: *default-logging
+    networks: [erp]
+
+  # ─── Redis: HTTP/session cache (ephemeral, LRU) ────────────────────
+  redis-cache:
+    image: redis:7-alpine
+    container_name: erp-redis-cache
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_CACHE_PASSWORD:?REDIS_CACHE_PASSWORD required}
+      --save ""
+      --appendonly no
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_CACHE_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 640m
+    logging: *default-logging
+    networks: [erp]
+
+  # ─── MinIO: S3-compatible object storage ──────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: erp-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD required}
+      MINIO_BROWSER: "on"
+    volumes:
+      - minio-data:/data
+    ports:
+      # Console only on localhost — SSH-tunnel to access from your laptop:
+      #   ssh -L 9001:localhost:9001 ubuntu@<vm-ip>
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 512m
+    logging: *default-logging
+    networks: [erp]
+
+  # ─── MinIO bucket bootstrap (runs once, then exits) ───────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: erp-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      PDF_BUCKET: ${PDF_BUCKET:-instigenie-pdfs}
+      ARCHIVE_BUCKET: ${ARCHIVE_BUCKET:-instigenie-archives}
+    entrypoint: >
+      /bin/sh -c "
+      set -e;
+      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\";
+      mc mb --ignore-existing local/$$PDF_BUCKET;
+      mc mb --ignore-existing local/$$ARCHIVE_BUCKET;
+      mc version enable local/$$PDF_BUCKET || true;
+      mc version enable local/$$ARCHIVE_BUCKET || true;
+      echo '[minio-init] buckets ready';
+      "
+    restart: "no"
+    networks: [erp]
+    logging: *default-logging
+
+  # ─── listen-notify: PG-LISTEN → BullMQ bridge ──────────────────────
+  listen-notify:
+    <<: *app-base
+    build:
+      context: ../..
+      dockerfile: ops/docker/listen-notify.Dockerfile
+    image: instigenie/listen-notify:${VERSION:?VERSION required}
+    container_name: erp-listen-notify
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-warn}
+      LISTEN_NOTIFY_PORT: 4002
+      NODE_OPTIONS: "--max-old-space-size=128"
+      # MUST be a direct PG URL — assertDirectPgUrl() in
+      # packages/db/src/direct-url.ts exits fatally on a pgbouncer URL.
+      DATABASE_DIRECT_URL: ${DATABASE_DIRECT_URL:?DATABASE_DIRECT_URL required}
+      REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
+      OTEL_TRACES_EXPORTER: none
+    mem_limit: 192m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-bull:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+process.env.LISTEN_NOTIFY_PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ─── worker: BullMQ consumer + email + PDF render ─────────────────
+  worker:
+    <<: *app-base
+    build:
+      context: ../..
+      dockerfile: ops/docker/worker.Dockerfile
+    image: instigenie/worker:${VERSION:?VERSION required}
+    container_name: erp-worker
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-warn}
+      WORKER_PORT: 4001
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      NODE_OPTIONS: "--max-old-space-size=384"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (must use instigenie_app, NOT postgres)}
+      REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:?REDIS_CACHE_URL required}
+      OTEL_TRACES_EXPORTER: none
+      # Email (SMTP preferred over Resend when both set; both empty disables).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_DISABLED: ${EMAIL_DISABLED:-false}
+      MAIL_FROM: ${MAIL_FROM:-Mobilab ERP <noreply@example.com>}
+      MAIL_REPLY_TO: ${MAIL_REPLY_TO:-}
+      WEB_ORIGIN: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL required}
+      # MinIO (internal docker DNS).
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      PDF_BUCKET: ${PDF_BUCKET:-instigenie-pdfs}
+      BRAND_NAME: ${BRAND_NAME:-Mobilab ERP}
+    mem_limit: 512m
+    depends_on:
+      listen-notify:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+process.env.WORKER_PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+  # ─── api: Fastify HTTP service (public on :4000) ──────────────────
+  api:
+    <<: *app-base
+    build:
+      context: ../..
+      dockerfile: ops/docker/api.Dockerfile
+    image: instigenie/api:${VERSION:?VERSION required}
+    container_name: erp-api
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-warn}
+      PORT: 4000
+      HOST: 0.0.0.0
+      NODE_OPTIONS: "--max-old-space-size=384"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (must use instigenie_app)}
+      VENDOR_DATABASE_URL: ${VENDOR_DATABASE_URL:?VENDOR_DATABASE_URL required (must use instigenie_vendor)}
+      REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:?REDIS_CACHE_URL required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+      JWT_ISSUER: ${JWT_ISSUER:-instigenie-api}
+      ACCESS_TOKEN_TTL_SEC: ${ACCESS_TOKEN_TTL_SEC:-900}
+      ESIGNATURE_PEPPER: ${ESIGNATURE_PEPPER:?ESIGNATURE_PEPPER required}
+      WEB_ORIGIN: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL required (CORS allowlist)}
+      OTEL_TRACES_EXPORTER: none
+    mem_limit: 512m
+    depends_on:
+      worker:
+        condition: service_healthy
+    ports:
+      - "${API_BIND:-0.0.0.0}:${API_PORT:-4000}:4000"
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # ─── web: Next.js standalone server (public on :3000) ─────────────
+  # NEXT_PUBLIC_API_BASE_URL must be set at BUILD time — Next inlines
+  # NEXT_PUBLIC_* into client bundles. Re-build the image when changed.
+  web:
+    <<: *app-base
+    build:
+      context: ../..
+      dockerfile: ops/docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?NEXT_PUBLIC_API_BASE_URL required}
+    image: instigenie/web:${VERSION:?VERSION required}
+    container_name: erp-web
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      # Sentry stays disabled unless the operator sets SENTRY_DSN.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: production
+    mem_limit: 512m
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+process.env.PORT+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+# ─── Volumes ──────────────────────────────────────────────────────────
+volumes:
+  pg-data:
+    name: instigenie-prod-pg-data
+  redis-bull-data:
+    name: instigenie-prod-redis-bull-data
+  minio-data:
+    name: instigenie-prod-minio-data
+
+# ─── Networks ─────────────────────────────────────────────────────────
+networks:
+  erp:
+    name: instigenie-prod
+    driver: bridge

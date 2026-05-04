@@ -26,6 +26,10 @@ RUN pnpm install --frozen-lockfile --config.engine-strict=false
 # `^build` (turbo) ensures all workspace deps (e.g. @instigenie/contracts)
 # compile to dist/ before next build runs.
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* are inlined into the client bundle at BUILD time.
+# Pass via --build-arg or compose `args:` — re-build the image when changed.
+ARG NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 RUN pnpm --filter @instigenie/web... build
 
 # ─── 3. runner: standalone Next server ─────────────────────────────────────
