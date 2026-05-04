@@ -23,6 +23,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git worktree list --porcelain 2>/dev/null | awk '/^worktree/{wt=$2} /^branch refs\\/heads\\/claude\\//{print wt}' | while read -r wt; do git worktree remove --force \"$wt\" >/dev/null 2>&1; done; git for-each-ref --format='%(refname:short)' refs/heads/claude/ 2>/dev/null | while read -r br; do git branch -D \"$br\" >/dev/null 2>&1; done",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
