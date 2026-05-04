@@ -107,6 +107,14 @@ export class VendorPasswordResetService {
         aggregateId: admin.id,
         eventType: "vendor.password_reset.requested",
         payload: {
+          // Sentinel orgId. Vendor admins live above the tenant boundary
+          // so there's no real org. The outbox-dispatch processor at
+          // apps/worker/src/processors/outbox-dispatch.ts gates §3.1
+          // handler fan-out on `typeof payload.orgId === "string"`;
+          // without this field the handler is silently skipped and no
+          // email ships. The handler itself does not touch tenant-scoped
+          // tables so the zero UUID is harmless.
+          orgId: "00000000-0000-0000-0000-000000000000",
           tokenId: inserted.id,
           vendorAdminId: admin.id,
           recipient: admin.email,
