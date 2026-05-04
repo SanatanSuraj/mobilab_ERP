@@ -1,44 +1,58 @@
-# Caddy reverse proxy + automatic HTTPS for the Instigenie ERP api.
+# Caddy reverse proxy + automatic HTTPS for the Mobilab ERP.
 #
-# Single virtual host: the JSON API. The Next.js frontend is hosted
-# on Vercel (apps/web/vercel.json) so Caddy doesn't proxy it here —
-# Vercel handles its own TLS for the web origin.
+# Single virtual host fronts both web (Next.js) and api (Fastify):
+#   https://<DOMAIN>/         →  web:3000   (Next.js standalone)
+#   https://<DOMAIN>/api/*    →  api:4000   (Fastify; /api prefix stripped)
 #
-# Variables come from the compose env block:
-#   API_HOSTNAME   user-facing JSON API host  (default: api.localhost)
-#   ACME_EMAIL     Let's Encrypt registration email (recommended)
+# Why path-based routing on one subdomain instead of two: the user only
+# set up a single DNS A record (erp.emobilab.in). Next.js does not own
+# any /api/* paths in this repo (apps/web/src/app/ has no route handlers
+# under /api), so the prefix is free.
 #
-# Local development:
-#   - Defaults to `api.localhost`. Caddy generates a self-signed cert
-#     from its built-in internal CA. Install the root once with
-#     `caddy trust` (or accept the browser warning).
+# DOMAIN must resolve to this host. Ports 80 + 443 must be reachable
+# from the public internet — Let's Encrypt HTTP-01 challenge requires
+# port 80 open during cert acquisition AND every renewal (every ~60 days).
 #
-# Production:
-#   - Point real DNS at the box (A or AAAA record), set API_HOSTNAME,
-#     and Caddy fetches Let's Encrypt certs at boot. Port 80 + 443
-#     must be reachable from the internet for the ACME HTTP-01 challenge.
+# Compose env vars consumed:
+#   DOMAIN       e.g. erp.emobilab.in
+#   ACME_EMAIL   Let's Encrypt registration email (used for expiry alerts)
 #
-# This file is hot-reloaded — `docker exec caddy caddy reload --config
-# /etc/caddy/Caddyfile` after edits, no full restart needed.
+# Hot-reload after editing this file:
+#   docker exec erp-caddy caddy reload --config /etc/caddy/Caddyfile
 
 {
 	# Email for Let's Encrypt registration. Without it, ACME still works
-	# but you don't get expiry notifications.
-	email {$ACME_EMAIL:admin@localhost}
+	# but you don't get expiry notification emails.
+	email {$ACME_EMAIL}
 
-	# Limit access logs to errors at the global level — per-site logging
-	# is enabled below.
+	# Trust the docker bridge network — important so {remote_host} and
+	# X-Forwarded-* headers behave correctly when this is later put behind
+	# Cloudflare or another upstream proxy.
 	servers {
 		trusted_proxies static private_ranges
 	}
 }
 
-{$API_HOSTNAME:api.localhost} {
+{$DOMAIN} {
 	encode zstd gzip
 
-	reverse_proxy api:4000 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-Proto {scheme}
+	# API path — strip the /api prefix so Fastify route paths match
+	# (Fastify mounts at root: /healthz, /auth/login, /vendor-admin/...).
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:4000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Everything else → Next.js. handle (not handle_path) preserves the
+	# request path so Next sees `/`, `/login`, `/vendor-admin/...` as-is.
+	handle {
+		reverse_proxy web:3000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 
 	header {
