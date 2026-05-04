@@ -49,6 +49,9 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
   let dir: string | undefined;
   let confirm = false;
   for (const arg of rest) {
+    // Skip the `--` end-of-options separator that pnpm forwards when
+    // scripts pass args through. See `migrate:prod` in root package.json.
+    if (arg === "--") continue;
     if (arg.startsWith("--dir=")) dir = arg.slice("--dir=".length);
     else if (arg === "--confirm") confirm = true;
     else throw new Error(`unknown flag: ${arg}`);

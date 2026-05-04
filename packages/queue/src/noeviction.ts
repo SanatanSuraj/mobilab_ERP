@@ -40,10 +40,27 @@ export class BullEvictionPolicyError extends Error {
  * hand in their long-lived ioredis instance; the helper does not close
  * it. Pass `{ owned: true }` when you create a throwaway connection.
  */
+const SKIP_ENV = "BULL_REDIS_SKIP_NOEVICTION_CHECK";
+
 export async function assertBullRedisNoeviction(
   redis: Redis,
   opts: { owned?: boolean } = {}
 ): Promise<void> {
+  // Managed Redis providers (Upstash, AWS Elasticache, Redis Cloud) often
+  // disable the CONFIG command for tenant isolation, returning empty or
+  // throwing. When the operator has verified noeviction in the provider
+  // UI out-of-band, opt in via BULL_REDIS_SKIP_NOEVICTION_CHECK=1.
+  const skip = process.env[SKIP_ENV];
+  if (skip === "1" || skip === "true") {
+    if (opts.owned) await redis.quit().catch(() => undefined);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[bull] ${SKIP_ENV}=${skip} — skipping maxmemory-policy assertion. ` +
+        `Verify the backing Redis is set to 'noeviction' in the provider UI.`
+    );
+    return;
+  }
+
   let rows: unknown;
   try {
     rows = await redis.config("GET", "maxmemory-policy");
@@ -51,7 +68,7 @@ export async function assertBullRedisNoeviction(
     if (opts.owned) await redis.quit().catch(() => undefined);
     throw new Error(
       `BullMQ redis: unable to read maxmemory-policy (${(err as Error).message}). ` +
-        `Grant CONFIG or verify the policy is 'noeviction' out-of-band.`
+        `Grant CONFIG, verify policy is 'noeviction' out-of-band, or set ${SKIP_ENV}=1.`
     );
   }
 

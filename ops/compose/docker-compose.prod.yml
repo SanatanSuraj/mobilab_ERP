@@ -102,6 +102,10 @@ services:
       # on boot if it does. On Neon: use the "Direct connection" string.
       DATABASE_DIRECT_URL: ${DATABASE_DIRECT_URL:?DATABASE_DIRECT_URL required (managed direct PG URL, NOT pooled)}
       REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
+      # Set to 1 when the BullMQ Redis is a managed provider that disables
+      # the CONFIG command (e.g. Upstash). Verify noeviction in the
+      # provider UI before enabling — see packages/queue/src/noeviction.ts.
+      BULL_REDIS_SKIP_NOEVICTION_CHECK: ${BULL_REDIS_SKIP_NOEVICTION_CHECK:-}
     mem_limit: 160m
     healthcheck:
       test:
@@ -132,6 +136,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (managed pooled PG URL)}
       REDIS_BULL_URL: ${REDIS_BULL_URL:?REDIS_BULL_URL required}
       REDIS_CACHE_URL: ${REDIS_CACHE_URL:?REDIS_CACHE_URL required}
+      # Set to 1 when BullMQ Redis is a managed provider that disables
+      # CONFIG (e.g. Upstash). See packages/queue/src/noeviction.ts.
+      BULL_REDIS_SKIP_NOEVICTION_CHECK: ${BULL_REDIS_SKIP_NOEVICTION_CHECK:-}
       # Email backend — see apps/worker/src/email/mailer.ts. Selection at
       # boot: SMTP_HOST takes priority, else RESEND_API_KEY, else
       # SKIPPED_DEV stub. EMAIL_DISABLED=true forces the stub.
