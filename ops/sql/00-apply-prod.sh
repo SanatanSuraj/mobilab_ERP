@@ -85,14 +85,17 @@ apply_file "$SEED_DIR/99-app-role.sql"    "roles"
 apply_file "$SEED_DIR/98-vendor-role.sql" "roles"
 
 # Rotate role passwords away from the dev placeholder shipped in the
-# role SQL. Uses psql variable substitution to avoid shell quoting
-# bugs; ALTER ROLE … PASSWORD does not log the password value.
+# role SQL. We pipe the SQL via stdin (psql -f -) because `-c` does NOT
+# process :'var' substitutions — only -f does. The `\set` directive
+# quote-escapes safely; ALTER ROLE … PASSWORD does not log the value.
 echo "[bootstrap] roles: rotating instigenie_app password from env"
-"${PSQL[@]}" -v app_pw="$APP_DB_PASSWORD" \
-  -c "ALTER ROLE instigenie_app    WITH PASSWORD :'app_pw';"
+"${PSQL[@]}" -v app_pw="$APP_DB_PASSWORD" -f - <<'SQL'
+ALTER ROLE instigenie_app WITH PASSWORD :'app_pw';
+SQL
 echo "[bootstrap] roles: rotating instigenie_vendor password from env"
-"${PSQL[@]}" -v vendor_pw="$VENDOR_DB_PASSWORD" \
-  -c "ALTER ROLE instigenie_vendor WITH PASSWORD :'vendor_pw';"
+"${PSQL[@]}" -v vendor_pw="$VENDOR_DB_PASSWORD" -f - <<'SQL'
+ALTER ROLE instigenie_vendor WITH PASSWORD :'vendor_pw';
+SQL
 
 # ─── 3. rls policies ────────────────────────────────────────────────
 apply_dir "$RLS_DIR" "rls"
@@ -138,13 +141,15 @@ SQL
     echo "[bootstrap] migrations: $version $name"
     "${PSQL[@]}" -v ON_ERROR_STOP=1 -1 \
       -v ver="$version" -v nm="$name" -v cs="$sum" -f "$f"
-    "${PSQL[@]}" -v ver="$version" -v nm="$name" -v cs="$sum" -c "
-      INSERT INTO public.schema_migrations (version, name, checksum)
-      VALUES (:'ver', :'nm', :'cs')
-      ON CONFLICT (version) DO UPDATE
-        SET checksum = EXCLUDED.checksum,
-            applied_at = now();
-    "
+    # Same -c vs -f gotcha applies — pipe the INSERT via stdin so psql
+    # processes :'ver' / :'nm' / :'cs' substitutions.
+    "${PSQL[@]}" -v ver="$version" -v nm="$name" -v cs="$sum" -f - <<'SQL'
+INSERT INTO public.schema_migrations (version, name, checksum)
+VALUES (:'ver', :'nm', :'cs')
+ON CONFLICT (version) DO UPDATE
+  SET checksum = EXCLUDED.checksum,
+      applied_at = now();
+SQL
   done
 fi
 
