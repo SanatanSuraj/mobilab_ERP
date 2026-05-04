@@ -51,11 +51,11 @@ next-env.d.ts
 # docker volumes (if developer does `docker compose cp` to inspect)
 ops/volumes/
 
-#log
-api_node.log
-worker_node.log
-listen-notify_node.log
-web_node.log
-api_4001_v2.log.claude/worktrees/
-# Added by code-review-graph
+# log files (any name, anywhere — catches dev runs without polluting git)
+*.log
+
+# claude code worktrees (one per parallel agent session)
+.claude/worktrees/
+
+# code-review-graph MCP cache (rebuilds on demand)
 .code-review-graph/
